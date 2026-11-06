@@ -1,0 +1,37 @@
+name: LearnByNews
+options:
+  bundleIdPrefix: com.goni
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  LearnByNews:
+    type: application
+    platform: iOS
+    sources:
+      - path: LearnByNews
+        excludes: ["Resources/Fonts/OFL-NanumPenScript.txt"]
+    info:
+      path: LearnByNews/Info.plist
+      properties:
+        CFBundleDisplayName: Learn by News
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIAppFonts: [NanumPenScript-Regular.ttf]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.goni.learn-by-news
+        TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: J3YQFB59W5
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  LearnByNews:
+    build:
+      targets:
+        LearnByNews: all

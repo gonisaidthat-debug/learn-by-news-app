@@ -1,0 +1,291 @@
+import Foundation
+
+enum Grade: String, Codable, CaseIterable, Hashable {
+    case A, B, C, D, skip
+    static let points: [Grade: Int] = [.A: 100, .B: 80, .C: 50, .D: 20]
+}
+
+struct Issue: Codable, Hashable {
+    var source: String
+    var mine: String
+    var meaning: String
+    var why: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
+        mine = try c.decodeIfPresent(String.self, forKey: .mine) ?? ""
+        meaning = try c.decodeIfPresent(String.self, forKey: .meaning) ?? ""
+        why = try c.decodeIfPresent(String.self, forKey: .why) ?? ""
+    }
+}
+
+struct Expression: Codable, Hashable {
+    var phrase: String
+    var meaning: String
+}
+
+struct Feedback: Codable, Hashable {
+    var grade: Grade
+    var issues: [Issue]
+    var reference: String
+    var expressions: [Expression]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        grade = try c.decode(Grade.self, forKey: .grade)
+        issues = try c.decodeIfPresent([Issue].self, forKey: .issues) ?? []
+        reference = try c.decodeIfPresent(String.self, forKey: .reference) ?? ""
+        expressions = try c.decodeIfPresent([Expression].self, forKey: .expressions) ?? []
+    }
+}
+
+struct Attempt: Codable, Hashable {
+    var translation: String
+    var grade: Grade
+    var feedback: Feedback
+    var createdAt: Int64
+}
+
+struct Sentence: Codable, Identifiable, Hashable {
+    var id: String
+    var idx: Int
+    var paragraph: Int
+    var text: String
+    var attempt: Attempt?
+    var history: [Attempt]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        idx = try c.decode(Int.self, forKey: .idx)
+        paragraph = try c.decodeIfPresent(Int.self, forKey: .paragraph) ?? 0
+        text = try c.decode(String.self, forKey: .text)
+        attempt = try c.decodeIfPresent(Attempt.self, forKey: .attempt)
+        history = try c.decodeIfPresent([Attempt].self, forKey: .history) ?? []
+    }
+}
+
+struct Phrase: Codable, Identifiable, Hashable {
+    var id: String
+    var phrase: String
+    var meaning: String
+    var sentenceId: String
+    var articleId: String
+    var createdAt: Int64
+    var sentenceText: String?
+    var articleTitle: String?
+}
+
+struct ReviewPattern: Codable, Hashable {
+    var title: String
+    var detail: String
+}
+
+struct Review: Codable, Identifiable, Hashable {
+    var id: String
+    var score: Int?
+    var createdAt: Int64
+    var summary: String
+    var patterns: [ReviewPattern]
+    var praise: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        score = try c.decodeIfPresent(Int.self, forKey: .score)
+        createdAt = try c.decode(Int64.self, forKey: .createdAt)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        patterns = try c.decodeIfPresent([ReviewPattern].self, forKey: .patterns) ?? []
+        praise = try c.decodeIfPresent(String.self, forKey: .praise) ?? ""
+    }
+}
+
+struct ArticleSummary: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var source: String?
+    var createdAt: Int64
+    var sentenceCount: Int
+    var doneCount: Int
+    var grades: [String: Int]
+
+    var isDone: Bool { doneCount >= sentenceCount }
+    func count(_ g: Grade) -> Int { grades[g.rawValue] ?? 0 }
+}
+
+struct ArticleDetail: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var source: String?
+    var createdAt: Int64
+    var sentences: [Sentence]
+    var phrases: [Phrase]
+    var reviews: [Review]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        sentences = try c.decodeIfPresent([Sentence].self, forKey: .sentences) ?? []
+        phrases = try c.decodeIfPresent([Phrase].self, forKey: .phrases) ?? []
+        reviews = try c.decodeIfPresent([Review].self, forKey: .reviews) ?? []
+    }
+
+    /// 등급 평균. 건너뜀 제외. 채점된 문장이 없으면 nil (웹 scoreOf와 동일)
+    static func score(of sentences: [Sentence]) -> Int? {
+        let pts = sentences.compactMap { s -> Int? in
+            guard let g = s.attempt?.grade, g != .skip else { return nil }
+            return Grade.points[g]
+        }
+        guard !pts.isEmpty else { return nil }
+        return Int((Double(pts.reduce(0, +)) / Double(pts.count)).rounded())
+    }
+}
+
+struct AttemptResult: Codable {
+    var grade: Grade
+    var issues: [Issue]
+    var reference: String
+    var expressions: [Expression]
+    var translation: String
+    var createdAt: Int64
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        grade = try c.decode(Grade.self, forKey: .grade)
+        issues = try c.decodeIfPresent([Issue].self, forKey: .issues) ?? []
+        reference = try c.decodeIfPresent(String.self, forKey: .reference) ?? ""
+        expressions = try c.decodeIfPresent([Expression].self, forKey: .expressions) ?? []
+        translation = try c.decodeIfPresent(String.self, forKey: .translation) ?? ""
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? Int64(Date().timeIntervalSince1970 * 1000)
+    }
+
+    var asAttempt: Attempt {
+        // Feedback은 커스텀 디코더만 있어서 JSON을 거쳐 만든다
+        let fb = try! JSONDecoder.api.decode(Feedback.self, from: try! JSONEncoder.api.encode(FeedbackBody(grade: grade, issues: issues, reference: reference, expressions: expressions)))
+        return Attempt(translation: translation, grade: grade, feedback: fb, createdAt: createdAt)
+    }
+}
+
+struct FeedbackBody: Encodable {
+    var grade: Grade; var issues: [Issue]; var reference: String; var expressions: [Expression]
+}
+
+struct QuizItem: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable { case issue, phrase }
+    var key: String
+    var kind: Kind
+    var sentenceId: String
+    var articleId: String?
+    var articleTitle: String?
+    var sentenceIdx: Int?
+    var sentenceText: String?
+    var source: String
+    var mine: String?
+    var meaning: String
+    var why: String?
+    var issuedAt: Int64?
+    var lastCorrect: Bool?
+    var lastAt: Int64?
+    var tries: Int
+    var wrong: Int
+    var id: String { key }
+}
+
+struct StudySession: Codable, Identifiable, Hashable {
+    var id: String
+    var startedAt: Int64
+    var endedAt: Int64
+    var attempts: Int
+    var score: Int?
+    var articles: [String]
+    var createdAt: Int64
+
+    var minutes: Int { max(1, Int((Double(endedAt - startedAt) / 60000).rounded())) }
+
+    /// 웹 fmtSession과 동일: "11/6 14:03–14:40 · 37분 · 12문장 · 85점"
+    var line: String {
+        let d = Date(ms: startedAt)
+        var s = "\(d.monthDay) \(Date(ms: startedAt).hm)–\(Date(ms: endedAt).hm) · \(minutes)분 · \(attempts)문장"
+        if let score { s += " · \(score)점" }
+        return s
+    }
+}
+
+struct LogAttempt: Codable, Identifiable, Hashable {
+    var id: String
+    var sentenceId: String
+    var articleId: String
+    var translation: String
+    var grade: Grade
+    var createdAt: Int64
+    var idx: Int
+    var text: String
+    var title: String
+}
+
+struct LogReview: Codable, Identifiable, Hashable {
+    var id: String
+    var articleId: String
+    var title: String
+    var score: Int?
+    var createdAt: Int64
+    var summary: String
+}
+
+struct LogQuiz: Codable, Identifiable, Hashable {
+    var id: String
+    var key: String
+    var source: String
+    var correct: Bool
+    var createdAt: Int64
+    var kind: QuizItem.Kind
+}
+
+struct ActivityLog: Codable {
+    var since: Int64
+    var attempts: [LogAttempt]
+    var sessions: [StudySession]
+    var reviews: [LogReview]
+    var quiz: [LogQuiz]
+}
+
+// MARK: - 날짜 도우미
+
+extension Date {
+    init(ms: Int64) { self.init(timeIntervalSince1970: Double(ms) / 1000) }
+    var ms: Int64 { Int64(timeIntervalSince1970 * 1000) }
+
+    var hm: String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR"); f.dateFormat = "HH:mm"
+        return f.string(from: self)
+    }
+    var monthDay: String {
+        let c = Calendar.current.dateComponents([.month, .day], from: self)
+        return "\(c.month ?? 0)/\(c.day ?? 0)"
+    }
+    var isToday: Bool { Calendar.current.isDateInToday(self) }
+    /// "11월 6일 (목)"
+    var dayLabel: String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR"); f.dateFormat = "M월 d일 (E)"
+        return f.string(from: self)
+    }
+    var fullLabel: String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "ko_KR"); f.dateStyle = .medium; f.timeStyle = .short
+        return f.string(from: self)
+    }
+}
+
+extension JSONDecoder {
+    static let api: JSONDecoder = {
+        let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase; return d
+    }()
+}
+extension JSONEncoder {
+    static let api: JSONEncoder = {
+        let e = JSONEncoder(); e.keyEncodingStrategy = .convertToSnakeCase; return e
+    }()
+}
