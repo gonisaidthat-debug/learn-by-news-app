@@ -5,6 +5,7 @@ struct LoginView: View {
     @State private var pw = ""
     @State private var err: String?
     @State private var busy = false
+    @State private var hidden = false   // SecureField는 한글 조합 입력을 막아서 일반 TextField + 가리기 토글
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -12,14 +13,24 @@ struct LoginView: View {
             Theme.desk.ignoresSafeArea()
             VStack(spacing: 10) {
                 Text("Learn by News").font(Theme.hand(34)).foregroundStyle(Theme.ink).padding(.bottom, 10)
-                SecureField("비밀번호", text: $pw)
-                    .keyboardType(.default)            // 한글 비밀번호 허용
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .focused($focused)
-                    .submitLabel(.go)
-                    .onSubmit { Task { await submit() } }
-                    .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+                HStack(spacing: 8) {
+                    TextField("비밀번호", text: $pw)
+                        .keyboardType(.default)            // 한글 비밀번호 허용
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($focused)
+                        .submitLabel(.go)
+                        .onSubmit { Task { await submit() } }
+                        .foregroundStyle(hidden ? .clear : Theme.ink)
+                        .overlay(alignment: .leading) {
+                            if hidden, !pw.isEmpty { Text(String(repeating: "•", count: pw.count)).foregroundStyle(Theme.ink).allowsHitTesting(false) }
+                        }
+                    Button { hidden.toggle() } label: {
+                        Image(systemName: hidden ? "eye.slash" : "eye").foregroundStyle(Theme.pencil)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                     .background(Theme.paper, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0xD6CFC0)))
                 Button { Task { await submit() } } label: {
