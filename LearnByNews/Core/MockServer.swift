@@ -172,7 +172,7 @@ struct MockState {
             sentences.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
         case "GET /api/phrases":
             let q = query.split(separator: "=").dropFirst().joined().removingPercentEncoding?.lowercased() ?? ""
-            return (200, phrases.filter { q.isEmpty || ($0["phrase"] as! String).lowercased().contains(q) || ($0["meaning"] as! String).lowercased().contains(q) }.reversed())
+            return (200, phrases.filter { q.isEmpty || ($0["phrase"] as! String).lowercased().contains(q) || ($0["meaning"] as! String).lowercased().contains(q) }.reversed() as [[String: Any]])
         case "POST /api/phrases":
             let sid = body["sentence_id"] as? String ?? ""
             let s = sentences.first { $0["id"] as? String == sid }
