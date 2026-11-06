@@ -26,7 +26,7 @@
 
 ### 기본
 - Base URL: `https://learn-by-news.goni-said-that.workers.dev`
-- 모든 요청: `Authorization: Bearer <APP_PASSWORD>`, JSON 본문은 `Content-Type: application/json`. 틀리면 `401 {"error":"unauthorized"}`.
+- 모든 요청: `Authorization: Bearer <percent-encoded UTF-8 APP_PASSWORD>` (헤더는 ASCII만 실리므로 한글 비밀번호는 반드시 인코딩. Swift: `addingPercentEncoding(withAllowedCharacters: .alphanumerics)`). 서버는 디코드해 비교하며 인코딩 안 된 ASCII 값도 받는다. 비밀번호 입력란은 한글 키보드를 막지 않는다. JSON 본문은 `Content-Type: application/json`. 틀리면 `401 {"error":"unauthorized"}`.
 - 오류는 항상 `{"error": "<한국어 메시지>"}`. 429는 하루 Claude 호출 상한. 413은 본문 512KB 초과.
 - 시각은 전부 Unix ms. 등급은 `"A"|"B"|"C"|"D"|"skip"`. 점수는 등급 평균(A100 B80 C50 D20, skip 제외, 반올림)이며 **클라이언트가 계산**한다.
 - 앱 아이콘 초안: `docs/assets/app-icon-1024.png` (공책+도장, 자체 제작).
