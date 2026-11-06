@@ -24,6 +24,9 @@ final class API {
         let c = URLSessionConfiguration.default
         c.timeoutIntervalForRequest = 90   // 채점·총평은 수 초~수십 초
         c.waitsForConnectivity = false
+        #if DEBUG
+        if MockServer.enabled { c.protocolClasses = [MockServer.self] }
+        #endif
         return URLSession(configuration: c)
     }()
 

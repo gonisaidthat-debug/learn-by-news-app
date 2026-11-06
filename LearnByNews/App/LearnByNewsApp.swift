@@ -7,6 +7,9 @@ struct LearnByNewsApp: App {
     @StateObject private var router = Router()
 
     init() {
+        #if DEBUG
+        if MockServer.enabled { Keychain.set("mock") }
+        #endif
         let needUpload = AppLog.shared.beginRun()
         if needUpload {
             Task {

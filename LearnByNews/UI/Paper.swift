@@ -67,12 +67,12 @@ struct Stamp: View {
     private var label: String {
         switch kind {
         case .grade(let g): return g == .skip ? "—" : g.rawValue
-        case .busy: return "✎"
+        case .busy: return "✎\u{FE0E}"
         case .error: return "!"
-        case .redo: return "↻"
+        case .redo: return "↻\u{FE0E}"
         case .question: return "?"
-        case .pin: return "📌"
-        case .session: return "✂"
+        case .pin: return "📌\u{FE0E}"
+        case .session: return "✂\u{FE0E}"
         }
     }
     private var color: Color {

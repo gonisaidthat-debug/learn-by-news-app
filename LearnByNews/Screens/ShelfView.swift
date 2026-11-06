@@ -3,7 +3,7 @@ import SwiftUI
 /// 공책 목록 + 붙여넣기 + 공부 기록 (웹 Paste.tsx)
 struct ShelfView: View {
     @EnvironmentObject var router: Router
-    @StateObject private var session = SessionModel()
+    @ObservedObject private var session = SessionModel.shared
     @State private var raw = ""
     @State private var link = ""
     @State private var busy = false
@@ -65,7 +65,7 @@ struct ShelfView: View {
             HStack {
                 MutedText(text: p.sentences.isEmpty ? " " : "문단 \(paragraphs) · 문장 \(p.sentences.count)")
                 Spacer()
-                Tiny(title: busy ? "공책 만드는 중…" : "새 공책 만들기 →", color: Theme.red) { Task { await create() } }
+                Tiny(title: busy ? "공책 만드는 중…" : "새 공책 만들기 →\u{FE0E}", color: Theme.red) { Task { await create() } }
                     .disabled(p.sentences.isEmpty || busy)
                     .opacity(p.sentences.isEmpty || busy ? 0.45 : 1)
             }
@@ -102,7 +102,7 @@ struct ShelfView: View {
                     }
                     .buttonStyle(.plain)
                     if let s = a.source, let url = URL(string: s), !s.isEmpty {
-                        Link(destination: url) { Text("↗").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 10) }
+                        Link(destination: url) { Text("↗\u{FE0E}").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 10) }
                     }
                     Button { toDelete = a } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 14) }
                         .buttonStyle(.plain)

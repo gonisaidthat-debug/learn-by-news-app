@@ -44,6 +44,25 @@ final class Router: ObservableObject {
     @Published var tab: Tab = .shelf
     @Published var shelfPath: [Route] = []
 
+    init() {
+        #if DEBUG
+        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | phrases | quiz | log | settings
+        if ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" { SessionStore.start = Date().ms - 600_000; SessionModel.shared.start = SessionStore.start }
+        if let r = ProcessInfo.processInfo.environment["LBN_ROUTE"] {
+            let p = r.split(separator: ":").map(String.init)
+            switch p[0] {
+            case "notebook": shelfPath = [.notebook(id: p[1], focus: p.count > 2 ? p[2] : nil)]
+            case "done": shelfPath = [.done(id: p[1])]
+            case "phrases": tab = .phrases
+            case "quiz": tab = .quiz
+            case "log": tab = .log
+            case "settings": tab = .settings
+            default: break
+            }
+        }
+        #endif
+    }
+
     func open(_ r: Route) {
         tab = .shelf
         shelfPath = [r]

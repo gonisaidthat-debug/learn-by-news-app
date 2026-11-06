@@ -3,6 +3,7 @@ import SwiftUI
 /// 공부 세션 상태. 시작점은 UserDefaults에.
 @MainActor
 final class SessionModel: ObservableObject {
+    static let shared = SessionModel()
     @Published var start: Int64? = SessionStore.start
     @Published var sessions: [StudySession] = []
     @Published var msg: String?
@@ -40,7 +41,7 @@ final class SessionModel: ObservableObject {
     }
 }
 
-/// 공부 세션 줄: "공부 시작 ▶" → "HH:MM부터 · 오늘 여기까지 ✂ · 버리기"
+/// 공부 세션 줄: "공부 시작 ▶\u{FE0E}" →\u{FE0E} "HH:MM부터 · 오늘 여기까지 ✂\u{FE0E} · 버리기"
 struct SessionBar: View {
     @ObservedObject var model: SessionModel
     var waiting = 0
@@ -57,13 +58,13 @@ struct SessionBar: View {
                         let d = Date(ms: start)
                         Text((d.isToday ? "" : d.monthDay + " ") + d.hm + "부터")
                             .font(Theme.hand(20)).foregroundStyle(d.isToday ? Theme.ink : Theme.red)
-                        Tiny(title: model.busy ? "기록 중…" : "오늘 여기까지 ✂", color: Theme.red) { Task { await model.close() } }
+                        Tiny(title: model.busy ? "기록 중…" : "오늘 여기까지 ✂\u{FE0E}", color: Theme.red) { Task { await model.close() } }
                             .disabled(model.busy || waiting > 0)
                             .opacity(model.busy || waiting > 0 ? 0.45 : 1)
                         if waiting > 0 { MutedText(text: "채점이 끝나면 누를 수 있다") }
                         Tiny(title: "버리기") { confirmDiscard = true }
                     } else if !hideStart {
-                        Tiny(title: "공부 시작 ▶", color: Theme.red) { model.begin() }
+                        Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red) { model.begin() }
                     }
                 }
                 if let msg = model.msg {
