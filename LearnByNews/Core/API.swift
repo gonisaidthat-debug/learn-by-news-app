@@ -98,11 +98,15 @@ final class API {
     func review(_ id: String, score: Int?) async throws -> Review { try await send("POST", "/api/articles/\(id)/review", body: ReviewBody(score: score)) }
 
     // MARK: sentences
-    struct TranslationBody: Encodable { var translation: String }
-    struct SkipBody: Encodable { var skip = true }
-    func attempt(_ sentenceId: String, translation: String) async throws -> AttemptResult {
-        try await send("POST", "/api/sentences/\(sentenceId)/attempts", body: translation.isEmpty ? SkipBody() as any Encodable : TranslationBody(translation: translation))
+    struct TranslationBody: Encodable { var translation: String; var attemptId: String }
+    struct SkipBody: Encodable { var skip = true; var attemptId: String }
+    /// attemptId는 클라이언트 UUID. 멈추기(DELETE /api/attempts/:id)에 쓴다
+    func attempt(_ sentenceId: String, translation: String, attemptId: String) async throws -> AttemptResult {
+        try await send("POST", "/api/sentences/\(sentenceId)/attempts", body: translation.isEmpty ? SkipBody(attemptId: attemptId) as any Encodable : TranslationBody(translation: translation, attemptId: attemptId))
     }
+    struct Cancelled: Decodable { var ok: Bool; var removed: Bool? }
+    /// 멈추기: 채점이 끝났으면 삭제, 아직이면 결과 도착 시 버린다
+    func cancelAttempt(_ attemptId: String) async throws -> Cancelled { try await send("DELETE", "/api/attempts/\(attemptId)") }
     struct MergeBody: Encodable { var dir: String }
     struct Merged: Decodable { var ok: Bool; var kept: String; var text: String }
     func merge(_ sentenceId: String, dir: String) async throws -> Merged { try await send("POST", "/api/sentences/\(sentenceId)/merge", body: MergeBody(dir: dir)) }

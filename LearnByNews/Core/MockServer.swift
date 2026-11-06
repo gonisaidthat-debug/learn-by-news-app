@@ -25,7 +25,8 @@ final class MockServer: URLProtocol {
             while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n > 0 { out.append(buf, count: n) } else { break } }
             s.close(); return out
         }), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { body = j }
-        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? 1.5 : path.hasSuffix("/review") ? 2 : 0.15
+        let slow = ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1" ? 8.0 : 1.5
+        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : path.hasSuffix("/review") ? 2 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
@@ -168,6 +169,8 @@ struct MockState {
             sentences.removeAll { $0["id"] as? String == drop["id"] as? String }
             for (n, s) in sents(of: aid).enumerated() { let j = sentences.firstIndex { $0["id"] as? String == s["id"] as? String }!; sentences[j]["idx"] = n }
             return (200, ["ok": true, "kept": keep["id"]!, "text": text])
+        case "DELETE /api/attempts/:id":
+            return (200, ["ok": true, "removed": true])
         case "DELETE /api/sentences/:id":
             sentences.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
         case "GET /api/phrases":

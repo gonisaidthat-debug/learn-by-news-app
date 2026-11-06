@@ -8,7 +8,7 @@ struct LearnByNewsApp: App {
 
     init() {
         #if DEBUG
-        if MockServer.enabled { Keychain.set("mock") }
+        if MockServer.enabled { Keychain.set("mock"); UserDefaults.standard.set(false, forKey: AuthModel.biometricKey) }
         #endif
         let needUpload = AppLog.shared.beginRun()
         if needUpload {

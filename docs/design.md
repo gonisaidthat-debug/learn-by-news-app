@@ -92,6 +92,8 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 - `SIMCTL_CHILD_LBN_MOCK=1`: 서버 대신 메모리 모의 서버(`MockServer`). 비밀번호 없이 화면을 볼 수 있다.
 - `SIMCTL_CHILD_LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | phrases | quiz | log | settings`: 시작 화면.
 - `SIMCTL_CHILD_LBN_SESSION=1`: 공부 세션이 시작된 상태로 시작.
+- `SIMCTL_CHILD_LBN_AUTOSUBMIT=1`: 공책을 열자마자 현재 문장에 번역을 넣고 제출(채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다).
+- 모의 모드에서는 Face ID 잠금을 끈다.
 - 예: `SIMCTL_CHILD_LBN_MOCK=1 SIMCTL_CHILD_LBN_ROUTE=notebook:a1 xcrun simctl launch <sim> com.goni.learn-by-news`
 
 ### 실기기에서 goni가 확인할 것 (시뮬레이터에서 못 본 것)

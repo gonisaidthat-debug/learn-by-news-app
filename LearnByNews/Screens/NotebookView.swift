@@ -1,6 +1,11 @@
 import SwiftUI
 
-struct Inflight: Hashable { var translation: String; var error: String? }
+struct Inflight: Hashable {
+    var translation: String
+    var attemptId: String
+    var wasRedo: Bool          // 다시 쓰기 중이던 문장이면 멈출 때 그 자리로 돌아간다
+    var error: String?
+}
 
 @MainActor
 final class NotebookModel: ObservableObject {
@@ -15,7 +20,10 @@ final class NotebookModel: ObservableObject {
     @Published var lastGraded: String?
     @Published var err: String?
     @Published var scrollTo: String?     // 스크롤 목표 ("bottom" 또는 문장 id)
+    @Published var focusRequest = 0      // 입력란에 포커스를 달라는 신호
     var browse: Bool { focusId != nil }
+    private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
+    private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
     init(id: String, focusId: String?) { self.id = id; self.focusId = focusId }
 
@@ -59,12 +67,35 @@ final class NotebookModel: ObservableObject {
         if r.grade != .skip { open = sid; lastGraded = sid; requestScroll("bottom") }
     }
 
-    func send(_ sid: String, _ translation: String) {
-        inflight[sid] = Inflight(translation: translation)
-        AppLog.shared.info("notebook", translation.isEmpty ? "skip" : "submit", ["sentence": sid, "chars": "\(translation.count)"])
+    func send(_ sid: String, _ translation: String, wasRedo: Bool? = nil) {
+        let attemptId = UUID().uuidString.lowercased()
+        let redoing = wasRedo ?? (data?.sentences.first { $0.id == sid }?.attempt != nil)
+        inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing)
+        AppLog.shared.info("notebook", translation.isEmpty ? "skip" : "submit", ["sentence": sid, "attempt": attemptId, "chars": "\(translation.count)"])
+        tasks[sid] = Task {
+            defer { tasks[sid] = nil }
+            do { let r = try await API.shared.attempt(sid, translation: translation, attemptId: attemptId); if !stopped.contains(attemptId) { applyResult(sid, r) } }
+            catch {
+                // 멈춘 요청의 오류(취소, 409 cancelled)는 보여주지 않는다
+                if stopped.contains(attemptId) || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, error: error.localizedDescription)
+            }
+        }
+    }
+
+    /// 멈추기: 요청 취소 → 서버에 DELETE → 그 문장을 다시 입력란으로, 쓰던 번역은 그대로
+    func stop(_ sid: String) {
+        guard let f = inflight[sid] else { return }
+        stopped.insert(f.attemptId)
+        tasks[sid]?.cancel(); tasks[sid] = nil
+        inflight[sid] = nil
+        AppLog.shared.info("notebook", "stop", ["sentence": sid, "attempt": f.attemptId])
+        if f.wasRedo { redo = sid } else { redo = nil }
+        input = f.translation
+        focusRequest += 1
         Task {
-            do { let r = try await API.shared.attempt(sid, translation: translation); applyResult(sid, r) }
-            catch { inflight[sid] = Inflight(translation: translation, error: error.localizedDescription) }
+            do { let r = try await API.shared.cancelAttempt(f.attemptId); AppLog.shared.info("notebook", "stop ok", ["attempt": f.attemptId, "removed": "\(r.removed ?? false)"]) }
+            catch { AppLog.shared.warn("notebook", "stop failed: \(error.localizedDescription)", ["attempt": f.attemptId]) }
         }
     }
 
@@ -73,8 +104,9 @@ final class NotebookModel: ObservableObject {
         guard let cur = current else { return }
         let t = skip ? "" : input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !skip && t.isEmpty { return }
+        let wasRedo = redo != nil
         input = ""; redo = nil
-        send(cur.id, t)
+        send(cur.id, t, wasRedo: wasRedo)
         requestScroll("bottom")
     }
 
@@ -163,11 +195,18 @@ struct NotebookView: View {
             await m.load { router.shelfPath = [.done(id: articleId)] }
             await session.load()
             if !m.browse { focused = true }
+            #if DEBUG
+            // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
+            if ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1", session.inSession, m.current != nil {
+                m.input = "분석가들은 노동 시장이 더 약해지면 12월 15일까지 인하를 예상한다."; m.submit(skip: false)
+            }
+            #endif
         }
         .onChange(of: m.allDone) { _, done in
             // 모든 문장이 채점되면 마지막 장으로
             if done, m.inflight.isEmpty, m.redo == nil, !m.browse { router.shelfPath = [.done(id: articleId)] }
         }
+        .onChange(of: m.focusRequest) { _, _ in focused = true }
         .onChange(of: m.inflight.isEmpty) { _, empty in
             if empty, m.allDone, m.redo == nil, !m.browse { router.shelfPath = [.done(id: articleId)] }
         }
@@ -227,11 +266,14 @@ struct NotebookView: View {
         } else if let f = m.inflight[x.id] {
             Entry(stamp: AnyView(Stamp(kind: f.error == nil ? .busy : .error))) {
                 Text(x.text).enLine()
-                if f.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) } else { Text(f.translation).koLine() }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    if f.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) } else { Text(f.translation).koLine() }
+                    if f.error == nil { Tiny(title: "멈추기 ↩\u{FE0E}") { m.stop(x.id); focused = true } }
+                }
                 if let e = f.error {
                     HStack(spacing: 10) {
                         Text(e).redpen()
-                        Tiny(title: "다시 시도") { m.send(x.id, f.translation) }
+                        Tiny(title: "다시 시도") { m.send(x.id, f.translation, wasRedo: f.wasRedo) }
                     }
                 }
             }
