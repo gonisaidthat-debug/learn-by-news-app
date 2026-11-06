@@ -1,6 +1,210 @@
 import SwiftUI
 
+/// 마지막 장: 점수·총평·다시 볼 문장·붙여 둔 표현 (웹 Done.tsx)
+@MainActor
+final class DoneModel: ObservableObject {
+    let id: String
+    @Published var data: ArticleDetail?
+    @Published var err: String?
+    @Published var open: String?
+    @Published var refOpen: [String: Bool] = [:]
+    @Published var reviewing = false
+    @Published var reviewErr: String?
+    @Published var showOld = false
+    private var autoTried = false
+
+    init(id: String) { self.id = id }
+
+    func load() async {
+        do {
+            let d = try await API.shared.article(id); data = d
+            // 다 끝났는데 총평이 없으면 한 번 자동으로 받는다
+            if !autoTried, d.reviews.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }), d.sentences.contains(where: { $0.attempt != nil && $0.attempt!.grade != .skip }) {
+                autoTried = true
+                await requestReview()
+            }
+        } catch { err = error.localizedDescription }
+    }
+
+    func requestReview() async {
+        guard let d = data, !reviewing else { return }
+        reviewing = true; reviewErr = nil
+        AppLog.shared.info("done", "review request", ["article": d.id])
+        do {
+            let r = try await API.shared.review(d.id, score: ArticleDetail.score(of: d.sentences))
+            data?.reviews.insert(r, at: 0)
+        } catch { reviewErr = error.localizedDescription }
+        reviewing = false
+    }
+
+    func togglePhrase(_ sid: String, _ e: Expression) async {
+        guard var d = data else { return }
+        do {
+            if let ex = d.phrases.first(where: { $0.sentenceId == sid && $0.phrase == e.phrase }) {
+                try await API.shared.deletePhrase(ex.id); d.phrases.removeAll { $0.id == ex.id }
+            } else {
+                let p = try await API.shared.savePhrase(e, sentenceId: sid, articleId: d.id); d.phrases.append(p)
+            }
+            data = d
+        } catch { err = error.localizedDescription }
+    }
+
+    func setSource(_ url: String) async {
+        do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
+    }
+}
+
 struct DoneView: View {
     var articleId: String
-    var body: some View { Text("마지막 장 \(articleId)") }
+    @EnvironmentObject var router: Router
+    @StateObject private var m: DoneModel
+
+    init(articleId: String) {
+        self.articleId = articleId
+        _m = StateObject(wrappedValue: DoneModel(id: articleId))
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.desk.ignoresSafeArea()
+            if let d = m.data { content(d) }
+            else if let e = m.err { ErrorText(message: e).padding() }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.desk, for: .navigationBar)
+        .toolbar { ToolbarItem(placement: .principal) { Text(m.data?.title ?? "").font(Theme.hand(22)).lineLimit(1) } }
+        .task { await m.load() }
+    }
+
+    private func content(_ d: ArticleDetail) -> some View {
+        var counts: [Grade: Int] = [:]
+        for s in d.sentences { if let g = s.attempt?.grade { counts[g, default: 0] += 1 } }
+        let review = d.sentences.filter { $0.attempt != nil && ($0.attempt!.grade == .C || $0.attempt!.grade == .D) }
+        let remaining = d.sentences.filter { $0.attempt == nil }.count
+        let score = ArticleDetail.score(of: d.sentences)
+        let latest = d.reviews.first
+        let older = Array(d.reviews.dropFirst())
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                NotebookHead(tab: "마지막 장") {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(d.title).lineLimit(2)
+                        SourceLink(source: d.source ?? "") { await m.setSource($0) }
+                    }
+                }
+                Paper {
+                    Entry {
+                        HStack(alignment: .firstTextBaseline, spacing: 18) {
+                            if let score {
+                                Text("\(score)점")
+                                    .font(Theme.hand(56)).foregroundStyle(Theme.red)
+                                    .padding(.horizontal, 14).padding(.vertical, 2)
+                                    .overlay(Ellipse().strokeBorder(Theme.red, lineWidth: 3))
+                                    .rotationEffect(.degrees(-6))
+                            } else {
+                                Text("채점된 문장 없음").font(Theme.hand(22)).foregroundStyle(Theme.pencil)
+                            }
+                            FlowLayout(spacing: 14) {
+                                ForEach(Grade.allCases, id: \.self) { g in
+                                    if let n = counts[g], n > 0 {
+                                        HStack(spacing: 4) { Stamp(kind: .grade(g), small: true); Text("×\(n)").font(Theme.hand(22)).foregroundStyle(Theme.pencil) }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(minHeight: Theme.lh * 2)
+                        if remaining > 0 {
+                            Tiny(title: "남은 \(remaining)문장 이어서 →\u{FE0E}") { router.shelfPath = [.notebook(id: d.id)] }.frame(height: Theme.lh)
+                        }
+                    }
+
+                    BlankLine()
+                    Entry {
+                        Text("총평").font(Theme.print(16)).italic().foregroundStyle(Theme.pencil).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
+                        if let latest { reviewBlock(latest) }
+                        else if m.reviewing { Text("선생님이 총평 쓰는 중… ✎\u{FE0E}").pencil() }
+                        else { Text(remaining > 0 ? "다 끝나면 총평이 나온다" : "총평 없음").pencil() }
+                        if let e = m.reviewErr {
+                            HStack(spacing: 10) {
+                                Text(e).redpen()
+                                Tiny(title: "다시 시도") { Task { await m.requestReview() } }
+                            }
+                        }
+                        FlowLayout(spacing: 14) {
+                            if latest != nil, !m.reviewing, remaining == 0 {
+                                Tiny(title: "총평 다시 받기 ↻\u{FE0E}") { Task { await m.requestReview() } }
+                            }
+                            if m.reviewing, latest != nil { Text("다시 쓰는 중… ✎\u{FE0E}").font(Theme.hand(22)).foregroundStyle(Theme.pencil) }
+                            if !older.isEmpty {
+                                Tiny(title: "이전 총평 \(older.count)개 \(m.showOld ? "접기" : "보기")") { m.showOld.toggle() }
+                            }
+                        }
+                        .frame(minHeight: Theme.lh)
+                        if m.showOld {
+                            ForEach(older) { r in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    HStack(spacing: 6) {
+                                        Text(Date(ms: r.createdAt).fullLabel).font(Theme.hand(17)).padding(.horizontal, 6).overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.pencil))
+                                        if let s = r.score { Text("\(s)점").font(Theme.hand(22)) }
+                                    }
+                                    .foregroundStyle(Theme.pencil).frame(height: Theme.lh)
+                                    reviewBlock(r)
+                                }
+                                .padding(.leading, 12)
+                                .overlay(alignment: .leading) { Line().rotation(.degrees(90)).stroke(style: StrokeStyle(lineWidth: 2, dash: [5, 4])).foregroundStyle(Theme.pencil).frame(width: 2) }
+                                .opacity(0.7)
+                            }
+                        }
+                    }
+
+                    if !review.isEmpty {
+                        BlankLine()
+                        Entry { Text("다시 볼 문장").font(Theme.print(16)).italic().foregroundStyle(Theme.pencil).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh)) }
+                        ForEach(review) { s in
+                            EntryView(
+                                s: s, expanded: m.open == s.id,
+                                onToggle: { m.open = m.open == s.id ? nil : s.id },
+                                showRef: m.refOpen[s.id] ?? true,
+                                onToggleRef: { m.refOpen[s.id] = !(m.refOpen[s.id] ?? true) },
+                                savedPhrases: d.phrases.filter { $0.sentenceId == s.id },
+                                onTogglePhrase: { e in Task { await m.togglePhrase(s.id, e) } }
+                            )
+                        }
+                    }
+
+                    BlankLine()
+                    Entry {
+                        Text("붙여 둔 표현" + (d.phrases.isEmpty ? "" : " (\(d.phrases.count))")).font(Theme.print(16)).italic().foregroundStyle(Theme.pencil).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
+                        if d.phrases.isEmpty {
+                            Text("없음").handLine(size: 21, color: Theme.pencil)
+                        } else {
+                            FlowLayout(spacing: 14) {
+                                ForEach(Array(d.phrases.enumerated()), id: \.element.id) { i, p in
+                                    Sticky(phrase: p.phrase, meaning: p.meaning, index: i)
+                                }
+                            }
+                            .padding(.vertical, 10)
+                        }
+                    }
+                    HStack(spacing: 18) {
+                        Tiny(title: "←\u{FE0E} 공책 목록") { router.shelfPath = [] }
+                        if let e = m.err { ErrorText(message: e) }
+                    }
+                    .frame(minHeight: Theme.lh).padding(.top, Theme.lh)
+                    .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
+                }
+            }
+            .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
+        }
+    }
+
+    @ViewBuilder
+    private func reviewBlock(_ r: Review) -> some View {
+        Text(r.summary).redpen(size: 24)
+        ForEach(Array(r.patterns.enumerated()), id: \.offset) { _, p in
+            (Text(p.title).underline(true, color: Theme.red) + Text("  ") + Text(p.detail)).redpen()
+        }
+        if !r.praise.isEmpty { Text(r.praise).handLine(size: 22, color: Theme.grade(.A)) }
+    }
 }
