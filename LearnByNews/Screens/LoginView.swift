@@ -30,6 +30,9 @@ struct LoginView: View {
                 .disabled(busy || pw.isEmpty)
                 .opacity(busy || pw.isEmpty ? 0.45 : 1)
                 if let err { ErrorText(message: err) }
+                if Keychain.get() != nil, auth.biometricEnabled, AuthModel.biometricAvailable {
+                    Tiny(title: "\(AuthModel.biometricName)로 열기", size: 20) { auth.state = .locked; Task { await auth.unlock() } }.padding(.top, 6)
+                }
             }
             .frame(maxWidth: 320)
             .padding(.horizontal, 16)

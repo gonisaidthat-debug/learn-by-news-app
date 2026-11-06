@@ -28,8 +28,8 @@ struct LearnByNewsApp: App {
                 .environmentObject(router)
                 .onChange(of: phase) { _, p in
                     switch p {
-                    case .background: AppLog.shared.markClean()
-                    case .active: AppLog.shared.markDirty()
+                    case .background: AppLog.shared.markClean(); auth.didEnterBackground()
+                    case .active: AppLog.shared.markDirty(); auth.willEnterForeground()
                     default: break
                     }
                 }

@@ -1,10 +1,29 @@
 import SwiftUI
+import LocalAuthentication
 
-/// 로그인 상태. 웹 App.tsx의 authed
+/// 로그인 상태. 웹 App.tsx의 authed + Face ID 잠금
 @MainActor
 final class AuthModel: ObservableObject {
-    enum State { case unknown, loggedOut, loggedIn }
+    enum State { case unknown, loggedOut, locked, loggedIn }
     @Published var state: State = .unknown
+    @Published var lockErr: String?
+    private var backgroundedAt: Date?
+    /// 백그라운드에 이보다 오래 있었으면 돌아올 때 다시 잠근다
+    static let relockAfter: TimeInterval = 120
+
+    static let biometricKey = "lbn_biometric_lock"
+    /// Face ID로 잠그기 (기본 켬)
+    var biometricEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: Self.biometricKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Self.biometricKey); objectWillChange.send() }
+    }
+    static var biometricAvailable: Bool {
+        LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+    static var biometricName: String {
+        let c = LAContext(); _ = c.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        switch c.biometryType { case .faceID: return "Face ID"; case .touchID: return "Touch ID"; case .opticID: return "Optic ID"; default: return "기기 암호" }
+    }
 
     init() {
         NotificationCenter.default.addObserver(forName: .lbnUnauthorized, object: nil, queue: .main) { [weak self] _ in
@@ -14,12 +33,45 @@ final class AuthModel: ObservableObject {
 
     func check() async {
         guard Keychain.get() != nil else { state = .loggedOut; return }
+        if biometricEnabled && Self.biometricAvailable { state = .locked; await unlock(); return }
+        await enter()
+    }
+
+    /// 저장된 비밀번호로 서버 확인 후 들어간다
+    private func enter() async {
         do { try await API.shared.checkAuth(); state = .loggedIn }
         catch APIError.unauthorized { state = .loggedOut }
         catch {
             // 네트워크 실패면 비밀번호는 그대로 두고 들어간다 (화면에서 오류를 보여준다)
             state = .loggedIn
         }
+    }
+
+    /// Face ID(안 되면 기기 암호)로 본인 확인
+    func unlock() async {
+        guard state == .locked else { return }
+        lockErr = nil
+        let ctx = LAContext()
+        ctx.localizedCancelTitle = "비밀번호로 들어가기"
+        do {
+            let ok = try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "저장된 비밀번호로 들어갑니다")
+            if ok { AppLog.shared.info("auth", "biometric ok"); await enter() }
+        } catch let e as LAError where e.code == .userCancel || e.code == .userFallback {
+            // 비밀번호 직접 입력으로
+            state = .loggedOut
+        } catch {
+            AppLog.shared.warn("auth", "biometric failed: \(error.localizedDescription)")
+            lockErr = error.localizedDescription
+        }
+    }
+
+    /// 백그라운드 전환 추적. 오래 비웠으면 돌아올 때 다시 잠근다
+    func didEnterBackground() { backgroundedAt = Date() }
+    func willEnterForeground() {
+        guard state == .loggedIn, biometricEnabled, Self.biometricAvailable, let t = backgroundedAt, Date().timeIntervalSince(t) > Self.relockAfter else { return }
+        backgroundedAt = nil
+        state = .locked
+        Task { await unlock() }
     }
 
     func login(_ pw: String) async -> String? {
@@ -78,10 +130,28 @@ struct RootView: View {
             switch auth.state {
             case .unknown: Theme.desk.ignoresSafeArea()
             case .loggedOut: LoginView()
+            case .locked: LockView()
             case .loggedIn: MainTabs()
             }
         }
         .task { await auth.check() }
+    }
+}
+
+/// Face ID 확인 중 화면. 실패하면 다시 시도하거나 비밀번호로.
+struct LockView: View {
+    @EnvironmentObject var auth: AuthModel
+    var body: some View {
+        ZStack {
+            Theme.desk.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Text("Learn by News").font(Theme.hand(34)).foregroundStyle(Theme.ink)
+                Image(systemName: "faceid").font(.system(size: 44)).foregroundStyle(Theme.pencil)
+                if let e = auth.lockErr { ErrorText(message: e) }
+                Tiny(title: "\(AuthModel.biometricName)로 열기", color: Theme.red, size: 24) { Task { await auth.unlock() } }
+                Tiny(title: "비밀번호로 들어가기", size: 20) { auth.state = .loggedOut }
+            }
+        }
     }
 }
 

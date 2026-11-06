@@ -18,6 +18,14 @@ struct SettingsView: View {
                     if let msg { Text(msg).font(.footnote).foregroundStyle(Theme.muted) }
                 }
                 Section {
+                    Toggle(isOn: Binding(get: { auth.biometricEnabled }, set: { auth.biometricEnabled = $0 })) {
+                        Label("\(AuthModel.biometricName)로 잠금", systemImage: "faceid").foregroundStyle(Theme.ink)
+                    }
+                    .disabled(!AuthModel.biometricAvailable)
+                } footer: {
+                    Text("켜면 앱을 열 때 \(AuthModel.biometricName)로 확인한 뒤 저장된 비밀번호로 들어간다. \(Int(AuthModel.relockAfter / 60))분 넘게 비웠다 돌아와도 다시 확인한다.")
+                }
+                Section {
                     Button(role: .destructive) { auth.logout() } label: { Label("로그아웃 (비밀번호 지우기)", systemImage: "rectangle.portrait.and.arrow.right") }
                 } footer: {
                     Text("Learn by News \(AppLog.appVersion) · \(AppLog.deviceName)\n서버 \(API.base.host ?? "")")
