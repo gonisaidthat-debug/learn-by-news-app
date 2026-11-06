@@ -13,7 +13,9 @@ struct LoginView: View {
             VStack(spacing: 10) {
                 Text("Learn by News").font(Theme.hand(34)).foregroundStyle(Theme.ink).padding(.bottom, 10)
                 SecureField("비밀번호", text: $pw)
-                    .textContentType(.password)
+                    .keyboardType(.default)            // 한글 비밀번호 허용
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
                     .focused($focused)
                     .submitLabel(.go)
                     .onSubmit { Task { await submit() } }

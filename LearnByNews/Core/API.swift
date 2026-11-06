@@ -32,11 +32,18 @@ final class API {
 
     struct Empty: Encodable {}
 
+    /// 모든 요청의 Authorization 값. 헤더는 ASCII만 실리므로 비밀번호(한글 가능)를 percent-encoding한다.
+    /// 서버가 decodeURIComponent 해서 비교한다. Keychain에는 원문 그대로 둔다.
+    static func authHeader() -> String {
+        let raw = Keychain.get() ?? ""
+        return "Bearer " + (raw.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
+    }
+
     func send<T: Decodable>(_ method: String, _ path: String, body: (any Encodable)? = nil) async throws -> T {
         var req = URLRequest(url: URL(string: Self.base.absoluteString + path)!)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(Keychain.get() ?? "")", forHTTPHeaderField: "Authorization")
+        req.setValue(Self.authHeader(), forHTTPHeaderField: "Authorization")
         if let body { req.httpBody = try JSONEncoder.api.encode(body) }
         let t0 = Date()
         let data: Data, http: HTTPURLResponse
