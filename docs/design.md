@@ -75,3 +75,24 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 - **세션 시작점은 클라이언트가 보관**(웹은 localStorage). 앱은 UserDefaults. 시작 전에는 입력 불가. "오늘 여기까지"는 `POST /api/sessions {started_at}`. 기기 간 시작점은 공유되지 않는다(필요해지면 서버로 옮긴다).
 - 참고 번역 기본 펼침. 등급 도장·빨간 밑줄(issue.mine을 번역에서 찾아 표시)·포스트잇 저장 토글은 웹과 같은 의미.
 - 폴백 금지: 채점 실패 시 같은 요청 재시도만.
+
+## 3. 앱 구조 (구현 메모, 2026-11-06)
+
+- `project.yml` → `xcodegen generate`. 타깃 LearnByNews, 번들 `com.goni.learn-by-news`, iOS 17+, 세로 고정.
+- `LearnByNews/Core`: `Models`(API 타입, 점수 계산), `API`(URLSession, Bearer, 401이면 Keychain 비우고 로그인 화면), `Keychain`, `SessionStore`(UserDefaults `lbn_session_start`), `Split`(NLTokenizer + 웹과 같은 약어·소문자·구두점 보정), `AppLog`(OSLog + Application Support/app-log.jsonl 2000줄 순환, 비정상 종료·error 감지 후 다음 실행 때 자동 POST /api/logs), `MockServer`(DEBUG 전용).
+- `LearnByNews/UI`: `Theme`(웹 styles.css 색·글꼴·줄높이 32pt·여백 36pt), `Paper`(줄노트 Canvas, Entry, Stamp, Sticky, Tiny, NotebookHead), `EntryView`(채점 항목, 빨간 밑줄 markWrong, 포스트잇 토글, FlowLayout, SourceLink).
+- `LearnByNews/Screens`: `ShelfView`(붙여넣기+링크+공책 목록+공부 기록), `NotebookView`, `DoneView`, `PhrasesView`, `QuizView`, `ActivityLogView`, `SettingsView`, `SessionBar`(SessionModel.shared).
+- 탭: 기사 / 표현장 / 시험지 / 기록 / 설정. 시험지·기록의 "공책에서 보기"는 `Router.open`으로 기사 탭의 NavigationStack 경로를 바꾼다.
+- 빨간 물결 밑줄: SwiftUI에 물결 패턴이 없어 점선(`.dot`) 밑줄로 대신한다.
+- Enter 제출: 세로 TextField에서 줄바꿈 문자가 들어오면 제출(한글 조합 중 Enter는 조합 확정이라 줄바꿈이 안 들어온다).
+
+### 시뮬레이터 확인용 환경변수 (DEBUG 빌드만)
+- `SIMCTL_CHILD_LBN_MOCK=1`: 서버 대신 메모리 모의 서버(`MockServer`). 비밀번호 없이 화면을 볼 수 있다.
+- `SIMCTL_CHILD_LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | phrases | quiz | log | settings`: 시작 화면.
+- `SIMCTL_CHILD_LBN_SESSION=1`: 공부 세션이 시작된 상태로 시작.
+- 예: `SIMCTL_CHILD_LBN_MOCK=1 SIMCTL_CHILD_LBN_ROUTE=notebook:a1 xcrun simctl launch <sim> com.goni.learn-by-news`
+
+### 실기기에서 goni가 확인할 것 (시뮬레이터에서 못 본 것)
+- 실제 비밀번호 로그인과 실제 서버 응답 해석(특히 채점·총평·시험지 JSON).
+- 한글 키보드에서 Enter 제출이 조합 중 글자를 잃지 않는지.
+- 채점 대기 중 도장(✎ 흔들림)과 결과 도착 시 펼침·스크롤.
