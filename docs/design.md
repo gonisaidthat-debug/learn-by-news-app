@@ -14,6 +14,8 @@
 
 **goni 추가 결정 (2026-11-06): 나머지도 전부 웹과 동일하게.** 비밀번호는 한 번 입력해 Keychain에 두고(웹의 localStorage 역할), 세션 시작점은 UserDefaults(웹의 localStorage 역할), 붙여넣기는 텍스트 붙여넣기 칸 + 링크 칸(웹과 같은 자동 URL 감지). 공유 시트는 나중.
 
+**goni 추가 결정 (2026-11-06): 버그 추적용 로그 기능 포함.** 앱은 OSLog와 로컬 순환 파일(최근 2000줄)에 기록한다. 설정 화면의 "로그 보내기"와, 다음 실행 시 자동(직전 실행에 error/fatal이 있었거나 비정상 종료였으면)으로 서버 `POST /api/logs`에 올린다. 항목: level(debug/info/warn/error/fatal), tag(화면/모듈), message, context(JSON), at. 기사 원문·번역 전문은 넣지 않는다(문장 id만). 서버는 30일 보관하고 웹 세션에서 `GET /api/logs`로 본다. 설정 화면에 로컬 로그 보기·지우기도 둔다.
+
 **앱 세션에서 goni와 정할 것 (남은 것 없음, 구현하며 생기면 여기에):**
 - 세션 시작점(UserDefaults)과 비밀번호 보관(Keychain).
 - 기사 붙여넣기 경로: 클립보드 붙여넣기 + 공유 시트(URL만 올 수 있음).
@@ -63,6 +65,9 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 | POST `/api/sessions` | `{started_at}` | `Session` — started_at 이후 채점이 없으면 400 |
 | DELETE `/api/sessions/:id` | — | `{ok}` |
 | GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions, reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` |
+| POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
+| GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
+| DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
 
 ### 클라이언트가 지켜야 할 규칙 (웹과 동일 동작)
 - **문장 분리**는 클라이언트 몫. 첫 줄 제목, URL만 있는 줄은 source, 빈 줄 사이가 문단. 약어(월 약어, Mr./Dr./Jr., No., vs., U.S. 등) 뒤는 끊지 않고, 소문자·구두점으로 시작하는 조각은 앞에 붙인다. iOS는 `NLTokenizer(unit: .sentence)` + 같은 보정.
