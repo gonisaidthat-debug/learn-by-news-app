@@ -66,6 +66,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 | POST `/api/sessions` | `{started_at}` | `Session` — started_at 이후 채점이 없으면 400 |
 | DELETE `/api/sessions/:id` | — | `{ok}` |
 | GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions, reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` |
+| GET `/api/export?since=<ms>` | — | `{exported_at, since, articles, sentences, attempts(feedback 파싱됨), phrases, reviews(review 파싱됨), quiz_results, sessions(articles 파싱됨)}` 오프라인 캐시용. since가 있으면 append-only 표만 증분, articles·sentences는 항상 전체. 삭제는 전체 내보내기로만 반영 |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
@@ -103,3 +104,10 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 - 실제 비밀번호 로그인과 실제 서버 응답 해석(특히 채점·총평·시험지 JSON).
 - 한글 키보드에서 Enter 제출이 조합 중 글자를 잃지 않는지.
 - 채점 대기 중 도장(✎ 흔들림)과 결과 도착 시 펼침·스크롤.
+
+## 3. 맥 앱과 오프라인 (2026-11-10, goni 결정: 진행)
+
+- **맥 앱**: 이 리포에서 맥 대상을 켠다. 1단계 "My Mac (Designed for iPad)"로 그대로 실행(창 최소 크기·레이아웃만 점검), 2단계 필요해지면 Mac Catalyst 또는 SwiftUI 멀티플랫폼 타깃으로 메뉴바·단축키(Enter 제출, Esc, ⌘N 새 공책 등) 보강.
+- **오프라인 범위**: 읽기·복습(공책 열람, 이전 시도, 총평, 표현장, 시험지, 기록, 공책 목록)은 오프라인. 채점·총평·새 공책 만들기는 온라인 전용. 시험 결과(POST /api/quiz/results)와 포스트잇 붙이기/떼기(POST/DELETE /api/phrases)는 오프라인 큐에 쌓았다가 연결되면 순서대로 보낸다.
+- **동기화**: 설정에 "오프라인용 내려받기"(전체 `GET /api/export` → SwiftData에 교체 저장, exported_at 기억)와 마지막 동기화 시각 표시. 앱 시작·포그라운드 복귀 시 온라인이면 `?since=<exported_at>` 증분. 하루 한 번 또는 공책 삭제·문장 합치기 뒤에는 전체 다시 받기(삭제 반영). 서버가 진실, 로컬은 캐시, 충돌은 서버 우선. 화면은 캐시를 먼저 그리고 온라인이면 갱신.
+- 오프라인에서 채점이 필요한 동작을 누르면 "온라인에서만 된다"를 그 자리에 보여준다(폴백 없음).
