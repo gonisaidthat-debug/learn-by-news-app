@@ -47,7 +47,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 | 메서드·경로 | 요청 | 응답 |
 |---|---|---|
 | GET `/api/auth` | — | `{ok:true}` (비밀번호 확인용) |
-| GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, grades:{A?,B?,C?,D?,skip?}}]` 최신순 |
+| GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, review_count, grades:{A?,B?,C?,D?,skip?}}]` 최신순. `review_count` = 총평 개수 = 완주 회차 |
 | POST `/api/articles` | `{title, source?, sentences:[{paragraph, text}]}` 문장 분리는 클라이언트 | `{id}` |
 | GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[]}` reviews 최신순 |
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
