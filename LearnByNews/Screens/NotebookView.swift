@@ -13,6 +13,8 @@ final class NotebookModel: ObservableObject {
     let focusId: String?
     let restartAfter: Int?
     let browseAll: Bool
+    let round: Int?           // 회차 열람: n번째 총평 시각까지의 마지막 시도로 보여준다
+    @Published var roundShown: Int?
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
@@ -35,7 +37,26 @@ final class NotebookModel: ObservableObject {
     private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
     private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
-    init(id: String, focusId: String?, restartAfter: Int?, browseAll: Bool) { self.id = id; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll }
+    init(id: String, focusId: String?, restartAfter: Int?, browseAll: Bool, round: Int?) {
+        self.id = id; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll; self.round = round
+    }
+
+    /// 회차 열람용 변환: n번째 총평(오래된 순) 시각까지의 시도만 남긴다. 총평도 n번째까지
+    static func asOfRound(_ d: ArticleDetail, _ n: Int) -> ArticleDetail? {
+        let asc = d.reviews.sorted { $0.createdAt < $1.createdAt }
+        guard n >= 1, n <= asc.count else { return nil }
+        let asOf = asc[n - 1].createdAt
+        var out = d
+        out.sentences = d.sentences.map { x in
+            var s = x
+            let all = (x.history + [x.attempt].compactMap { $0 }).filter { $0.createdAt <= asOf }.sorted { $0.createdAt < $1.createdAt }
+            s.attempt = all.last
+            s.history = Array(all.dropLast())
+            return s
+        }
+        out.reviews = Array(asc.prefix(n)).reversed()
+        return out
+    }
 
     var frontIdx: Int? {
         guard let d = data else { return nil }
@@ -51,7 +72,11 @@ final class NotebookModel: ObservableObject {
     func load(onDone: @escaping () -> Void) async {
         do {
             let d = try await API.shared.article(id)
-            if browse { data = d; open = focusId; if let focusId { requestScroll(focusId) }; return }
+            if browse {
+                if let round, let r = Self.asOfRound(d, round) { data = r; roundShown = round } else { data = d }
+                open = focusId; if let focusId { requestScroll(focusId) }
+                return
+            }
             if let n = restartAfter, !d.sentences.isEmpty {
                 // 처음부터(또는 앞 n문장 다음부터) 다시 쓰기 시작. 진행 상태를 저장한다
                 let ids = d.sentences.map(\.id)
@@ -233,15 +258,16 @@ struct NotebookView: View {
     var focusId: String? = nil
     var restartAfter: Int? = nil
     var browseAll: Bool = false
+    var round: Int? = nil
     @EnvironmentObject var router: Router
     @ObservedObject private var session = SessionModel.shared
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
     @State private var toRemove: Sentence?
 
-    init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil, browseAll: Bool = false) {
-        self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll
-        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restartAfter: restartAfter, browseAll: browseAll))
+    init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil, browseAll: Bool = false, round: Int? = nil) {
+        self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll; self.round = round
+        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restartAfter: restartAfter, browseAll: browseAll, round: round))
     }
 
     var body: some View {
@@ -289,7 +315,7 @@ struct NotebookView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    NotebookHead(tab: m.browse ? "열람" : (m.passLabel ?? "\(doneCount) / \(total)")) {
+                    NotebookHead(tab: m.browse ? (m.roundShown.map { "\($0)회차 열람" } ?? "열람") : (m.passLabel ?? "\(doneCount) / \(total)")) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(d.title).lineLimit(2)
                             SourceLink(source: d.source ?? "") { await m.setSource($0) }

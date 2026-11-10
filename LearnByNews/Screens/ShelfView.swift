@@ -32,7 +32,7 @@ struct ShelfView: View {
             .background(Theme.desk.ignoresSafeArea())
             .navigationDestination(for: Route.self) { r in
                 switch r {
-                case .notebook(let id, let focus, let restartAfter, let browse): NotebookView(articleId: id, focusId: focus, restartAfter: restartAfter, browseAll: browse)
+                case .notebook(let id, let focus, let restartAfter, let browse, let round): NotebookView(articleId: id, focusId: focus, restartAfter: restartAfter, browseAll: browse, round: round)
                 case .done(let id, let newReview): DoneView(articleId: id, newReview: newReview)
                 }
             }
@@ -95,28 +95,40 @@ struct ShelfView: View {
                 let status: String = prog.map { "\($0.ids.count - $0.remaining.count) / \(a.sentenceCount)" }
                     .map { "\(a.rounds + 1)회차 진행 중 \($0)" }
                     ?? (a.isDone ? (a.rounds >= 2 ? "완료 · \(a.rounds)회차" : "완료") : "\(a.doneCount) / \(a.sentenceCount)")
-                HStack(spacing: 0) {
-                    Button {
-                        router.shelfPath = [(a.isDone && prog == nil) ? .done(id: a.id) : .notebook(id: a.id)]
-                    } label: {
-                        HStack(alignment: .center, spacing: 16) {
-                            Text(a.title).font(Theme.hand(24)).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                            VStack(alignment: .trailing, spacing: 6) {
-                                MutedText(text: status).fixedSize()
-                                // 진행 중이면 이번 회차에 다시 쓴 문장의 등급만, 아니면 문장별 최신 채점
-                                GradeBar(grades: prog != nil ? (roundGrades[a.id] ?? [:]) : a.grades, total: a.sentenceCount)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 0) {
+                        Button {
+                            router.shelfPath = [(a.isDone && prog == nil) ? .done(id: a.id) : .notebook(id: a.id)]
+                        } label: {
+                            HStack(alignment: .center, spacing: 16) {
+                                Text(a.title).font(Theme.hand(24)).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                                VStack(alignment: .trailing, spacing: 6) {
+                                    MutedText(text: status).fixedSize()
+                                    // 진행 중이면 이번 회차에 다시 쓴 문장의 등급만, 아니면 문장별 최신 채점
+                                    GradeBar(grades: prog != nil ? (roundGrades[a.id] ?? [:]) : a.grades, total: a.sentenceCount)
+                                }
                             }
+                            .padding(EdgeInsets(top: 16, leading: 18, bottom: a.rounds > 0 ? 4 : 16, trailing: 18))
+                            .contentShape(Rectangle())
                         }
-                        .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if let s = a.source, let url = URL(string: s), !s.isEmpty {
-                        Link(destination: url) { Text("↗\u{FE0E}").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 10) }
-                    }
-                    Button { toDelete = a } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 14) }
                         .buttonStyle(.plain)
+                        if let s = a.source, let url = URL(string: s), !s.isEmpty {
+                            Link(destination: url) { Text("↗\u{FE0E}").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 10) }
+                        }
+                        Button { toDelete = a } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 14) }
+                            .buttonStyle(.plain)
+                    }
+                    // 회차별 링크: "1회차 2회차 …" + 진행 중이면 "n회차 진행 중"(공책으로). 총평이 없으면 줄 자체를 숨긴다
+                    if a.rounds > 0 {
+                        HStack(spacing: 10) {
+                            ForEach(1...a.rounds, id: \.self) { n in
+                                Tiny(title: "\(n)회차", size: 17) { router.shelfPath = [.notebook(id: a.id, browse: true, round: n)] }
+                            }
+                            if prog != nil { Tiny(title: "\(a.rounds + 1)회차 진행 중", color: Theme.red, size: 17) { router.shelfPath = [.notebook(id: a.id)] } }
+                        }
+                        .padding(EdgeInsets(top: 0, leading: 18, bottom: 10, trailing: 18))
+                    }
                 }
                 .background(Theme.paper)
                 .overlay(alignment: .leading) { Rectangle().fill(Theme.coverColors[i % 4]).frame(width: 14) }
