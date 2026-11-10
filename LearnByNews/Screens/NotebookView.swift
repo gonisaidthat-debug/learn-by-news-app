@@ -11,7 +11,7 @@ struct Inflight: Hashable {
 final class NotebookModel: ObservableObject {
     let id: String
     let focusId: String?
-    let restart: Bool
+    let restartAfter: Int?
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
@@ -34,7 +34,7 @@ final class NotebookModel: ObservableObject {
     private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
     private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
-    init(id: String, focusId: String?, restart: Bool) { self.id = id; self.focusId = focusId; self.restart = restart }
+    init(id: String, focusId: String?, restartAfter: Int?) { self.id = id; self.focusId = focusId; self.restartAfter = restartAfter }
 
     var frontIdx: Int? {
         guard let d = data else { return nil }
@@ -51,11 +51,24 @@ final class NotebookModel: ObservableObject {
         do {
             let d = try await API.shared.article(id)
             if let focusId { data = d; open = focusId; requestScroll(focusId); return }
-            if restart, let first = d.sentences.first {
+            if let n = restartAfter, !d.sentences.isEmpty {
+                // 처음부터(또는 앞 n문장 다음부터) 다시 쓰기 시작. 진행 상태를 저장한다
                 let ids = d.sentences.map(\.id)
-                data = d; pass = ids; redo = first.id; input = ""
-                AppLog.shared.info("notebook", "restart pass", ["article": id, "count": "\(ids.count)"])
-                requestScroll(first.id); focusRequest += 1
+                let prog = RedoProgress(ids: ids, done: Array(ids.prefix(min(n, ids.count - 1))))
+                prog.save(id)
+                AppLog.shared.info("notebook", "restart pass", ["article": id, "count": "\(ids.count)", "after": "\(n)"])
+                data = d; beginPass(prog)
+                return
+            }
+            if let prog = RedoProgress.load(id) {
+                // 저장된 진행 상태가 있으면 그 자리에서 다시 쓰기 모드로
+                let alive = prog.ids.filter { x in d.sentences.contains { $0.id == x } }
+                let p = RedoProgress(ids: alive, done: prog.done.filter(alive.contains))
+                if p.remaining.isEmpty {
+                    RedoProgress.clear(id); data = d; finishingPass = true; passSubmitted = Set(p.done); return
+                }
+                AppLog.shared.info("notebook", "resume pass", ["article": id, "done": "\(p.done.count)", "count": "\(p.ids.count)"])
+                data = d; beginPass(p)
                 return
             }
             if d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(); return }
@@ -129,8 +142,10 @@ final class NotebookModel: ObservableObject {
             let i = pass.firstIndex(of: cur.id) ?? -1
             if i >= 0, i + 1 < pass.count {
                 let next = pass[i + 1]
+                RedoProgress(ids: pass, done: pass.filter(passSubmitted.contains)).save(id)
                 redo = next; requestScroll(next); focusRequest += 1
             } else {
+                RedoProgress.clear(id)
                 self.pass = nil; redo = nil; finishingPass = true
                 requestScroll("bottom")
             }
@@ -141,7 +156,16 @@ final class NotebookModel: ObservableObject {
     }
 
     func startRedo(_ s: Sentence) { redo = s.id; open = nil; input = "" }
-    func cancelRedo() { redo = nil; pass = nil; passSubmitted = []; input = "" }
+    private func beginPass(_ p: RedoProgress) {
+        pass = p.ids; passSubmitted = Set(p.done); redo = p.remaining.first; input = ""; open = nil
+        if let r = redo { requestScroll(r) }
+        focusRequest += 1
+    }
+
+    func cancelRedo() {
+        if pass != nil { RedoProgress.clear(id) }
+        redo = nil; pass = nil; passSubmitted = []; input = ""
+    }
     var passLabel: String? {
         guard let pass, let redo, let i = pass.firstIndex(of: redo) else { return nil }
         return "다시 \(i + 1) / \(pass.count)"
@@ -203,16 +227,16 @@ final class NotebookModel: ObservableObject {
 struct NotebookView: View {
     var articleId: String
     var focusId: String? = nil
-    var restart: Bool = false
+    var restartAfter: Int? = nil
     @EnvironmentObject var router: Router
     @ObservedObject private var session = SessionModel.shared
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
     @State private var toRemove: Sentence?
 
-    init(articleId: String, focusId: String? = nil, restart: Bool = false) {
-        self.articleId = articleId; self.focusId = focusId; self.restart = restart
-        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restart: restart))
+    init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil) {
+        self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter
+        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restartAfter: restartAfter))
     }
 
     var body: some View {

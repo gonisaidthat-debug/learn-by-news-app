@@ -12,6 +12,8 @@ final class DoneModel: ObservableObject {
     @Published var reviewing = false
     @Published var reviewErr: String?
     @Published var showOld = false
+    @Published var progress: RedoProgress?     // 저장된 다시 쓰기 진행 상태
+    @Published var estimated: Int?             // 저장이 없을 때 추정한 "오늘 다시 쓴 앞쪽 문장 수"
     private var autoTried = false
 
     init(id: String, newReview: Bool) { self.id = id; self.newReview = newReview }
@@ -19,6 +21,10 @@ final class DoneModel: ObservableObject {
     func load() async {
         do {
             let d = try await API.shared.article(id); data = d
+            progress = RedoProgress.load(id)
+            estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil
+            // 다시 쓰기가 진행 중이면 총평을 자동 요청하지 않는다
+            if progress != nil { return }
             if newReview, !autoTried { autoTried = true; await requestReview(); return }
             // 다 끝났는데 총평이 없으면 한 번 자동으로 받는다
             if !autoTried, d.reviews.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }), d.sentences.contains(where: { $0.attempt != nil && $0.attempt!.grade != .skip }) {
@@ -139,7 +145,14 @@ struct DoneView: View {
                                 Tiny(title: "총평 다시 받기 ↻\u{FE0E}") { Task { await m.requestReview() } }
                             }
                             if remaining == 0, !m.reviewing {
-                                Tiny(title: "처음부터 다시 쓰기 ↻\u{FE0E}") { router.shelfPath = [.notebook(id: d.id, restart: true)] }
+                                if let p = m.progress {
+                                    Tiny(title: "처음부터 다시 쓰기 이어서 (\(p.done.count) / \(p.ids.count)) →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: d.id)] }
+                                } else {
+                                    Tiny(title: "처음부터 다시 쓰기 ↻\u{FE0E}") { router.shelfPath = [.notebook(id: d.id, restartAfter: 0)] }
+                                    if let n = m.estimated {
+                                        Tiny(title: "오늘 다시 쓴 \(n)문장 다음부터 이어서 →\u{FE0E}") { router.shelfPath = [.notebook(id: d.id, restartAfter: n)] }
+                                    }
+                                }
                             }
                             if m.reviewing, latest != nil { Text("다시 쓰는 중… ✎\u{FE0E}").font(Theme.hand(22)).foregroundStyle(Theme.pencil) }
                             if !older.isEmpty {

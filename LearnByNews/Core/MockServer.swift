@@ -84,7 +84,8 @@ struct MockState {
             ["id": "s5", "article_id": "a1", "idx": 4, "paragraph": 1, "text": "Analysts expect a cut by Dec. 15 if the labor market softens further.", "attempt": NSNull(), "history": []],
             ["id": "s6", "article_id": "a1", "idx": 5, "paragraph": 2, "text": "Markets rose modestly after the announcement.", "attempt": NSNull(), "history": []],
             ["id": "s7", "article_id": "a2", "idx": 0, "paragraph": 0, "text": "Seoul will add 40 km of bike lanes along the Han River by 2027.",
-             "attempt": attempt("서울시는 2027년까지 한강을 따라 자전거 도로 40km를 추가한다.", fb("A", ref: "서울시는 2027년까지 한강변 자전거도로 40km를 늘린다.", expr: [["phrase": "add ~ km of", "meaning": "~km를 늘리다"]]), at: now - 2 * 86_400_000), "history": []],
+             "attempt": attempt("서울시는 2027년까지 한강을 따라 자전거 도로 40km를 추가한다.", fb("A", ref: "서울시는 2027년까지 한강변 자전거도로 40km를 늘린다.", expr: [["phrase": "add ~ km of", "meaning": "~km를 늘리다"]]), at: now - 600_000),
+             "history": [attempt("서울은 2027년까지 한강 자전거길 40km를 더한다.", fb("B", ref: "서울시는 2027년까지 한강변 자전거도로 40km를 늘린다."), at: now - 2 * 86_400_000)]],
             ["id": "s8", "article_id": "a2", "idx": 1, "paragraph": 0, "text": "The city said the plan would ease congestion on weekends.",
              "attempt": attempt("시는 이 계획이 주말 혼잡을 완화할 것이라고 말했다.", fb("B", issues: [["source": "ease congestion", "mine": "혼잡을 완화할", "meaning": "혼잡을 덜어 줄", "why": "자연스러운 어감"]], ref: "시는 이 계획이 주말 혼잡을 덜어 줄 것이라고 밝혔다."), at: now - 2 * 86_400_000 + 90_000), "history": []],
         ]
