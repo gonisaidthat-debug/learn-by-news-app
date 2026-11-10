@@ -40,6 +40,7 @@ Phrase     { id, phrase, meaning, sentence_id, article_id, created_at, sentence_
 Review     { id, score: int|null, created_at, summary, patterns: [{title, detail}], praise }
 Session    { id, started_at, ended_at, attempts, score: int|null, articles: string[], created_at }
 Highlight  { id, sentence_id, article_id, start_word, end_word, span, answer: {meaning, why, similar}, created_at }
+Drill      { id, phrase_id, phrase, meaning, korean, created_at, answer, grade, feedback: {grade, used_expression, issues[{mine, better, why}], reference, note}|null, answered_at, reference? }
 QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, article_title, sentence_idx, sentence_text,
              source, mine, meaning, why, issued_at, last_correct: bool|null, last_at, tries, wrong }
 ```
@@ -71,6 +72,10 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다 |
 | POST `/api/sentences/:id/ask` | `{start_word, end_word, span}` (단어 인덱스는 공백 분리 기준 0부터) | `Highlight & {phrase: Phrase|null}` — Claude가 구절을 `{meaning, why, similar}`로 설명(하루 상한 포함). 구절은 표현장에도 기본으로 붙는다 |
 | DELETE `/api/highlights/:id` | — | `{ok}` |
+| POST `/api/drills/next` | `{phrase_id?}` | `Drill`(reference 없음). 안 푼 최근 문제가 있으면 그걸 다시 준다. 없으면 표현장에서 골라 Claude가 한국어 문장을 만든다(호출 1) |
+| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}` |
+| DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
+| GET `/api/drills?days=30` | — | 푼 문제 목록 최신순 |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
@@ -120,3 +125,8 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - **동기화**: 설정에 "오프라인용 내려받기"(전체 `GET /api/export` → SwiftData에 교체 저장, exported_at 기억)와 마지막 동기화 시각 표시. 앱 시작·포그라운드 복귀 시 온라인이면 `?since=<exported_at>` 증분. 하루 한 번 또는 공책 삭제·문장 합치기 뒤에는 전체 다시 받기(삭제 반영). 서버가 진실, 로컬은 캐시, 충돌은 서버 우선. 화면은 캐시를 먼저 그리고 온라인이면 갱신.
 - 오프라인에서 채점이 필요한 동작을 누르면 "온라인에서만 된다"를 그 자리에 보여준다(폴백 없음).
 - **구현(2026-11-10)**: `Core/Cache.swift`(SwiftData 모델 Cached*, `Cache.shared` — export 적용(full 교체/증분 upsert)과 화면용 질의: 서버 핸들러와 같은 계산으로 목록·상세·표현장·시험지·세션·기록을 만든다), `Core/Sync.swift`(`Connectivity` NWPathMonitor, `SyncManager` autoSync/sync/flushQueue, 오프라인 겸용 answerQuiz·savePhrase(임시 id `local-…`)·deletePhrase). 동기화 시각은 UserDefaults(`lbn_cache_exported_at`, `lbn_cache_last_full`, 삭제 뒤 `lbn_cache_needs_full`). 화면은 캐시를 먼저 그리고 `APIError.isNetwork`면 캐시를 유지한다. DEBUG: `SIMCTL_CHILD_LBN_OFFLINE=1`이면 모든 요청이 네트워크 오류, 연결 상태도 오프라인.
+
+## 4. 응용 탭 (2026-11-10 goni 요청)
+- 탭 "응용": 표현장의 표현을 거꾸로 쓰는 한→영 연습. 카드: 써야 할 표현 포스트잇(표현 · 뜻) + 서버가 낸 한국어 문장(손글씨). 영어 입력 후 제출.
+- 결과: 등급 도장, "✓ 표현 사용 / ✗ 쓰지 않았다", 고칠 곳(빨간 펜), 참고 영문(연필), 한 줄 코멘트. 버튼: 다음 문장, 같은 표현 한 번 더(`{phrase_id}`로 next), 건너뛰기(DELETE). 아래 최근 응용 목록(GET).
+- 온라인 전용(출제·채점 모두 Claude). 오프라인이면 "온라인에서만 된다". 푼 기록은 export에 아직 없음(필요하면 서버에 요청).
