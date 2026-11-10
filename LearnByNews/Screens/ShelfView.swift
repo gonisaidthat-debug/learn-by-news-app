@@ -13,6 +13,7 @@ struct ShelfView: View {
     @State private var roundGrades: [String: [String: Int]] = [:]
     @State private var loaded = false
     @State private var offline = false     // 서버에 못 닿아 캐시를 보여주는 중
+    @State private var bookmark: Bookmark?
     @State private var toDelete: ArticleSummary?
     @State private var sessionToDelete: StudySession?
     @FocusState private var pasteFocused: Bool
@@ -23,6 +24,7 @@ struct ShelfView: View {
         NavigationStack(path: $router.shelfPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    if let b = bookmark { bookmarkBar(b).padding(.bottom, 12) }
                     sheet
                     SessionBar(model: session).padding(.horizontal, 4).padding(.top, 14)
                     if !list.isEmpty { notebooks.padding(.top, 36) }
@@ -45,6 +47,34 @@ struct ShelfView: View {
             .onChange(of: router.shelfPath) { _, p in if p.isEmpty { Task { await load() } } }
             .onChange(of: router.newNotebookRequest) { _, _ in pasteFocused = true }
         }
+    }
+
+    // MARK: 책갈피 띠 — 누르면 그 문장이 펼쳐진 열람 화면(회차 있으면 그 회차)
+    private func bookmarkBar(_ b: Bookmark) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                router.shelfPath = [.notebook(id: b.articleId, focus: b.sentenceId, browse: true, round: b.round)]
+            } label: {
+                Text(b.line + " →\u{FE0E}").font(Theme.hand(21)).foregroundStyle(Theme.ink).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button { Task { await clearBookmark() } } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 6) }
+                .buttonStyle(.plain)
+        }
+        .padding(EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 8))
+        .background(Theme.tab.opacity(0.55))
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.red).frame(width: 4) }
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func loadBookmark() async {
+        if bookmark == nil { bookmark = Cache.shared.bookmark() }
+        do { bookmark = try await API.shared.bookmark(); Cache.shared.setBookmark(bookmark) } catch { /* 오프라인: 캐시 */ }
+    }
+    private func clearBookmark() async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
+        do { try await API.shared.clearBookmark(); bookmark = nil; Cache.shared.setBookmark(nil) } catch { err = error.localizedDescription }
     }
 
     // MARK: 붙여넣기 종이
@@ -184,7 +214,8 @@ struct ShelfView: View {
     private func load() async {
         async let a: Void = loadList()
         async let b: Void = session.load()
-        _ = await (a, b)
+        async let c: Void = loadBookmark()
+        _ = await (a, b, c)
         session.start = SessionStore.start
     }
     private func loadList() async {

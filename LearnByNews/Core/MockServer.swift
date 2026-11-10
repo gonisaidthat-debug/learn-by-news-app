@@ -61,6 +61,8 @@ struct MockState {
     var sessions: [[String: Any]] = []
     var quizResults: [[String: Any]] = []
     var logs: [[String: Any]] = []
+    var bookmark: [String: Any]? = nil
+    var highlights: [[String: Any]] = []
     var seq = 100
 
     init() {
@@ -100,6 +102,7 @@ struct MockState {
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
         sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
+        bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
     }
 
@@ -255,6 +258,16 @@ struct MockState {
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
             }
             return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults])
+        case "GET /api/bookmark":
+            guard let b = bookmark, let s = sentences.first(where: { $0["id"] as? String == b["sentence_id"] as? String }) else { return (200, NSNull()) }
+            let a = articles.first { $0["id"] as? String == b["article_id"] as? String }
+            var o = b; o["article_title"] = a?["title"] ?? ""; o["sentence_idx"] = s["idx"]!; o["sentence_text"] = s["text"]!
+            return (200, o)
+        case "PUT /api/bookmark":
+            bookmark = ["article_id": body["article_id"] ?? "", "sentence_id": body["sentence_id"] ?? "", "round": body["round"] ?? NSNull(), "created_at": Date().ms]
+            return (200, ["ok": true])
+        case "DELETE /api/bookmark":
+            bookmark = nil; return (200, ["ok": true])
         case "GET /api/export":
             let since = Int64(query.split(separator: "=").dropFirst().joined()) ?? 0
             var attempts: [[String: Any]] = []
@@ -274,7 +287,9 @@ struct MockState {
                           "phrases": phrases.filter { ($0["created_at"] as! Int64) > since },
                           "reviews": revs,
                           "quiz_results": quizResults.filter { ($0["created_at"] as! Int64) > since }.map { ["id": $0["id"]!, "key": $0["key"]!, "sentence_id": "", "source": $0["source"]!, "correct": ($0["correct"] as! Bool) ? 1 : 0, "created_at": $0["created_at"]!] },
-                          "sessions": sessions.filter { ($0["created_at"] as! Int64) > since }])
+                          "sessions": sessions.filter { ($0["created_at"] as! Int64) > since },
+                          "highlights": highlights.filter { ($0["created_at"] as! Int64) > since },
+                          "bookmark": bookmark ?? NSNull()])
         case "POST /api/logs":
             let n = (body["entries"] as? [Any])?.count ?? 0
             return (200, ["ok": true, "saved": n])

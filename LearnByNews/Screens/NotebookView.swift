@@ -16,6 +16,7 @@ final class NotebookModel: ObservableObject {
     let round: Int?           // 회차 열람: n번째 총평 시각까지의 마지막 시도로 보여준다
     @Published var roundShown: Int?
     @Published var offline = false        // 서버에 못 닿아 캐시를 보여주는 중 (입력 불가)
+    @Published var bookmark: Bookmark?
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
@@ -117,6 +118,28 @@ final class NotebookModel: ObservableObject {
     /// 레이아웃이 끝난 뒤 스크롤하도록 한 박자 늦게 목표를 올린다
     func requestScroll(_ target: String) {
         Task { try? await Task.sleep(for: .milliseconds(250)); scrollTo = target }
+    }
+
+    func loadBookmark() async {
+        bookmark = Cache.shared.bookmark()
+        do { bookmark = try await API.shared.bookmark(); Cache.shared.setBookmark(bookmark) } catch { /* 오프라인: 캐시 */ }
+    }
+
+    /// 책갈피 꽂기/빼기 (서버에 하나). 회차 열람 중이면 round도
+    func toggleBookmark(_ sid: String) async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
+        do {
+            if bookmark?.sentenceId == sid {
+                try await API.shared.clearBookmark(); bookmark = nil; Cache.shared.setBookmark(nil)
+                AppLog.shared.info("bookmark", "cleared")
+            } else {
+                try await API.shared.setBookmark(articleId: id, sentenceId: sid, round: roundShown)
+                let s = data?.sentences.first { $0.id == sid }
+                bookmark = Bookmark(articleId: id, sentenceId: sid, round: roundShown, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+                Cache.shared.setBookmark(bookmark)
+                AppLog.shared.info("bookmark", "set", ["sentence": sid, "round": "\(roundShown ?? 0)"])
+            }
+        } catch { err = error.localizedDescription }
     }
 
     func reload() async {
@@ -313,6 +336,7 @@ struct NotebookView: View {
         }
         .task {
             await m.load { router.shelfPath = [.done(id: articleId)] }
+            await m.loadBookmark()
             await session.load()
             if !m.browse { focused = true }
             #if DEBUG
@@ -413,7 +437,9 @@ struct NotebookView: View {
                 onTogglePhrase: { e in Task { await m.togglePhrase(x.id, e) } },
                 onRemove: m.browse ? nil : { toRemove = x },
                 onRedo: m.browse ? nil : { m.startRedo(x); focused = true },
-                highlight: focusId == x.id
+                highlight: focusId == x.id,
+                bookmarked: m.bookmark?.sentenceId == x.id,
+                onBookmark: { Task { await m.toggleBookmark(x.id) } }
             )
             .id(x.id)
         } else {

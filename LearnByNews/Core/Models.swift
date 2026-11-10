@@ -136,9 +136,10 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
     var sentences: [Sentence]
     var phrases: [Phrase]
     var reviews: [Review]
+    var highlights: [Highlight]
 
-    init(id: String, title: String, source: String?, createdAt: Int64, sentences: [Sentence], phrases: [Phrase], reviews: [Review]) {
-        self.id = id; self.title = title; self.source = source; self.createdAt = createdAt; self.sentences = sentences; self.phrases = phrases; self.reviews = reviews
+    init(id: String, title: String, source: String?, createdAt: Int64, sentences: [Sentence], phrases: [Phrase], reviews: [Review], highlights: [Highlight] = []) {
+        self.id = id; self.title = title; self.source = source; self.createdAt = createdAt; self.sentences = sentences; self.phrases = phrases; self.reviews = reviews; self.highlights = highlights
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +151,7 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
         sentences = try c.decodeIfPresent([Sentence].self, forKey: .sentences) ?? []
         phrases = try c.decodeIfPresent([Phrase].self, forKey: .phrases) ?? []
         reviews = try c.decodeIfPresent([Review].self, forKey: .reviews) ?? []
+        highlights = try c.decodeIfPresent([Highlight].self, forKey: .highlights) ?? []
     }
 
     /// 등급 평균. 건너뜀 제외. 채점된 문장이 없으면 nil (웹 scoreOf와 동일)
@@ -195,7 +197,7 @@ struct FeedbackBody: Encodable {
 }
 
 struct QuizItem: Codable, Identifiable, Hashable {
-    enum Kind: String, Codable { case issue, phrase }
+    enum Kind: String, Codable { case issue, phrase, highlight }
     var key: String
     var kind: Kind
     var sentenceId: String
@@ -311,6 +313,51 @@ extension JSONEncoder {
 }
 
 
+// MARK: - 책갈피 (서버에 하나)
+
+struct Bookmark: Codable, Hashable {
+    var articleId: String
+    var sentenceId: String
+    var round: Int?
+    var createdAt: Int64?
+    var articleTitle: String?
+    var sentenceIdx: Int?
+    var sentenceText: String?
+
+    /// "🔖 책갈피 · 기사 · n번째 문장 · (회차)"
+    var line: String {
+        var s = "🔖 책갈피 · \(articleTitle ?? "") · \((sentenceIdx ?? 0) + 1)번째 문장"
+        if let r = round { s += " · \(r)회차" }
+        return s
+    }
+}
+
+// MARK: - 형광펜
+
+struct HighlightAnswer: Codable, Hashable {
+    var meaning: String
+    var why: String
+    var similar: String
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        meaning = try c.decodeIfPresent(String.self, forKey: .meaning) ?? ""
+        why = try c.decodeIfPresent(String.self, forKey: .why) ?? ""
+        similar = try c.decodeIfPresent(String.self, forKey: .similar) ?? ""
+    }
+    init(meaning: String, why: String, similar: String) { self.meaning = meaning; self.why = why; self.similar = similar }
+}
+
+struct Highlight: Codable, Identifiable, Hashable {
+    var id: String
+    var sentenceId: String
+    var articleId: String
+    var startWord: Int
+    var endWord: Int
+    var span: String
+    var answer: HighlightAnswer
+    var createdAt: Int64
+}
+
 // MARK: - 오프라인 내보내기 (GET /api/export)
 
 struct ExportPayload: Decodable {
@@ -341,4 +388,7 @@ struct ExportPayload: Decodable {
     var reviews: [Review]
     var quizResults: [QuizResult]
     var sessions: [StudySession]
+    var highlights: [Highlight]?
+    var bookmark: BookmarkRow?
+    struct BookmarkRow: Decodable { var articleId: String; var sentenceId: String; var round: Int?; var createdAt: Int64? }
 }

@@ -83,6 +83,34 @@ import SwiftData
     }
 }
 
+@Model final class CachedHighlight {
+    @Attribute(.unique) var id: String
+    var sentenceId: String
+    var articleId: String
+    var startWord: Int
+    var endWord: Int
+    var span: String
+    var meaning: String
+    var why: String
+    var similar: String
+    var createdAt: Int64
+    init(_ h: Highlight) {
+        id = h.id; sentenceId = h.sentenceId; articleId = h.articleId; startWord = h.startWord; endWord = h.endWord; span = h.span
+        meaning = h.answer.meaning; why = h.answer.why; similar = h.answer.similar; createdAt = h.createdAt
+    }
+    var value: Highlight { Highlight(id: id, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, answer: HighlightAnswer(meaning: meaning, why: why, similar: similar), createdAt: createdAt) }
+}
+
+/// 책갈피 사본 (하나, id "main")
+@Model final class CachedBookmark {
+    @Attribute(.unique) var id: String
+    var articleId: String
+    var sentenceId: String
+    var round: Int?
+    var createdAt: Int64
+    init(articleId: String, sentenceId: String, round: Int?, createdAt: Int64) { id = "main"; self.articleId = articleId; self.sentenceId = sentenceId; self.round = round; self.createdAt = createdAt }
+}
+
 /// 오프라인 큐. 연결되면 순서대로 보낸다
 @Model final class PendingOp {
     @Attribute(.unique) var id: String
@@ -105,7 +133,7 @@ final class Cache {
     private static let needsFullKey = "lbn_cache_needs_full"
 
     private init() {
-        let schema = Schema([CachedArticle.self, CachedSentence.self, CachedAttempt.self, CachedPhrase.self, CachedReview.self, CachedQuizResult.self, CachedSession.self, PendingOp.self])
+        let schema = Schema([CachedArticle.self, CachedSentence.self, CachedAttempt.self, CachedPhrase.self, CachedReview.self, CachedQuizResult.self, CachedSession.self, CachedHighlight.self, CachedBookmark.self, PendingOp.self])
         let url = URL.applicationSupportDirectory.appendingPathComponent("cache.store")
         do {
             container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: url)])
@@ -145,6 +173,7 @@ final class Cache {
         if full {
             deleteAll(CachedArticle.self); deleteAll(CachedSentence.self); deleteAll(CachedAttempt.self)
             deleteAll(CachedPhrase.self); deleteAll(CachedReview.self); deleteAll(CachedQuizResult.self); deleteAll(CachedSession.self)
+            deleteAll(CachedHighlight.self)
         } else {
             deleteAll(CachedArticle.self); deleteAll(CachedSentence.self)
             let aIds = Set(x.attempts.map(\.id)), pIds = Set(x.phrases.map(\.id)), rIds = Set(x.reviews.map(\.id)), qIds = Set(x.quizResults.map(\.id)), sIds = Set(x.sessions.map(\.id))
@@ -153,7 +182,13 @@ final class Cache {
             if !rIds.isEmpty { try ctx.delete(model: CachedReview.self, where: #Predicate { rIds.contains($0.id) }) }
             if !qIds.isEmpty { try ctx.delete(model: CachedQuizResult.self, where: #Predicate { qIds.contains($0.id) }) }
             if !sIds.isEmpty { try ctx.delete(model: CachedSession.self, where: #Predicate { sIds.contains($0.id) }) }
+            let hIds = Set((x.highlights ?? []).map(\.id))
+            if !hIds.isEmpty { try ctx.delete(model: CachedHighlight.self, where: #Predicate { hIds.contains($0.id) }) }
         }
+        for h in x.highlights ?? [] { ctx.insert(CachedHighlight(h)) }
+        // 책갈피는 항상 전체(하나)
+        deleteAll(CachedBookmark.self)
+        if let b = x.bookmark { ctx.insert(CachedBookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, createdAt: b.createdAt ?? 0)) }
         for a in x.articles { ctx.insert(CachedArticle(id: a.id, title: a.title, source: a.source ?? "", createdAt: a.createdAt)) }
         for s in x.sentences { ctx.insert(CachedSentence(id: s.id, articleId: s.articleId, idx: s.idx, paragraph: s.paragraph ?? 0, text: s.text)) }
         for a in x.attempts {
@@ -212,7 +247,21 @@ final class Cache {
             Phrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, sentenceText: sentences.first { $0.id == p.sentenceId }?.text, articleTitle: a.title)
         }
         let reviews = all(CachedReview.self).filter { $0.articleId == id }.sorted { $0.createdAt > $1.createdAt }.map(toReview)
-        return ArticleDetail(id: a.id, title: a.title, source: a.source, createdAt: a.createdAt, sentences: sentences, phrases: phrases, reviews: reviews)
+        let highlights = all(CachedHighlight.self).filter { $0.articleId == id }.sorted { $0.createdAt < $1.createdAt }.map(\.value)
+        return ArticleDetail(id: a.id, title: a.title, source: a.source, createdAt: a.createdAt, sentences: sentences, phrases: phrases, reviews: reviews, highlights: highlights)
+    }
+
+    /// 캐시된 책갈피 (제목·문장 번호·본문은 캐시 표에서 채운다)
+    func bookmark() -> Bookmark? {
+        guard let b = all(CachedBookmark.self).first else { return nil }
+        let s = all(CachedSentence.self).first { $0.id == b.sentenceId }
+        let a = all(CachedArticle.self).first { $0.id == b.articleId }
+        return Bookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, createdAt: b.createdAt, articleTitle: a?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+    }
+    func setBookmark(_ b: Bookmark?) {
+        deleteAll(CachedBookmark.self)
+        if let b { ctx.insert(CachedBookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, createdAt: b.createdAt ?? Date().ms)) }
+        try? ctx.save()
     }
 
     func phrases(q: String) -> [Phrase]? {
@@ -253,6 +302,12 @@ final class Cache {
                          source: p.phrase, mine: "", meaning: p.meaning, why: "", issuedAt: p.createdAt,
                          lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0))
         }
+        for h in all(CachedHighlight.self).sorted(by: { $0.createdAt < $1.createdAt }) {
+            let key = "h|\(h.id)"; let l = last[key]; let s = sents[h.sentenceId]
+            put(QuizItem(key: key, kind: .highlight, sentenceId: h.sentenceId, articleId: h.articleId, articleTitle: arts[h.articleId]?.title ?? "", sentenceIdx: s?.idx ?? 0, sentenceText: s?.text ?? "",
+                         source: h.span, mine: "", meaning: h.meaning, why: h.why, issuedAt: h.createdAt,
+                         lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0))
+        }
         return order.compactMap { items[$0] }
     }
 
@@ -276,7 +331,7 @@ final class Cache {
             return LogReview(id: r.id, articleId: r.articleId, title: ar.title, score: r.score, createdAt: r.createdAt, summary: r.summary)
         }
         let quiz = all(CachedQuizResult.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.map {
-            LogQuiz(id: $0.id, key: $0.key, source: $0.source, correct: $0.correct, createdAt: $0.createdAt, kind: $0.key.hasPrefix("p|") ? .phrase : .issue)
+            LogQuiz(id: $0.id, key: $0.key, source: $0.source, correct: $0.correct, createdAt: $0.createdAt, kind: $0.key.hasPrefix("p|") ? .phrase : $0.key.hasPrefix("h|") ? .highlight : .issue)
         }
         return ActivityLog(since: since, attempts: attempts, sessions: sessions, reviews: reviews, quiz: quiz)
     }

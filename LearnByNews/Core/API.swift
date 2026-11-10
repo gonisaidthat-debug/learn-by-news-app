@@ -142,6 +142,18 @@ final class API {
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }
 
+    // MARK: bookmark (서버에 하나)
+    func bookmark() async throws -> Bookmark? {
+        // 없으면 본문이 "null" → Optional로 해석
+        let r: Bookmark? = try await send("GET", "/api/bookmark")
+        return r
+    }
+    struct BookmarkBody: Encodable { var articleId: String; var sentenceId: String; var round: Int? }
+    func setBookmark(articleId: String, sentenceId: String, round: Int?) async throws {
+        let _: OK = try await send("PUT", "/api/bookmark", body: BookmarkBody(articleId: articleId, sentenceId: sentenceId, round: round))
+    }
+    func clearBookmark() async throws { let _: OK = try await send("DELETE", "/api/bookmark") }
+
     // MARK: export (오프라인 캐시)
     func export(since: Int64?) async throws -> ExportPayload {
         try await send("GET", since.map { "/api/export?since=\($0)" } ?? "/api/export")

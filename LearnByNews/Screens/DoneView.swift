@@ -12,6 +12,7 @@ final class DoneModel: ObservableObject {
     @Published var reviewing = false
     @Published var reviewErr: String?
     @Published var showOld = false
+    @Published var bookmark: Bookmark?
     @Published var progress: RedoProgress?     // 저장된 다시 쓰기 진행 상태
     @Published var estimated: Int?             // 저장이 없을 때 추정한 "오늘 다시 쓴 앞쪽 문장 수"
     private var autoTried = false
@@ -26,6 +27,8 @@ final class DoneModel: ObservableObject {
             catch let e as APIError where e.isNetwork { if let c = Cache.shared.article(id) { d = c } else { throw e } }
             data = d
             progress = RedoProgress.load(id)
+            bookmark = Cache.shared.bookmark()
+            if let b = try? await API.shared.bookmark() { bookmark = b; Cache.shared.setBookmark(b) }
             estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil
             // 다시 쓰기가 진행 중이면 총평을 자동 요청하지 않는다
             if progress != nil { return }
@@ -66,6 +69,19 @@ final class DoneModel: ObservableObject {
     func setSource(_ url: String) async {
         guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
+    }
+
+    func toggleBookmark(_ sid: String) async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
+        do {
+            if bookmark?.sentenceId == sid { try await API.shared.clearBookmark(); bookmark = nil; Cache.shared.setBookmark(nil) }
+            else {
+                try await API.shared.setBookmark(articleId: id, sentenceId: sid, round: nil)
+                let s = data?.sentences.first { $0.id == sid }
+                bookmark = Bookmark(articleId: id, sentenceId: sid, round: nil, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+                Cache.shared.setBookmark(bookmark)
+            }
+        } catch { err = error.localizedDescription }
     }
 }
 
@@ -194,7 +210,9 @@ struct DoneView: View {
                                 showRef: m.refOpen[s.id] ?? true,
                                 onToggleRef: { m.refOpen[s.id] = !(m.refOpen[s.id] ?? true) },
                                 savedPhrases: d.phrases.filter { $0.sentenceId == s.id },
-                                onTogglePhrase: { e in Task { await m.togglePhrase(s.id, e) } }
+                                onTogglePhrase: { e in Task { await m.togglePhrase(s.id, e) } },
+                                bookmarked: m.bookmark?.sentenceId == s.id,
+                                onBookmark: { Task { await m.toggleBookmark(s.id) } }
                             )
                         }
                     }

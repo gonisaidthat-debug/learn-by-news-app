@@ -86,6 +86,8 @@ struct EntryView: View {
     var onRemove: (() -> Void)?
     var onRedo: (() -> Void)?
     var highlight = false
+    var bookmarked = false
+    var onBookmark: (() -> Void)?
 
     var body: some View {
         let a = s.attempt!
@@ -105,7 +107,8 @@ struct EntryView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if let onRemove, fb.grade == .skip {
+            if bookmarked { Ribbon().padding(.trailing, 10) }
+            else if let onRemove, fb.grade == .skip {
                 Button(action: onRemove) { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 8).frame(height: Theme.lh) }
                     .buttonStyle(.plain).opacity(0.5)
             }
@@ -113,6 +116,7 @@ struct EntryView: View {
         .contentShape(Rectangle())
         .onTapGesture { onToggle?() }
         .contextMenu {
+            if let onBookmark { Button(bookmarked ? "책갈피 빼기" : "책갈피 꽂기", systemImage: "bookmark", action: onBookmark) }
             if let onRedo { Button("다시 쓰기 ↻\u{FE0E}", action: onRedo) }
             if let onRemove { Button("공책에서 빼기", role: .destructive, action: onRemove) }
         }
@@ -207,5 +211,20 @@ struct SourceLink: View {
             Button("취소", role: .cancel) {}
         }
         .alert("http(s)://로 시작하는 주소여야 한다", isPresented: $bad) { Button("확인") {} }
+    }
+}
+
+
+/// 책갈피 리본: 오른쪽 위에 걸린 빨간 띠
+struct Ribbon: View {
+    var body: some View {
+        Path { p in
+            p.move(to: .zero); p.addLine(to: CGPoint(x: 14, y: 0)); p.addLine(to: CGPoint(x: 14, y: 24))
+            p.addLine(to: CGPoint(x: 7, y: 18)); p.addLine(to: CGPoint(x: 0, y: 24)); p.closeSubpath()
+        }
+        .fill(Theme.red)
+        .frame(width: 14, height: 24)
+        .shadow(color: .black.opacity(0.2), radius: 1, y: 1)
+        .accessibilityLabel("책갈피")
     }
 }
