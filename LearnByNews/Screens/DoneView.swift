@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class DoneModel: ObservableObject {
     let id: String
+    let newReview: Bool   // 처음부터 다시 쓰기가 끝나면 기존 총평이 있어도 새로 받는다
     @Published var data: ArticleDetail?
     @Published var err: String?
     @Published var open: String?
@@ -13,11 +14,12 @@ final class DoneModel: ObservableObject {
     @Published var showOld = false
     private var autoTried = false
 
-    init(id: String) { self.id = id }
+    init(id: String, newReview: Bool) { self.id = id; self.newReview = newReview }
 
     func load() async {
         do {
             let d = try await API.shared.article(id); data = d
+            if newReview, !autoTried { autoTried = true; await requestReview(); return }
             // 다 끝났는데 총평이 없으면 한 번 자동으로 받는다
             if !autoTried, d.reviews.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }), d.sentences.contains(where: { $0.attempt != nil && $0.attempt!.grade != .skip }) {
                 autoTried = true
@@ -56,12 +58,13 @@ final class DoneModel: ObservableObject {
 
 struct DoneView: View {
     var articleId: String
+    var newReview: Bool = false
     @EnvironmentObject var router: Router
     @StateObject private var m: DoneModel
 
-    init(articleId: String) {
-        self.articleId = articleId
-        _m = StateObject(wrappedValue: DoneModel(id: articleId))
+    init(articleId: String, newReview: Bool = false) {
+        self.articleId = articleId; self.newReview = newReview
+        _m = StateObject(wrappedValue: DoneModel(id: articleId, newReview: newReview))
     }
 
     var body: some View {
@@ -134,6 +137,9 @@ struct DoneView: View {
                         FlowLayout(spacing: 14) {
                             if latest != nil, !m.reviewing, remaining == 0 {
                                 Tiny(title: "총평 다시 받기 ↻\u{FE0E}") { Task { await m.requestReview() } }
+                            }
+                            if remaining == 0, !m.reviewing {
+                                Tiny(title: "처음부터 다시 쓰기 ↻\u{FE0E}") { router.shelfPath = [.notebook(id: d.id, restart: true)] }
                             }
                             if m.reviewing, latest != nil { Text("다시 쓰는 중… ✎\u{FE0E}").font(Theme.hand(22)).foregroundStyle(Theme.pencil) }
                             if !older.isEmpty {

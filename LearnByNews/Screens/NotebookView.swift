@@ -11,7 +11,11 @@ struct Inflight: Hashable {
 final class NotebookModel: ObservableObject {
     let id: String
     let focusId: String?
+    let restart: Bool
     @Published var data: ArticleDetail?
+    /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
+    @Published var pass: [String]?
+    @Published var finishedPass = false   // 마지막 문장을 제출했다 → 마지막 장으로 (새 총평)
     @Published var input = ""
     @Published var inflight: [String: Inflight] = [:]
     @Published var redo: String?         // 다시 쓰는 중인 문장 id
@@ -25,7 +29,7 @@ final class NotebookModel: ObservableObject {
     private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
     private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
-    init(id: String, focusId: String?) { self.id = id; self.focusId = focusId }
+    init(id: String, focusId: String?, restart: Bool) { self.id = id; self.focusId = focusId; self.restart = restart }
 
     var frontIdx: Int? {
         guard let d = data else { return nil }
@@ -42,6 +46,13 @@ final class NotebookModel: ObservableObject {
         do {
             let d = try await API.shared.article(id)
             if let focusId { data = d; open = focusId; requestScroll(focusId); return }
+            if restart, let first = d.sentences.first {
+                let ids = d.sentences.map(\.id)
+                data = d; pass = ids; redo = first.id; input = ""
+                AppLog.shared.info("notebook", "restart pass", ["article": id, "count": "\(ids.count)"])
+                requestScroll(first.id); focusRequest += 1
+                return
+            }
             if d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(); return }
             data = d; requestScroll("bottom")
         } catch { err = error.localizedDescription }
@@ -105,13 +116,29 @@ final class NotebookModel: ObservableObject {
         let t = skip ? "" : input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !skip && t.isEmpty { return }
         let wasRedo = redo != nil
-        input = ""; redo = nil
+        input = ""
         send(cur.id, t, wasRedo: wasRedo)
+        if let pass {
+            // 처음부터 다시: 다음 문장으로 이어서, 끝나면 새 총평을 받으러 마지막 장으로
+            let i = pass.firstIndex(of: cur.id) ?? -1
+            if i >= 0, i + 1 < pass.count {
+                let next = pass[i + 1]
+                redo = next; requestScroll(next); focusRequest += 1
+            } else {
+                self.pass = nil; redo = nil; finishedPass = true
+            }
+            return
+        }
+        redo = nil
         requestScroll("bottom")
     }
 
     func startRedo(_ s: Sentence) { redo = s.id; open = nil; input = "" }
-    func cancelRedo() { redo = nil; input = "" }
+    func cancelRedo() { redo = nil; pass = nil; input = "" }
+    var passLabel: String? {
+        guard let pass, let redo, let i = pass.firstIndex(of: redo) else { return nil }
+        return "다시 \(i + 1) / \(pass.count)"
+    }
 
     func merge(_ sid: String, dir: String) async {
         do { _ = try await API.shared.merge(sid, dir: dir); AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
@@ -169,15 +196,16 @@ final class NotebookModel: ObservableObject {
 struct NotebookView: View {
     var articleId: String
     var focusId: String? = nil
+    var restart: Bool = false
     @EnvironmentObject var router: Router
     @ObservedObject private var session = SessionModel.shared
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
     @State private var toRemove: Sentence?
 
-    init(articleId: String, focusId: String? = nil) {
-        self.articleId = articleId; self.focusId = focusId
-        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId))
+    init(articleId: String, focusId: String? = nil, restart: Bool = false) {
+        self.articleId = articleId; self.focusId = focusId; self.restart = restart
+        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restart: restart))
     }
 
     var body: some View {
@@ -207,6 +235,7 @@ struct NotebookView: View {
             if done, m.inflight.isEmpty, m.redo == nil, !m.browse { router.shelfPath = [.done(id: articleId)] }
         }
         .onChange(of: m.focusRequest) { _, _ in focused = true }
+        .onChange(of: m.finishedPass) { _, f in if f { router.shelfPath = [.done(id: articleId, newReview: true)] } }
         .onChange(of: m.inflight.isEmpty) { _, empty in
             if empty, m.allDone, m.redo == nil, !m.browse { router.shelfPath = [.done(id: articleId)] }
         }
@@ -221,7 +250,7 @@ struct NotebookView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    NotebookHead(tab: "\(doneCount) / \(total)") {
+                    NotebookHead(tab: m.passLabel ?? "\(doneCount) / \(total)") {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(d.title).lineLimit(2)
                             SourceLink(source: d.source ?? "") { await m.setSource($0) }
@@ -333,7 +362,7 @@ struct NotebookView: View {
                     if session.inSession { Tiny(title: "건너뛰기") { m.submit(skip: true) } }
                     Tiny(title: "제거") { toRemove = cur }
                     if m.redo != nil {
-                        Tiny(title: "취소") { m.cancelRedo() }
+                        Tiny(title: m.pass != nil ? "다시 쓰기 그만" : "취소") { m.cancelRedo() }
                     } else {
                         let ci = d.sentences.firstIndex { $0.id == cur.id } ?? -1
                         let prev = ci > 0 ? d.sentences[ci - 1] : nil

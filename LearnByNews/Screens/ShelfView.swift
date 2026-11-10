@@ -30,8 +30,8 @@ struct ShelfView: View {
             .background(Theme.desk.ignoresSafeArea())
             .navigationDestination(for: Route.self) { r in
                 switch r {
-                case .notebook(let id, let focus): NotebookView(articleId: id, focusId: focus)
-                case .done(let id): DoneView(articleId: id)
+                case .notebook(let id, let focus, let restart): NotebookView(articleId: id, focusId: focus, restart: restart)
+                case .done(let id, let newReview): DoneView(articleId: id, newReview: newReview)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)

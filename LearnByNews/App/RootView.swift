@@ -85,8 +85,10 @@ final class AuthModel: ObservableObject {
 }
 
 enum Route: Hashable {
-    case notebook(id: String, focus: String? = nil)
-    case done(id: String)
+    /// restart: 처음부터 다시 쓰기 순회로 연다
+    case notebook(id: String, focus: String? = nil, restart: Bool = false)
+    /// newReview: 기존 총평이 있어도 새 총평을 자동 요청한다 (처음부터 다시 쓰기가 끝났을 때)
+    case done(id: String, newReview: Bool = false)
 }
 
 /// 탭·화면 이동. 시험지·기록에서 "공책에서 보기"처럼 탭을 건너 이동할 때 쓴다
@@ -98,13 +100,14 @@ final class Router: ObservableObject {
 
     init() {
         #if DEBUG
-        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | phrases | quiz | log | settings
+        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | restart:a2 | phrases | quiz | log | settings
         if ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" { SessionStore.start = Date().ms - 600_000; SessionModel.shared.start = SessionStore.start }
         if let r = ProcessInfo.processInfo.environment["LBN_ROUTE"] {
             let p = r.split(separator: ":").map(String.init)
             switch p[0] {
             case "notebook": shelfPath = [.notebook(id: p[1], focus: p.count > 2 ? p[2] : nil)]
             case "done": shelfPath = [.done(id: p[1])]
+            case "restart": shelfPath = [.notebook(id: p[1], restart: true)]
             case "phrases": tab = .phrases
             case "quiz": tab = .quiz
             case "log": tab = .log
