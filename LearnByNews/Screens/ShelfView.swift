@@ -125,9 +125,13 @@ struct ShelfView: View {
     private var notebooks: some View {
         VStack(spacing: 12) {
             ForEach(Array(list.enumerated()), id: \.element.id) { i, a in
-                // 이 기기에 다시 쓰기 진행 상태가 있으면 "n회차 진행 중"으로, 누르면 공책에서 이어진다
-                let prog = RedoProgress.load(a.id).flatMap { $0.remaining.isEmpty ? nil : $0 }
-                let status: String = prog.map { "\($0.ids.count - $0.remaining.count) / \(a.sentenceCount)" }
+                // 다시 쓰기 진행은 서버 pass_done이 진실(오프라인이면 로컬 캐시). 있으면 "n회차 진행 중", 누르면 공책에서 이어진다
+                let prog: RedoProgress? = {
+                    if let d = a.passDone { return d.count < a.sentenceCount ? RedoProgress(ids: [], done: d) : nil }
+                    if offline { return RedoProgress.load(a.id).flatMap { $0.remaining.isEmpty ? nil : $0 } }
+                    return nil
+                }()
+                let status: String = prog.map { "\($0.done.count) / \(a.sentenceCount)" }
                     .map { "\(a.rounds + 1)회차 진행 중 \($0)" }
                     ?? (a.isDone ? (a.rounds >= 2 ? "완료 · \(a.rounds)회차" : "완료") : "\(a.doneCount) / \(a.sentenceCount)")
                 VStack(alignment: .leading, spacing: 0) {
@@ -216,7 +220,6 @@ struct ShelfView: View {
         async let b: Void = session.load()
         async let c: Void = loadBookmark()
         _ = await (a, b, c)
-        session.start = SessionStore.start
     }
     private func loadList() async {
         // 캐시를 먼저 그리고 온라인이면 갱신
@@ -232,10 +235,13 @@ struct ShelfView: View {
     private func loadRoundGrades() async {
         var out: [String: [String: Int]] = [:]
         for a in list {
-            guard let p = RedoProgress.load(a.id), !p.remaining.isEmpty else { continue }
+            let done: [String]
+            if let d = a.passDone, d.count < a.sentenceCount { done = d }
+            else if offline, let p = RedoProgress.load(a.id), !p.remaining.isEmpty { done = p.done }
+            else { continue }
             guard let d = (try? await API.shared.article(a.id)) ?? Cache.shared.article(a.id) else { continue }
             var g: [String: Int] = [:]
-            for s in d.sentences where p.done.contains(s.id) {
+            for s in d.sentences where done.contains(s.id) {
                 if let gr = s.attempt?.grade { g[gr.rawValue, default: 0] += 1 }
             }
             out[a.id] = g

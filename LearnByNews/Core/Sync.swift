@@ -80,6 +80,17 @@ final class SyncManager: ObservableObject {
                 case "phrase_delete":
                     let b = try JSONDecoder.api.decode(PhraseDeleteOp.self, from: op.payload)
                     try await API.shared.deletePhrase(b.id)
+                case "pass_put":
+                    let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
+                    try await API.shared.putPass(b.articleId, done: b.done ?? [])
+                case "pass_delete":
+                    let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
+                    try await API.shared.deletePass(b.articleId)
+                case "session_start_put":
+                    let b = try JSONDecoder.api.decode(SessionStartState.self, from: op.payload)
+                    try await API.shared.putSessionStart(b.startedAt)
+                case "session_start_delete":
+                    try await API.shared.deleteSessionStart()
                 default: break
                 }
                 Cache.shared.remove(op)
@@ -95,6 +106,32 @@ final class SyncManager: ObservableObject {
     }
 
     struct PhraseSaveOp: Codable { var tempId: String; var phrase: String; var meaning: String; var sentenceId: String; var articleId: String }
+    struct PassOp: Codable { var articleId: String; var done: [String]? }
+
+    /// 온라인이면 바로, 아니면(또는 네트워크 실패면) 큐에
+    private func sendOrQueue(_ kind: String, _ payload: some Encodable, _ send: () async throws -> Void) async {
+        if Connectivity.shared.isOnline {
+            do { try await send(); return }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+            catch { AppLog.shared.warn("sync", "\(kind) failed: \(error.localizedDescription)"); return }
+        }
+        Cache.shared.enqueue(kind, payload); pendingCount = Cache.shared.pendingCount
+    }
+
+    // MARK: 다시 쓰기 진행 (서버가 진실, RedoProgress는 캐시)
+    func putPass(_ articleId: String, done: [String]) async {
+        await sendOrQueue("pass_put", PassOp(articleId: articleId, done: done)) { try await API.shared.putPass(articleId, done: done) }
+    }
+    func deletePass(_ articleId: String) async {
+        await sendOrQueue("pass_delete", PassOp(articleId: articleId, done: nil)) { try await API.shared.deletePass(articleId) }
+    }
+    // MARK: 공부 시작점
+    func putSessionStart(_ t: Int64) async {
+        await sendOrQueue("session_start_put", SessionStartState(startedAt: t)) { try await API.shared.putSessionStart(t) }
+    }
+    func deleteSessionStart() async {
+        await sendOrQueue("session_start_delete", SessionStartState(startedAt: 0)) { try await API.shared.deleteSessionStart() }
+    }
     struct PhraseDeleteOp: Codable { var id: String }
 
     // MARK: 화면이 쓰는 오프라인 겸용 동작

@@ -90,21 +90,34 @@ final class NotebookModel: ObservableObject {
                 open = focusId; if let focusId { requestScroll(focusId) }
                 return
             }
+            let ids = d.sentences.map(\.id)
             if let n = restartAfter, !d.sentences.isEmpty {
-                // 처음부터(또는 앞 n문장 다음부터) 다시 쓰기 시작. 진행 상태를 저장한다
-                let ids = d.sentences.map(\.id)
+                // 처음부터(또는 앞 n문장 다음부터) 다시 쓰기 시작. 서버에 올리고 로컬에도 캐시
                 let prog = RedoProgress(ids: ids, done: Array(ids.prefix(min(n, ids.count - 1))))
                 prog.save(id)
+                await SyncManager.shared.putPass(id, done: prog.done)
                 AppLog.shared.info("notebook", "restart pass", ["article": id, "count": "\(ids.count)", "after": "\(n)"])
                 data = d; beginPass(prog)
                 return
             }
-            if let prog = RedoProgress.load(id) {
-                // 저장된 진행 상태가 있으면 그 자리에서 다시 쓰기 모드로
-                let alive = prog.ids.filter { x in d.sentences.contains { $0.id == x } }
+            // 진행 상태: 서버가 진실. 서버가 null인데 로컬에만 있으면 한 번 올려 이관(오프라인이면 로컬 캐시 사용)
+            var prog: RedoProgress? = nil
+            if !offline {
+                if let server = try? await API.shared.pass(id) {
+                    prog = RedoProgress.from(serverDone: server.done, sentenceIds: ids); prog?.save(id)
+                } else if let local = RedoProgress.load(id), Connectivity.shared.isOnline {
+                    await SyncManager.shared.putPass(id, done: local.done); prog = local
+                    AppLog.shared.info("notebook", "pass migrated to server", ["article": id])
+                } else if Connectivity.shared.isOnline {
+                    RedoProgress.clear(id)
+                } else { prog = RedoProgress.load(id) }
+            } else { prog = RedoProgress.load(id) }
+            if let prog {
+                let alive = prog.ids.filter(ids.contains)
                 let p = RedoProgress(ids: alive, done: prog.done.filter(alive.contains))
                 if p.remaining.isEmpty {
-                    RedoProgress.clear(id); data = d; finishingPass = true; passSubmitted = Set(p.done); return
+                    RedoProgress.clear(id); await SyncManager.shared.deletePass(id)
+                    data = d; finishingPass = true; passSubmitted = Set(p.done); return
                 }
                 AppLog.shared.info("notebook", "resume pass", ["article": id, "done": "\(p.done.count)", "count": "\(p.ids.count)"])
                 data = d; beginPass(p)
@@ -210,10 +223,13 @@ final class NotebookModel: ObservableObject {
             let i = pass.firstIndex(of: cur.id) ?? -1
             if i >= 0, i + 1 < pass.count {
                 let next = pass[i + 1]
-                RedoProgress(ids: pass, done: pass.filter(passSubmitted.contains)).save(id)
+                let done = pass.filter(passSubmitted.contains)
+                RedoProgress(ids: pass, done: done).save(id)
+                Task { await SyncManager.shared.putPass(id, done: done) }
                 redo = next; requestScroll(next); focusRequest += 1
             } else {
                 RedoProgress.clear(id)
+                Task { await SyncManager.shared.deletePass(id) }
                 self.pass = nil; redo = nil; finishingPass = true
                 requestScroll("bottom")
             }
@@ -231,7 +247,7 @@ final class NotebookModel: ObservableObject {
     }
 
     func cancelRedo() {
-        if pass != nil { RedoProgress.clear(id) }
+        if pass != nil { RedoProgress.clear(id); Task { await SyncManager.shared.deletePass(id) } }
         redo = nil; pass = nil; passSubmitted = []; input = ""
     }
     var passLabel: String? {

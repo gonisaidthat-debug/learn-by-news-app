@@ -27,6 +27,8 @@ final class DoneModel: ObservableObject {
             catch let e as APIError where e.isNetwork { if let c = Cache.shared.article(id) { d = c } else { throw e } }
             data = d
             progress = RedoProgress.load(id)
+            if let server = try? await API.shared.pass(id) { progress = RedoProgress.from(serverDone: server.done, sentenceIds: d.sentences.map(\.id)); progress?.save(id) }
+            else if Connectivity.shared.isOnline, (try? await API.shared.pass(id)) == nil, progress == nil { RedoProgress.clear(id) }
             bookmark = Cache.shared.bookmark()
             if let b = try? await API.shared.bookmark() { bookmark = b; Cache.shared.setBookmark(b) }
             estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil

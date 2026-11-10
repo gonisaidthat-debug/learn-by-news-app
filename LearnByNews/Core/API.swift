@@ -146,6 +146,15 @@ final class API {
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }
 
+    // MARK: 기기 상태 → 서버 (다시 쓰기 진행, 공부 시작점). 서버가 진실, 로컬은 캐시
+    func pass(_ articleId: String) async throws -> PassState? { let r: PassState? = try await send("GET", "/api/articles/\(articleId)/pass"); return r }
+    struct PassBody: Codable { var done: [String] }
+    func putPass(_ articleId: String, done: [String]) async throws { let _: OK = try await send("PUT", "/api/articles/\(articleId)/pass", body: PassBody(done: done)) }
+    func deletePass(_ articleId: String) async throws { let _: OK = try await send("DELETE", "/api/articles/\(articleId)/pass") }
+    func sessionStart() async throws -> SessionStartState? { let r: SessionStartState? = try await send("GET", "/api/session-start"); return r }
+    func putSessionStart(_ startedAt: Int64) async throws { let _: OK = try await send("PUT", "/api/session-start", body: SessionStartState(startedAt: startedAt)) }
+    func deleteSessionStart() async throws { let _: OK = try await send("DELETE", "/api/session-start") }
+
     // MARK: 응용
     struct DrillNextBody: Encodable { var phraseId: String? }
     func nextDrill(phraseId: String? = nil) async throws -> Drill { try await send("POST", "/api/drills/next", body: DrillNextBody(phraseId: phraseId)) }

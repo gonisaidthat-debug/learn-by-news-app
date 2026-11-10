@@ -35,7 +35,7 @@ final class MockServer: URLProtocol {
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
             Self.lock.unlock()
-            let data = try! JSONSerialization.data(withJSONObject: json)
+            let data = try! JSONSerialization.data(withJSONObject: json, options: [.fragmentsAllowed])
             let res = HTTPURLResponse(url: req.url!, statusCode: code, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
             client?.urlProtocol(self, didReceive: res, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
@@ -63,6 +63,8 @@ struct MockState {
     var logs: [[String: Any]] = []
     var bookmark: [String: Any]? = nil
     var drills: [[String: Any]] = []
+    var passes: [String: [String]] = [:]
+    var sessionStart: Int64? = nil
     var highlights: [[String: Any]] = []
     var seq = 100
 
@@ -104,6 +106,7 @@ struct MockState {
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
         sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
+        passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
         highlights = [["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
                        "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
@@ -113,7 +116,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -126,6 +129,7 @@ struct MockState {
                 for s in ss { if let at = s["attempt"] as? [String: Any], let gr = at["grade"] as? String { g[gr, default: 0] += 1 } }
                 var o = a; o["sentence_count"] = ss.count; o["done_count"] = g.values.reduce(0, +); o["grades"] = g
                 o["review_count"] = reviews.filter { $0["article_id"] as? String == a["id"] as? String }.count
+                o["pass_done"] = passes[a["id"] as! String] ?? NSNull()
                 return o
             })
         case "POST /api/articles":
@@ -271,6 +275,18 @@ struct MockState {
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
             }
             return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults])
+        case "GET /api/articles/:id/pass":
+            return (200, passes[id].map { ["done": $0, "updated_at": Date().ms] as [String: Any] } ?? NSNull())
+        case "PUT /api/articles/:id/pass":
+            passes[id] = body["done"] as? [String] ?? []; return (200, ["ok": true])
+        case "DELETE /api/articles/:id/pass":
+            passes[id] = nil; return (200, ["ok": true])
+        case "GET /api/session-start":
+            return (200, sessionStart.map { ["started_at": $0] as [String: Any] } ?? NSNull())
+        case "PUT /api/session-start":
+            sessionStart = (body["started_at"] as? NSNumber)?.int64Value; return (200, ["ok": true])
+        case "DELETE /api/session-start":
+            sessionStart = nil; return (200, ["ok": true])
         case "POST /api/drills/next":
             if let open = drills.last(where: { $0["feedback"] is NSNull }), body["phrase_id"] == nil { return (200, open) }
             let p = phrases.first { $0["id"] as? String == body["phrase_id"] as? String } ?? phrases.randomElement()

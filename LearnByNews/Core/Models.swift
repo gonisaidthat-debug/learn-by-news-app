@@ -122,6 +122,7 @@ struct ArticleSummary: Codable, Identifiable, Hashable {
     var doneCount: Int
     var grades: [String: Int]
     var reviewCount: Int?          // 총평 개수 = 완주 회차
+    var passDone: [String]?        // 서버에 저장된 다시 쓰기 진행(제출한 문장 id). null이면 진행 중 아님
 
     var isDone: Bool { doneCount >= sentenceCount }
     var rounds: Int { reviewCount ?? 0 }
@@ -312,6 +313,11 @@ extension JSONEncoder {
     }()
 }
 
+
+/// 서버에 저장된 다시 쓰기 진행 (GET /api/articles/:id/pass)
+struct PassState: Codable, Hashable { var done: [String]; var updatedAt: Int64? }
+/// 서버에 저장된 공부 세션 시작점 (GET /api/session-start)
+struct SessionStartState: Codable, Hashable { var startedAt: Int64 }
 
 // MARK: - 책갈피 (서버에 하나)
 

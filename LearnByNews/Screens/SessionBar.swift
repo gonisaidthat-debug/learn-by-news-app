@@ -11,18 +11,31 @@ final class SessionModel: ObservableObject {
 
     var inSession: Bool { start != nil }
 
+    /// 시작점은 서버(/api/session-start)가 진실, UserDefaults는 캐시. 다른 기기에서 시작한 세션도 보인다
     func begin() {
         let t = Date().ms
         SessionStore.start = t; start = t; msg = nil
         AppLog.shared.info("session", "begin", ["at": "\(t)"])
+        Task { await SyncManager.shared.putSessionStart(t) }
     }
     func discard() {
         SessionStore.start = nil; start = nil; msg = nil
         AppLog.shared.info("session", "discard")
+        Task { await SyncManager.shared.deleteSessionStart() }
     }
     func load() async {
         if sessions.isEmpty, let c = Cache.shared.sessions() { sessions = c }
         do { sessions = try await API.shared.sessions() } catch { AppLog.shared.warn("session", "list failed: \(error.localizedDescription)") }
+        await loadStart()
+    }
+    /// 서버 시작점을 읽어 로컬과 맞춘다. 서버가 null인데 로컬에만 있으면 올려서 이관
+    func loadStart() async {
+        guard Connectivity.shared.isOnline else { start = SessionStore.start; return }
+        do {
+            if let s = try await API.shared.sessionStart() { SessionStore.start = s.startedAt; start = s.startedAt }
+            else if let local = SessionStore.start { await SyncManager.shared.putSessionStart(local); start = local }
+            else { start = nil }
+        } catch { start = SessionStore.start }
     }
     func close() async {
         guard let start, !busy else { return }
@@ -30,6 +43,7 @@ final class SessionModel: ObservableObject {
         do {
             let s = try await API.shared.closeSession(startedAt: start)
             SessionStore.start = nil; self.start = nil
+            await SyncManager.shared.deleteSessionStart()
             msg = "기록했다 · \(s.line)"
             sessions.insert(s, at: 0)
             AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)"])
