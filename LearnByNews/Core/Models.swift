@@ -154,6 +154,7 @@ struct AttemptResult: Codable {
     var expressions: [Expression]
     var translation: String
     var createdAt: Int64
+    var phrases: [Phrase]      // 서버가 이번에 표현장에 새로 저장한 포스트잇
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -163,6 +164,7 @@ struct AttemptResult: Codable {
         expressions = try c.decodeIfPresent([Expression].self, forKey: .expressions) ?? []
         translation = try c.decodeIfPresent(String.self, forKey: .translation) ?? ""
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? Int64(Date().timeIntervalSince1970 * 1000)
+        phrases = try c.decodeIfPresent([Phrase].self, forKey: .phrases) ?? []
     }
 
     var asAttempt: Attempt {

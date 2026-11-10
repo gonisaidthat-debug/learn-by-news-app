@@ -32,7 +32,7 @@ struct ShelfView: View {
             .background(Theme.desk.ignoresSafeArea())
             .navigationDestination(for: Route.self) { r in
                 switch r {
-                case .notebook(let id, let focus, let restartAfter): NotebookView(articleId: id, focusId: focus, restartAfter: restartAfter)
+                case .notebook(let id, let focus, let restartAfter, let browse): NotebookView(articleId: id, focusId: focus, restartAfter: restartAfter, browseAll: browse)
                 case .done(let id, let newReview): DoneView(articleId: id, newReview: newReview)
                 }
             }

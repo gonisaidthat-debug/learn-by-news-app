@@ -86,7 +86,8 @@ final class AuthModel: ObservableObject {
 
 enum Route: Hashable {
     /// restartAfter: 처음부터 다시 쓰기 순회로 연다. 0이면 첫 문장부터, n이면 앞 n문장은 끝난 것으로 두고 n+1번째부터
-    case notebook(id: String, focus: String? = nil, restartAfter: Int? = nil)
+    /// browse: 열람 모드(전체 문장 + 최신 번역·첨삭·이전 시도, 입력 없음). focus가 있으면 그 문장으로 스크롤
+    case notebook(id: String, focus: String? = nil, restartAfter: Int? = nil, browse: Bool = false)
     /// newReview: 기존 총평이 있어도 새 총평을 자동 요청한다 (처음부터 다시 쓰기가 끝났을 때)
     case done(id: String, newReview: Bool = false)
 }
@@ -107,6 +108,7 @@ final class Router: ObservableObject {
             switch p[0] {
             case "notebook": shelfPath = [.notebook(id: p[1], focus: p.count > 2 ? p[2] : nil)]
             case "done": shelfPath = [.done(id: p[1])]
+            case "browse": shelfPath = [.notebook(id: p[1], browse: true)]
             case "restart": shelfPath = [.notebook(id: p[1], restartAfter: Int(p.count > 2 ? p[2] : "0") ?? 0)]
             case "phrases": tab = .phrases
             case "quiz": tab = .quiz

@@ -12,6 +12,7 @@ final class NotebookModel: ObservableObject {
     let id: String
     let focusId: String?
     let restartAfter: Int?
+    let browseAll: Bool
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
@@ -30,11 +31,11 @@ final class NotebookModel: ObservableObject {
     @Published var err: String?
     @Published var scrollTo: String?     // 스크롤 목표 ("bottom" 또는 문장 id)
     @Published var focusRequest = 0      // 입력란에 포커스를 달라는 신호
-    var browse: Bool { focusId != nil }
+    var browse: Bool { focusId != nil || browseAll }
     private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
     private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
-    init(id: String, focusId: String?, restartAfter: Int?) { self.id = id; self.focusId = focusId; self.restartAfter = restartAfter }
+    init(id: String, focusId: String?, restartAfter: Int?, browseAll: Bool) { self.id = id; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll }
 
     var frontIdx: Int? {
         guard let d = data else { return nil }
@@ -50,7 +51,7 @@ final class NotebookModel: ObservableObject {
     func load(onDone: @escaping () -> Void) async {
         do {
             let d = try await API.shared.article(id)
-            if let focusId { data = d; open = focusId; requestScroll(focusId); return }
+            if browse { data = d; open = focusId; if let focusId { requestScroll(focusId) }; return }
             if let n = restartAfter, !d.sentences.isEmpty {
                 // 처음부터(또는 앞 n문장 다음부터) 다시 쓰기 시작. 진행 상태를 저장한다
                 let ids = d.sentences.map(\.id)
@@ -91,6 +92,9 @@ final class NotebookModel: ObservableObject {
         if let prev = s.attempt { s.history.append(prev) }
         s.attempt = r.asAttempt
         d.sentences[i] = s
+        // 서버가 이번에 표현장에 저장한 포스트잇 → 처음부터 "붙은" 상태로
+        let have = Set(d.phrases.map(\.id))
+        d.phrases.append(contentsOf: r.phrases.filter { !have.contains($0.id) })
         data = d
         inflight[sid] = nil
         if r.grade != .skip { open = sid; lastGraded = sid; requestScroll("bottom") }
@@ -228,15 +232,16 @@ struct NotebookView: View {
     var articleId: String
     var focusId: String? = nil
     var restartAfter: Int? = nil
+    var browseAll: Bool = false
     @EnvironmentObject var router: Router
     @ObservedObject private var session = SessionModel.shared
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
     @State private var toRemove: Sentence?
 
-    init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil) {
-        self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter
-        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restartAfter: restartAfter))
+    init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil, browseAll: Bool = false) {
+        self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll
+        _m = StateObject(wrappedValue: NotebookModel(id: articleId, focusId: focusId, restartAfter: restartAfter, browseAll: browseAll))
     }
 
     var body: some View {
@@ -284,7 +289,7 @@ struct NotebookView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    NotebookHead(tab: m.passLabel ?? "\(doneCount) / \(total)") {
+                    NotebookHead(tab: m.browse ? "열람" : (m.passLabel ?? "\(doneCount) / \(total)")) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(d.title).lineLimit(2)
                             SourceLink(source: d.source ?? "") { await m.setSource($0) }
@@ -349,8 +354,8 @@ struct NotebookView: View {
                 onToggleRef: { m.refOpen[x.id] = !(m.refOpen[x.id] ?? true) },
                 savedPhrases: d.phrases.filter { $0.sentenceId == x.id },
                 onTogglePhrase: { e in Task { await m.togglePhrase(x.id, e) } },
-                onRemove: { toRemove = x },
-                onRedo: { m.startRedo(x); focused = true },
+                onRemove: m.browse ? nil : { toRemove = x },
+                onRedo: m.browse ? nil : { m.startRedo(x); focused = true },
                 highlight: focusId == x.id
             )
             .id(x.id)
@@ -389,14 +394,20 @@ struct NotebookView: View {
             if let e = m.err { ErrorText(message: e) }
             FlowLayout(spacing: 18) {
                 if m.browse {
-                    Tiny(title: "←\u{FE0E} 돌아가기") { router.shelfPath.removeLast() }
-                    if cur != nil { Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] } }
-                    else { Tiny(title: "마지막 장 →\u{FE0E}") { router.shelfPath = [.done(id: articleId)] } }
+                    Tiny(title: "←\u{FE0E} 돌아가기") { if router.shelfPath.count > 1 { router.shelfPath.removeLast() } else { router.shelfPath = [] } }
+                    if RedoProgress.load(articleId) != nil {
+                        Tiny(title: "다시 쓰기 이어서 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }
+                    } else if cur != nil {
+                        Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }
+                    } else {
+                        Tiny(title: "마지막 장 →\u{FE0E}") { router.shelfPath = [.done(id: articleId)] }
+                    }
                 } else if let cur {
                     if session.inSession { Tiny(title: "건너뛰기") { m.submit(skip: true) } }
                     Tiny(title: "제거") { toRemove = cur }
                     if m.redo != nil {
                         Tiny(title: m.pass != nil ? "다시 쓰기 그만" : "취소") { m.cancelRedo() }
+                        if m.pass != nil { Tiny(title: "이전 회차 열람") { router.shelfPath.append(.notebook(id: articleId, browse: true)) } }
                     } else {
                         let ci = d.sentences.firstIndex { $0.id == cur.id } ?? -1
                         let prev = ci > 0 ? d.sentences[ci - 1] : nil

@@ -156,7 +156,15 @@ struct MockState {
             if let prev = sentences[i]["attempt"] as? [String: Any] { hist.append(prev) }
             sentences[i]["history"] = hist
             sentences[i]["attempt"] = attempt(tr, f, at: at)
-            var out = f; out["translation"] = tr; out["created_at"] = at
+            // 첨삭 표현은 서버가 표현장에 저장하고 새로 저장된 것을 돌려준다 (같은 문장·같은 표현은 한 번만)
+            var saved: [[String: Any]] = []
+            let a = articles.first { $0["id"] as? String == sentences[i]["article_id"] as? String }
+            for e in (f["expressions"] as? [[String: String]]) ?? [] {
+                if phrases.contains(where: { $0["sentence_id"] as? String == id && $0["phrase"] as? String == e["phrase"] }) { continue }
+                let p: [String: Any] = ["id": nextId("p"), "phrase": e["phrase"]!, "meaning": e["meaning"]!, "sentence_id": id, "article_id": sentences[i]["article_id"]!, "created_at": at, "sentence_text": sentences[i]["text"]!, "article_title": a?["title"] ?? ""]
+                phrases.append(p); saved.append(p)
+            }
+            var out = f; out["translation"] = tr; out["created_at"] = at; out["phrases"] = saved
             return (200, out)
         case "POST /api/sentences/:id/merge":
             guard let i = sentences.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }

@@ -208,6 +208,7 @@ struct DoneView: View {
                     }
                     HStack(spacing: 18) {
                         Tiny(title: "←\u{FE0E} 공책 목록") { router.shelfPath = [] }
+                        Tiny(title: "공책 전체 열람 →\u{FE0E}") { router.shelfPath.append(.notebook(id: d.id, browse: true)) }
                         if let e = m.err { ErrorText(message: e) }
                     }
                     .frame(minHeight: Theme.lh).padding(.top, Theme.lh)
