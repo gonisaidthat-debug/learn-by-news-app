@@ -467,5 +467,6 @@ struct ExportPayload: Decodable {
     var sessions: [StudySession]
     var highlights: [Highlight]?
     var bookmark: BookmarkRow?
+    var drills: [Drill]?          // 푼 것만, answered_at 기준 증분
     struct BookmarkRow: Decodable { var articleId: String; var sentenceId: String; var round: Int?; var createdAt: Int64? }
 }

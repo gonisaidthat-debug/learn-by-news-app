@@ -370,7 +370,8 @@ struct MockState {
                           "quiz_results": quizResults.filter { ($0["created_at"] as! Int64) > since }.map { ["id": $0["id"]!, "key": $0["key"]!, "sentence_id": "", "source": $0["source"]!, "correct": ($0["correct"] as! Bool) ? 1 : 0, "created_at": $0["created_at"]!] },
                           "sessions": sessions.filter { ($0["created_at"] as! Int64) > since },
                           "highlights": highlights.filter { ($0["created_at"] as! Int64) > since },
-                          "bookmark": bookmark ?? NSNull()])
+                          "bookmark": bookmark ?? NSNull(),
+                          "drills": drills.filter { !($0["feedback"] is NSNull) && (($0["answered_at"] as? Int64) ?? 0) > since }])
         case "POST /api/logs":
             let n = (body["entries"] as? [Any])?.count ?? 0
             return (200, ["ok": true, "saved": n])

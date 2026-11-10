@@ -101,6 +101,21 @@ import SwiftData
     var value: Highlight { Highlight(id: id, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, answer: HighlightAnswer(meaning: meaning, why: why, similar: similar), createdAt: createdAt) }
 }
 
+/// 푼 응용 문제 (기록 탭용)
+@Model final class CachedDrill {
+    @Attribute(.unique) var id: String
+    var phrase: String
+    var korean: String
+    var answer: String
+    var grade: String
+    var usedExpression: Bool
+    var answeredAt: Int64
+    init(_ d: Drill) {
+        id = d.id; phrase = d.phrase; korean = d.korean; answer = d.answer ?? ""; grade = d.grade?.rawValue ?? ""
+        usedExpression = d.feedback?.usedExpression ?? false; answeredAt = d.answeredAt ?? d.createdAt
+    }
+}
+
 /// 책갈피 사본 (하나, id "main")
 @Model final class CachedBookmark {
     @Attribute(.unique) var id: String
@@ -133,7 +148,7 @@ final class Cache {
     private static let needsFullKey = "lbn_cache_needs_full"
 
     private init() {
-        let schema = Schema([CachedArticle.self, CachedSentence.self, CachedAttempt.self, CachedPhrase.self, CachedReview.self, CachedQuizResult.self, CachedSession.self, CachedHighlight.self, CachedBookmark.self, PendingOp.self])
+        let schema = Schema([CachedArticle.self, CachedSentence.self, CachedAttempt.self, CachedPhrase.self, CachedReview.self, CachedQuizResult.self, CachedSession.self, CachedHighlight.self, CachedBookmark.self, CachedDrill.self, PendingOp.self])
         let url = URL.applicationSupportDirectory.appendingPathComponent("cache.store")
         do {
             container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: url)])
@@ -173,7 +188,7 @@ final class Cache {
         if full {
             deleteAll(CachedArticle.self); deleteAll(CachedSentence.self); deleteAll(CachedAttempt.self)
             deleteAll(CachedPhrase.self); deleteAll(CachedReview.self); deleteAll(CachedQuizResult.self); deleteAll(CachedSession.self)
-            deleteAll(CachedHighlight.self)
+            deleteAll(CachedHighlight.self); deleteAll(CachedDrill.self)
         } else {
             deleteAll(CachedArticle.self); deleteAll(CachedSentence.self)
             let aIds = Set(x.attempts.map(\.id)), pIds = Set(x.phrases.map(\.id)), rIds = Set(x.reviews.map(\.id)), qIds = Set(x.quizResults.map(\.id)), sIds = Set(x.sessions.map(\.id))
@@ -184,7 +199,10 @@ final class Cache {
             if !sIds.isEmpty { try ctx.delete(model: CachedSession.self, where: #Predicate { sIds.contains($0.id) }) }
             let hIds = Set((x.highlights ?? []).map(\.id))
             if !hIds.isEmpty { try ctx.delete(model: CachedHighlight.self, where: #Predicate { hIds.contains($0.id) }) }
+            let dIds = Set((x.drills ?? []).map(\.id))
+            if !dIds.isEmpty { try ctx.delete(model: CachedDrill.self, where: #Predicate { dIds.contains($0.id) }) }
         }
+        for d in x.drills ?? [] where d.feedback != nil { ctx.insert(CachedDrill(d)) }
         for h in x.highlights ?? [] { ctx.insert(CachedHighlight(h)) }
         // 책갈피는 항상 전체(하나)
         deleteAll(CachedBookmark.self)
@@ -333,7 +351,10 @@ final class Cache {
         let quiz = all(CachedQuizResult.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.map {
             LogQuiz(id: $0.id, key: $0.key, source: $0.source, correct: $0.correct, createdAt: $0.createdAt, kind: $0.key.hasPrefix("p|") ? .phrase : $0.key.hasPrefix("h|") ? .highlight : .issue)
         }
-        return ActivityLog(since: since, attempts: attempts, sessions: sessions, reviews: reviews, quiz: quiz)
+        let drills = all(CachedDrill.self).filter { $0.answeredAt >= since }.sorted { $0.answeredAt < $1.answeredAt }.map {
+            LogDrill(id: $0.id, phrase: $0.phrase, korean: $0.korean, answer: $0.answer, grade: Grade(rawValue: $0.grade), usedExpression: $0.usedExpression, answeredAt: $0.answeredAt)
+        }
+        return ActivityLog(since: since, attempts: attempts, sessions: sessions, reviews: reviews, quiz: quiz, drills: drills)
     }
 
     // MARK: 오프라인에서 바뀐 것을 캐시에도 반영 (서버에 보내질 때까지 화면이 맞도록)
