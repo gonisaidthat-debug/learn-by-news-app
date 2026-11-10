@@ -49,7 +49,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | 메서드·경로 | 요청 | 응답 |
 |---|---|---|
 | GET `/api/auth` | — | `{ok:true}` (비밀번호 확인용) |
-| GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, review_count, grades:{A?,B?,C?,D?,skip?}}]` 최신순. `review_count` = 총평 개수 = 완주 회차 |
+| GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, review_count, pass_done: string[]|null, grades:{A?,B?,C?,D?,skip?}}]` 최신순. `review_count` = 완주 회차, `pass_done` = 다시 쓰기 진행 중이면 이번 회차에 제출한 문장 id들 |
 | POST `/api/articles` | `{title, source?, sentences:[{paragraph, text}]}` 문장 분리는 클라이언트 | `{id}` |
 | GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[], highlights: Highlight[]}` reviews 최신순 |
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
@@ -76,6 +76,8 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}` |
 | DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
 | GET `/api/drills?days=30` | — | 푼 문제 목록 최신순 |
+| GET / PUT / DELETE `/api/articles/:id/pass` | PUT `{done: string[]}` | GET → `{done, updated_at}|null`. **다시 쓰기 진행 상태는 서버가 진실**. 제출마다 PUT, 완료·중단 시 DELETE. UserDefaults는 캐시(오프라인 큐로 지연 전송 가능) |
+| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. **공부 세션 시작점도 서버에 하나** |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
@@ -130,3 +132,9 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - 탭 "응용": 표현장의 표현을 거꾸로 쓰는 한→영 연습. 카드: 써야 할 표현 포스트잇(표현 · 뜻) + 서버가 낸 한국어 문장(손글씨). 영어 입력 후 제출.
 - 결과: 등급 도장, "✓ 표현 사용 / ✗ 쓰지 않았다", 고칠 곳(빨간 펜), 참고 영문(연필), 한 줄 코멘트. 버튼: 다음 문장, 같은 표현 한 번 더(`{phrase_id}`로 next), 건너뛰기(DELETE). 아래 최근 응용 목록(GET).
 - 온라인 전용(출제·채점 모두 Claude). 오프라인이면 "온라인에서만 된다". 푼 기록은 export에 아직 없음(필요하면 서버에 요청).
+
+## 5. 완전 오프라인 (2026-11-10 goni 요청)
+- 목표: 네트워크가 없어도 **핵심 루프(번역 제출·건너뛰기·다시 쓰기·멈추기)**가 된다. 번역은 로컬에 "채점 대기" attempt로 즉시 저장(대기 도장), 연결되면 큐를 순서대로 `POST /api/sentences/:id/attempts`(attempt_id 포함)로 보내 도장·첨삭·포스트잇으로 교체. 멈추기는 큐 제거(이미 보냈으면 DELETE /api/attempts/:id).
+- 큐 대상: 번역/건너뛰기, 다시 쓰기 진행(`PUT /api/articles/:id/pass`), 공부 시작점(`/api/session-start`), 책갈피, 포스트잇, 시험 결과. 가능하면 새 공책 만들기·합치기·제거·링크 수정도 큐(로컬 임시 id → 서버 id 교체).
+- 온라인 전용(안내만): 총평, 형광펜 묻기, 응용. 폴백 없음.
+- 한계: 서버의 created_at은 전송 시각이라 세션 기록의 시간 범위가 어긋날 수 있다. 설정 > 오프라인에 "대기 중 채점 n개" 표시. 서버가 진실, 충돌은 서버 우선.
