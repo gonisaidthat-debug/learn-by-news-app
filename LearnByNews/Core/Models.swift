@@ -370,6 +370,50 @@ struct AskResult: Decodable {
     }
 }
 
+// MARK: - 응용 (표현을 거꾸로 쓰는 한→영 연습)
+
+struct DrillIssue: Codable, Hashable {
+    var mine: String
+    var better: String
+    var why: String
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mine = try c.decodeIfPresent(String.self, forKey: .mine) ?? ""
+        better = try c.decodeIfPresent(String.self, forKey: .better) ?? ""
+        why = try c.decodeIfPresent(String.self, forKey: .why) ?? ""
+    }
+}
+
+struct DrillFeedback: Codable, Hashable {
+    var grade: Grade
+    var usedExpression: Bool
+    var issues: [DrillIssue]
+    var reference: String
+    var note: String
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        grade = (try? c.decode(Grade.self, forKey: .grade)) ?? .C
+        usedExpression = (try? c.decode(Bool.self, forKey: .usedExpression)) ?? (((try? c.decode(Int.self, forKey: .usedExpression)) ?? 0) != 0)
+        issues = try c.decodeIfPresent([DrillIssue].self, forKey: .issues) ?? []
+        reference = try c.decodeIfPresent(String.self, forKey: .reference) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+    }
+}
+
+struct Drill: Codable, Identifiable, Hashable {
+    var id: String
+    var phraseId: String?
+    var phrase: String
+    var meaning: String
+    var korean: String
+    var createdAt: Int64
+    var answer: String?
+    var grade: Grade?
+    var feedback: DrillFeedback?
+    var answeredAt: Int64?
+    var reference: String?
+}
+
 // MARK: - 오프라인 내보내기 (GET /api/export)
 
 struct ExportPayload: Decodable {

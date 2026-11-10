@@ -103,7 +103,7 @@ enum Route: Hashable {
 /// 탭·화면 이동. 시험지·기록에서 "공책에서 보기"처럼 탭을 건너 이동할 때 쓴다
 @MainActor
 final class Router: ObservableObject {
-    enum Tab: Hashable { case shelf, phrases, quiz, log, settings }
+    enum Tab: Hashable { case shelf, phrases, quiz, drills, log, settings }
     @Published var tab: Tab = .shelf
     @Published var shelfPath: [Route] = []
     /// ⌘N: 공책 목록의 붙여넣기 칸으로 포커스
@@ -113,7 +113,7 @@ final class Router: ObservableObject {
 
     init() {
         #if DEBUG
-        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | restart:a2 | phrases | quiz | log | settings
+        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | restart:a2 | phrases | quiz | drills | log | settings
         if ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" { SessionStore.start = Date().ms - 600_000; SessionModel.shared.start = SessionStore.start }
         if let r = ProcessInfo.processInfo.environment["LBN_ROUTE"] {
             let p = r.split(separator: ":").map(String.init)
@@ -124,6 +124,7 @@ final class Router: ObservableObject {
             case "restart": shelfPath = [.notebook(id: p[1], restartAfter: Int(p.count > 2 ? p[2] : "0") ?? 0)]
             case "phrases": tab = .phrases
             case "quiz": tab = .quiz
+            case "drills": tab = .drills
             case "log": tab = .log
             case "settings": tab = .settings
             default: break
@@ -191,6 +192,7 @@ struct MainTabs: View {
             ShelfView().tabItem { Label("기사", systemImage: "book.closed") }.tag(Router.Tab.shelf)
             PhrasesView().tabItem { Label("표현장", systemImage: "note.text") }.tag(Router.Tab.phrases)
             QuizView().tabItem { Label("시험지", systemImage: "questionmark.square") }.tag(Router.Tab.quiz)
+            DrillsView().tabItem { Label("응용", systemImage: "pencil.and.outline") }.tag(Router.Tab.drills)
             ActivityLogView().tabItem { Label("기록", systemImage: "calendar") }.tag(Router.Tab.log)
             SettingsView().tabItem { Label("설정", systemImage: "gearshape") }.tag(Router.Tab.settings)
         }

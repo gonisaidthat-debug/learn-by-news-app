@@ -146,6 +146,14 @@ final class API {
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }
 
+    // MARK: 응용
+    struct DrillNextBody: Encodable { var phraseId: String? }
+    func nextDrill(phraseId: String? = nil) async throws -> Drill { try await send("POST", "/api/drills/next", body: DrillNextBody(phraseId: phraseId)) }
+    struct DrillAnswerBody: Encodable { var answer: String }
+    func answerDrill(_ id: String, answer: String) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer)) }
+    func deleteDrill(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/drills/\(id)") }
+    func drills(days: Int = 30) async throws -> [Drill] { try await send("GET", "/api/drills?days=\(days)") }
+
     // MARK: 형광펜
     struct AskBody: Encodable { var startWord: Int; var endWord: Int; var span: String }
     func ask(_ sentenceId: String, startWord: Int, endWord: Int, span: String) async throws -> AskResult {
