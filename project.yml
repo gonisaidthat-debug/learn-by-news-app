@@ -21,14 +21,17 @@ targets:
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
+        LSRequiresIPhoneOS: true
         UIAppFonts: [NanumPenScript-Regular.ttf]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         ITSAppUsesNonExemptEncryption: false
         NSFaceIDUsageDescription: 저장된 비밀번호로 들어갈 때 본인 확인에 Face ID를 씁니다.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.goni.learn-by-news
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         DEVELOPMENT_TEAM: J3YQFB59W5
         CODE_SIGN_STYLE: Automatic
 schemes:

@@ -109,6 +109,8 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 
 ## 3. 맥 앱과 오프라인 (2026-11-10, goni 결정: 진행)
 
+- **맥 실행 방법(1단계 완료)**: `project.yml`에 iPad 대상(`TARGETED_DEVICE_FAMILY 1,2`, iPad 전 방향)과 `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD`, `LSRequiresIPhoneOS`를 켰다. Xcode에서는 대상 "My Mac (Designed for iPad)". 터미널에서는 `scripts/run-mac.sh [LBN_MOCK=1 …]` — xcodebuild로 빌드한 iOS 번들을 `build/mac/LearnByNews.app/Wrapper/` 구조로 감싸서 연다(그냥 `open`하면 "incorrect executable format"). 넓은 화면에서는 종이 폭을 820pt로 제한(`readableWidth()`). 창 최소 크기는 Designed-for-iPad에선 시스템이 정한다.
+
 - **맥 앱**: 이 리포에서 맥 대상을 켠다. 1단계 "My Mac (Designed for iPad)"로 그대로 실행(창 최소 크기·레이아웃만 점검), 2단계 필요해지면 Mac Catalyst 또는 SwiftUI 멀티플랫폼 타깃으로 메뉴바·단축키(Enter 제출, Esc, ⌘N 새 공책 등) 보강.
 - **오프라인 범위**: 읽기·복습(공책 열람, 이전 시도, 총평, 표현장, 시험지, 기록, 공책 목록)은 오프라인. 채점·총평·새 공책 만들기는 온라인 전용. 시험 결과(POST /api/quiz/results)와 포스트잇 붙이기/떼기(POST/DELETE /api/phrases)는 오프라인 큐에 쌓았다가 연결되면 순서대로 보낸다.
 - **동기화**: 설정에 "오프라인용 내려받기"(전체 `GET /api/export` → SwiftData에 교체 저장, exported_at 기억)와 마지막 동기화 시각 표시. 앱 시작·포그라운드 복귀 시 온라인이면 `?since=<exported_at>` 증분. 하루 한 번 또는 공책 삭제·문장 합치기 뒤에는 전체 다시 받기(삭제 반영). 서버가 진실, 로컬은 캐시, 충돌은 서버 우선. 화면은 캐시를 먼저 그리고 온라인이면 갱신.

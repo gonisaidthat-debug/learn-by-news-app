@@ -30,6 +30,7 @@ struct PhrasesView: View {
                     }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
+                .readableWidth()
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.desk.ignoresSafeArea())

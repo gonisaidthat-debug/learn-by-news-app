@@ -27,6 +27,7 @@ struct ShelfView: View {
                     if !session.sessions.isEmpty { ledger.padding(.top, 40) }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 60, trailing: 10))
+                .readableWidth()
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.desk.ignoresSafeArea())

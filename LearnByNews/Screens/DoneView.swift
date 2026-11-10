@@ -216,6 +216,7 @@ struct DoneView: View {
                 }
             }
             .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
+                .readableWidth()
         }
     }
 

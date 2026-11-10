@@ -337,6 +337,7 @@ struct NotebookView: View {
                     }
                 }
                 .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
+                .readableWidth()
                 Color.clear.frame(height: 1).id("bottom")
             }
             .scrollDismissesKeyboard(.interactively)

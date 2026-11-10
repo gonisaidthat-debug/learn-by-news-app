@@ -64,6 +64,10 @@ struct RuledText: ViewModifier {
 }
 
 extension View {
+    /// 넓은 화면(아이패드·맥)에서 종이 폭을 웹 .shell(820px)처럼 제한하고 가운데 둔다
+    func readableWidth() -> some View {
+        self.frame(maxWidth: 820).frame(maxWidth: .infinity)
+    }
     /// 인쇄체 원문 줄
     func enLine(size: CGFloat = 16) -> some View {
         self.font(Theme.print(size)).foregroundStyle(Theme.ink).modifier(RuledText(uiFont: Theme.printUI(size), lh: Theme.lh))

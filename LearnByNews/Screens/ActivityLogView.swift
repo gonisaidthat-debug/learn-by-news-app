@@ -101,6 +101,7 @@ struct ActivityLogView: View {
                     }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
+                .readableWidth()
             }
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
