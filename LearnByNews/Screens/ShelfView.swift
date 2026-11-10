@@ -9,6 +9,8 @@ struct ShelfView: View {
     @State private var busy = false
     @State private var err: String?
     @State private var list: [ArticleSummary] = []
+    /// 다시 쓰기 진행 중인 공책의 이번 회차 등급 (article id → 등급별 개수)
+    @State private var roundGrades: [String: [String: Int]] = [:]
     @State private var loaded = false
     @State private var toDelete: ArticleSummary?
     @State private var sessionToDelete: StudySession?
@@ -100,7 +102,11 @@ struct ShelfView: View {
                         HStack(alignment: .center, spacing: 16) {
                             Text(a.title).font(Theme.hand(24)).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
-                            MutedText(text: status).fixedSize()
+                            VStack(alignment: .trailing, spacing: 6) {
+                                MutedText(text: status).fixedSize()
+                                // 진행 중이면 이번 회차에 다시 쓴 문장의 등급만, 아니면 문장별 최신 채점
+                                GradeBar(grades: prog != nil ? (roundGrades[a.id] ?? [:]) : a.grades, total: a.sentenceCount)
+                            }
                         }
                         .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
                         .contentShape(Rectangle())
@@ -168,6 +174,22 @@ struct ShelfView: View {
         do { list = try await API.shared.articles(); err = nil }
         catch { err = error.localizedDescription }
         loaded = true
+        await loadRoundGrades()
+    }
+
+    /// 진행 상태가 있는 공책만 상세를 받아 done 문장의 등급을 센다
+    private func loadRoundGrades() async {
+        var out: [String: [String: Int]] = [:]
+        for a in list {
+            guard let p = RedoProgress.load(a.id), !p.remaining.isEmpty else { continue }
+            guard let d = try? await API.shared.article(a.id) else { continue }
+            var g: [String: Int] = [:]
+            for s in d.sentences where p.done.contains(s.id) {
+                if let gr = s.attempt?.grade { g[gr.rawValue, default: 0] += 1 }
+            }
+            out[a.id] = g
+        }
+        roundGrades = out
     }
     private func create() async {
         let p = parsed

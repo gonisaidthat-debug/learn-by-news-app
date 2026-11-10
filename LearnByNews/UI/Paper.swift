@@ -164,19 +164,18 @@ struct Tiny: View {
     }
 }
 
-/// 공책 등급 분포 막대
+/// 공책 등급 분포 막대. grades는 등급별 개수, total은 전체 문장 수(나머지는 빈 칸)
 struct GradeBar: View {
-    var summary: ArticleSummary
+    var grades: [String: Int]
+    var total: Int
     var body: some View {
-        let total = summary.sentenceCount
-        let graded = Grade.allCases.reduce(0) { $0 + summary.count($1) }
         GeometryReader { g in
             HStack(spacing: 0) {
                 ForEach(Grade.allCases, id: \.self) { gr in
-                    let n = summary.count(gr)
+                    let n = grades[gr.rawValue] ?? 0
                     if n > 0 { Rectangle().fill(Theme.grade(gr)).frame(width: g.size.width * CGFloat(n) / CGFloat(max(total, 1))) }
                 }
-                if total > graded { Color.clear }
+                Spacer(minLength: 0)
             }
         }
         .frame(width: 90, height: 6)
