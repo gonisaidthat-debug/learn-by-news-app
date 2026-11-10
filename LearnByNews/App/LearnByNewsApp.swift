@@ -29,10 +29,16 @@ struct LearnByNewsApp: App {
                 .onChange(of: phase) { _, p in
                     switch p {
                     case .background: AppLog.shared.markClean(); auth.didEnterBackground()
-                    case .active: AppLog.shared.markDirty(); auth.willEnterForeground()
+                    case .active: AppLog.shared.markDirty(); auth.willEnterForeground(); RootView.applyMacWindowSize()
                     default: break
                     }
                 }
+        }
+        .commands {
+            // 맥 메뉴바: 파일 > 새 공책 (⌘N). Enter 제출·Esc 취소는 화면 안에서 처리
+            CommandGroup(replacing: .newItem) {
+                Button("새 공책") { router.newNotebook() }.keyboardShortcut("n", modifiers: .command)
+            }
         }
     }
 }

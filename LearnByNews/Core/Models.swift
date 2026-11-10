@@ -11,6 +11,8 @@ struct Issue: Codable, Hashable {
     var meaning: String
     var why: String
 
+    init(source: String, mine: String, meaning: String, why: String) { self.source = source; self.mine = mine; self.meaning = meaning; self.why = why }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
@@ -30,6 +32,8 @@ struct Feedback: Codable, Hashable {
     var issues: [Issue]
     var reference: String
     var expressions: [Expression]
+
+    init(grade: Grade, issues: [Issue], reference: String, expressions: [Expression]) { self.grade = grade; self.issues = issues; self.reference = reference; self.expressions = expressions }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -54,6 +58,10 @@ struct Sentence: Codable, Identifiable, Hashable {
     var text: String
     var attempt: Attempt?
     var history: [Attempt]
+
+    init(id: String, idx: Int, paragraph: Int, text: String, attempt: Attempt?, history: [Attempt]) {
+        self.id = id; self.idx = idx; self.paragraph = paragraph; self.text = text; self.attempt = attempt; self.history = history
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -90,6 +98,10 @@ struct Review: Codable, Identifiable, Hashable {
     var patterns: [ReviewPattern]
     var praise: String
 
+    init(id: String, score: Int?, createdAt: Int64, summary: String, patterns: [ReviewPattern], praise: String) {
+        self.id = id; self.score = score; self.createdAt = createdAt; self.summary = summary; self.patterns = patterns; self.praise = praise
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -124,6 +136,10 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
     var sentences: [Sentence]
     var phrases: [Phrase]
     var reviews: [Review]
+
+    init(id: String, title: String, source: String?, createdAt: Int64, sentences: [Sentence], phrases: [Phrase], reviews: [Review]) {
+        self.id = id; self.title = title; self.source = source; self.createdAt = createdAt; self.sentences = sentences; self.phrases = phrases; self.reviews = reviews
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -292,4 +308,37 @@ extension JSONEncoder {
     static let api: JSONEncoder = {
         let e = JSONEncoder(); e.keyEncodingStrategy = .convertToSnakeCase; return e
     }()
+}
+
+
+// MARK: - 오프라인 내보내기 (GET /api/export)
+
+struct ExportPayload: Decodable {
+    struct Article: Decodable { var id: String; var title: String; var source: String?; var createdAt: Int64 }
+    struct Sentence: Decodable { var id: String; var articleId: String; var idx: Int; var paragraph: Int?; var text: String }
+    struct Attempt: Decodable { var id: String; var sentenceId: String; var articleId: String; var translation: String; var grade: Grade; var feedback: Feedback; var createdAt: Int64 }
+    struct ReviewBody: Decodable { var summary: String?; var patterns: [ReviewPattern]?; var praise: String? }
+    struct Review: Decodable { var id: String; var articleId: String; var score: Int?; var review: ReviewBody; var createdAt: Int64 }
+    struct QuizResult: Decodable {
+        var id: String; var key: String; var sentenceId: String; var source: String; var correct: Bool; var createdAt: Int64
+        enum CodingKeys: String, CodingKey { case id, key, sentenceId, source, correct, createdAt }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id); key = try c.decode(String.self, forKey: .key)
+            sentenceId = try c.decodeIfPresent(String.self, forKey: .sentenceId) ?? ""
+            source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
+            if let b = try? c.decode(Bool.self, forKey: .correct) { correct = b }
+            else { correct = ((try? c.decode(Int.self, forKey: .correct)) ?? 0) != 0 }
+            createdAt = try c.decode(Int64.self, forKey: .createdAt)
+        }
+    }
+    var exportedAt: Int64
+    var since: Int64
+    var articles: [Article]
+    var sentences: [Sentence]
+    var attempts: [Attempt]
+    var phrases: [Phrase]
+    var reviews: [Review]
+    var quizResults: [QuizResult]
+    var sessions: [StudySession]
 }

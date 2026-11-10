@@ -31,7 +31,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.goni.learn-by-news
         TARGETED_DEVICE_FAMILY: "1,2"
-        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
+        SUPPORTS_MACCATALYST: YES
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": LearnByNews/LearnByNews-mac.entitlements
         DEVELOPMENT_TEAM: J3YQFB59W5
         CODE_SIGN_STYLE: Automatic
 schemes:

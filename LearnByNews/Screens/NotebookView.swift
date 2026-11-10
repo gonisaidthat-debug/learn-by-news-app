@@ -281,6 +281,15 @@ struct NotebookView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { Text(m.data?.title ?? "").font(Theme.hand(22)).lineLimit(1) }
         }
+        .background {
+            // 하드웨어 키보드 Esc: 다시 쓰기 취소, 아니면 마지막 채점 문장의 참고 번역 접기/펼치기 (웹과 동일)
+            Button("") {
+                if m.redo != nil { m.cancelRedo(); focused = true }
+                else if let last = m.lastGraded { m.open = last; m.refOpen[last] = !(m.refOpen[last] ?? true) }
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .opacity(0).frame(width: 0, height: 0)
+        }
         .task {
             await m.load { router.shelfPath = [.done(id: articleId)] }
             await session.load()

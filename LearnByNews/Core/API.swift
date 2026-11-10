@@ -5,6 +5,9 @@ enum APIError: LocalizedError {
     case server(String)
     case network(String)
 
+    /// 네트워크(오프라인) 때문인가. 서버가 돌려준 오류(4xx/5xx)는 아니다
+    var isNetwork: Bool { if case .network = self { return true }; return false }
+
     var errorDescription: String? {
         switch self {
         case .unauthorized: return "비밀번호가 필요합니다"
@@ -138,4 +141,9 @@ final class API {
 
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }
+
+    // MARK: export (오프라인 캐시)
+    func export(since: Int64?) async throws -> ExportPayload {
+        try await send("GET", since.map { "/api/export?since=\($0)" } ?? "/api/export")
+    }
 }

@@ -99,6 +99,10 @@ final class Router: ObservableObject {
     enum Tab: Hashable { case shelf, phrases, quiz, log, settings }
     @Published var tab: Tab = .shelf
     @Published var shelfPath: [Route] = []
+    /// ⌘N: 공책 목록의 붙여넣기 칸으로 포커스
+    @Published var newNotebookRequest = 0
+
+    func newNotebook() { tab = .shelf; shelfPath = []; newNotebookRequest += 1 }
 
     init() {
         #if DEBUG
@@ -141,6 +145,17 @@ struct RootView: View {
             }
         }
         .task { await auth.check() }
+        .onAppear { Self.applyMacWindowSize() }
+    }
+
+    /// 맥(Catalyst): 창 최소 크기 720×600
+    static func applyMacWindowSize() {
+        #if targetEnvironment(macCatalyst)
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            scene.sizeRestrictions?.minimumSize = CGSize(width: 720, height: 600)
+            scene.titlebar?.titleVisibility = .hidden
+        }
+        #endif
     }
 }
 

@@ -109,7 +109,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 
 ## 3. 맥 앱과 오프라인 (2026-11-10, goni 결정: 진행)
 
-- **맥 실행 방법(1단계 완료)**: `project.yml`에 iPad 대상(`TARGETED_DEVICE_FAMILY 1,2`, iPad 전 방향)과 `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD`, `LSRequiresIPhoneOS`를 켰다. Xcode에서는 대상 "My Mac (Designed for iPad)". 터미널에서는 `scripts/run-mac.sh [LBN_MOCK=1 …]` — xcodebuild로 빌드한 iOS 번들을 `build/mac/LearnByNews.app/Wrapper/` 구조로 감싸서 연다(그냥 `open`하면 "incorrect executable format"). 넓은 화면에서는 종이 폭을 820pt로 제한(`readableWidth()`). 창 최소 크기는 Designed-for-iPad에선 시스템이 정한다.
+- **맥 실행 방법(Catalyst, 2026-11-10)**: `project.yml`에 iPad 대상(`TARGETED_DEVICE_FAMILY 1,2`)과 `SUPPORTS_MACCATALYST`, 번들 id 동일(`DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER NO`), 맥 전용 entitlements(App Sandbox + 네트워크 클라이언트). Xcode 대상 "My Mac (Mac Catalyst)". 터미널: `scripts/run-mac.sh`(xcodebuild → `build/DerivedData/Build/Products/Debug-maccatalyst/LearnByNews.app`을 `open`). Development 서명이라 `spctl --assess`는 rejected지만 로컬 빌드엔 quarantine이 없어 경고 없이 열린다. "Designed for iPad"를 수동 Wrapper로 감싸는 방식은 Gatekeeper가 손상으로 판정해 폐기. 맥다움: 창 최소 720×600, 파일 > 새 공책(⌘N), Esc(다시 쓰기 취소/참고 번역 토글), 종이 폭 820pt 가운데.
 
 - **맥 앱**: 이 리포에서 맥 대상을 켠다. 1단계 "My Mac (Designed for iPad)"로 그대로 실행(창 최소 크기·레이아웃만 점검), 2단계 필요해지면 Mac Catalyst 또는 SwiftUI 멀티플랫폼 타깃으로 메뉴바·단축키(Enter 제출, Esc, ⌘N 새 공책 등) 보강.
 - **오프라인 범위**: 읽기·복습(공책 열람, 이전 시도, 총평, 표현장, 시험지, 기록, 공책 목록)은 오프라인. 채점·총평·새 공책 만들기는 온라인 전용. 시험 결과(POST /api/quiz/results)와 포스트잇 붙이기/떼기(POST/DELETE /api/phrases)는 오프라인 큐에 쌓았다가 연결되면 순서대로 보낸다.

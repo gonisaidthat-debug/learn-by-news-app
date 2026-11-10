@@ -14,6 +14,7 @@ struct ShelfView: View {
     @State private var loaded = false
     @State private var toDelete: ArticleSummary?
     @State private var sessionToDelete: StudySession?
+    @FocusState private var pasteFocused: Bool
 
     private var parsed: SplitResult { Split.article(raw) }
 
@@ -41,6 +42,7 @@ struct ShelfView: View {
             .task { await load() }
             .refreshable { await load() }
             .onChange(of: router.shelfPath) { _, p in if p.isEmpty { Task { await load() } } }
+            .onChange(of: router.newNotebookRequest) { _, _ in pasteFocused = true }
         }
     }
 
@@ -56,6 +58,7 @@ struct ShelfView: View {
                         .padding(.top, 8).padding(.leading, 5)
                 }
                 TextEditor(text: $raw)
+                    .focused($pasteFocused)
                     .font(Theme.print(16))
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 9 * 28)
