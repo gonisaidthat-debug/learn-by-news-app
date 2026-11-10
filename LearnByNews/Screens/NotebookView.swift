@@ -16,6 +16,11 @@ final class NotebookModel: ObservableObject {
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
     @Published var finishingPass = false  // 마지막 문장을 제출했다 → 채점이 다 끝나면 마지막 장으로 (새 총평)
+    /// 이번 다시 쓰기에서 새로 제출한 문장 id. 화면은 처음 하는 것처럼 비우고 이것만 쌓는다
+    @Published var passSubmitted: Set<String> = []
+    var passMode: Bool { pass != nil || finishingPass }
+    /// 다시 쓰기 모드에서 보이는 시도: 이번에 새로 제출한 문장만. 나머지는 없는 것처럼
+    func visibleAttempt(_ s: Sentence) -> Attempt? { passMode && !passSubmitted.contains(s.id) ? nil : s.attempt }
     @Published var input = ""
     @Published var inflight: [String: Inflight] = [:]
     @Published var redo: String?         // 다시 쓰는 중인 문장 id
@@ -120,6 +125,7 @@ final class NotebookModel: ObservableObject {
         send(cur.id, t, wasRedo: wasRedo)
         if let pass {
             // 처음부터 다시: 다음 문장으로 이어서, 끝나면 새 총평을 받으러 마지막 장으로
+            passSubmitted.insert(cur.id)
             let i = pass.firstIndex(of: cur.id) ?? -1
             if i >= 0, i + 1 < pass.count {
                 let next = pass[i + 1]
@@ -135,7 +141,7 @@ final class NotebookModel: ObservableObject {
     }
 
     func startRedo(_ s: Sentence) { redo = s.id; open = nil; input = "" }
-    func cancelRedo() { redo = nil; pass = nil; input = "" }
+    func cancelRedo() { redo = nil; pass = nil; passSubmitted = []; input = "" }
     var passLabel: String? {
         guard let pass, let redo, let i = pass.firstIndex(of: redo) else { return nil }
         return "다시 \(i + 1) / \(pass.count)"
@@ -247,9 +253,10 @@ struct NotebookView: View {
     private func content(_ d: ArticleDetail) -> some View {
         let total = d.sentences.count
         let doneCount = d.sentences.filter { $0.attempt != nil }.count
-        let upto = m.browse ? total : (m.frontIdx ?? total)
+        let redoIdx = m.redo.flatMap { r in d.sentences.firstIndex { $0.id == r } }
+        let upto = m.browse ? total : m.passMode ? (redoIdx.map { $0 + 1 } ?? total) : (m.frontIdx ?? total)
         let waiting = m.inflight.count
-        let markers = m.markers(session.sessions)
+        let markers = m.passMode ? [:] : m.markers(session.sessions)
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -310,7 +317,7 @@ struct NotebookView: View {
                 }
             }
             .id(x.id)
-        } else if x.attempt != nil {
+        } else if m.visibleAttempt(x) != nil {
             EntryView(
                 s: x, expanded: m.open == x.id,
                 onToggle: { m.open = m.open == x.id ? nil : x.id },
