@@ -27,6 +27,8 @@ enum Theme {
     }
     static let stickyColors: [Color] = [Color(hex: 0xFFF59B), Color(hex: 0xFFD6E7), Color(hex: 0xCDEAFF)]
     static let stickyBack = Color(hex: 0xF3EFE3)
+    static let marker = Color(hex: 0xFFF176)          // 형광펜
+    static let markerSelecting = Color(hex: 0xFFE082) // 고르는 중
     static let coverColors: [Color] = [Color(hex: 0xC0392B), Color(hex: 0x2C6FBB), Color(hex: 0x2E8B57), Color(hex: 0x8E5BBD)]
 
     /// 줄 간격(한 줄 높이)과 왼쪽 여백 폭. 웹 모바일 값

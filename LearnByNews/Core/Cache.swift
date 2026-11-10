@@ -350,6 +350,13 @@ final class Cache {
         if let e = all(CachedPhrase.self).first(where: { $0.id == tempId }) { ctx.delete(e) }
         upsertPhrase(real)
     }
+    func upsertHighlight(_ h: Highlight) {
+        if let e = all(CachedHighlight.self).first(where: { $0.id == h.id }) { ctx.delete(e) }
+        ctx.insert(CachedHighlight(h)); try? ctx.save()
+    }
+    func removeHighlight(id: String) {
+        if let e = all(CachedHighlight.self).first(where: { $0.id == id }) { ctx.delete(e); try? ctx.save() }
+    }
     func addQuizResult(key: String, sentenceId: String, source: String, correct: Bool) {
         ctx.insert(CachedQuizResult(id: "local-" + UUID().uuidString, key: key, sentenceId: sentenceId, source: source, correct: correct, createdAt: Date().ms))
         try? ctx.save()

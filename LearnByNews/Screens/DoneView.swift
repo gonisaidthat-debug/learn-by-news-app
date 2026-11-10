@@ -71,6 +71,18 @@ final class DoneModel: ObservableObject {
         do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
     }
 
+    func ask(_ sid: String, start: Int, end: Int, span: String) async throws {
+        guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
+        let r = try await API.shared.ask(sid, startWord: start, endWord: end, span: span)
+        data?.highlights.append(r.highlight); Cache.shared.upsertHighlight(r.highlight)
+        if let p = r.phrase, !(data?.phrases.contains { $0.id == p.id } ?? true) { data?.phrases.append(p); Cache.shared.upsertPhrase(p) }
+    }
+    func deleteHighlight(_ h: Highlight) async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
+        do { try await API.shared.deleteHighlight(h.id); data?.highlights.removeAll { $0.id == h.id }; Cache.shared.removeHighlight(id: h.id) }
+        catch { err = error.localizedDescription }
+    }
+
     func toggleBookmark(_ sid: String) async {
         guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do {
@@ -212,7 +224,10 @@ struct DoneView: View {
                                 savedPhrases: d.phrases.filter { $0.sentenceId == s.id },
                                 onTogglePhrase: { e in Task { await m.togglePhrase(s.id, e) } },
                                 bookmarked: m.bookmark?.sentenceId == s.id,
-                                onBookmark: { Task { await m.toggleBookmark(s.id) } }
+                                onBookmark: { Task { await m.toggleBookmark(s.id) } },
+                                highlights: d.highlights.filter { $0.sentenceId == s.id },
+                                onAsk: { st, en, sp in try await m.ask(s.id, start: st, end: en, span: sp) },
+                                onDeleteHighlight: { h in await m.deleteHighlight(h) }
                             )
                         }
                     }

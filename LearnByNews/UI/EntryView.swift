@@ -88,12 +88,18 @@ struct EntryView: View {
     var highlight = false
     var bookmarked = false
     var onBookmark: (() -> Void)?
+    /// 형광펜: 이 문장의 메모들, 묻기(start, end, span), 삭제
+    var highlights: [Highlight] = []
+    var onAsk: ((Int, Int, String) async throws -> Void)?
+    var onDeleteHighlight: ((Highlight) async -> Void)?
 
     var body: some View {
         let a = s.attempt!
         let fb = a.feedback
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
-            Text(s.text).enLine()
+            if expanded, onAsk != nil { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk!) }
+            else { Text(markHighlights(s.text, highlights)).enLine() }
+            if expanded { ForEach(highlights) { h in MarkerMemo(h: h, onDelete: onDeleteHighlight) } }
             if fb.grade == .skip {
                 HStack(spacing: 10) {
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
@@ -226,5 +232,130 @@ struct Ribbon: View {
         .frame(width: 14, height: 24)
         .shadow(color: .black.opacity(0.2), radius: 1, y: 1)
         .accessibilityLabel("책갈피")
+    }
+}
+
+
+// MARK: - 형광펜
+
+/// 공백 분리 단어 조각과 문자 범위 (인덱스 0부터)
+func wordPieces(_ text: String) -> [(word: String, range: Range<String.Index>)] {
+    var out: [(String, Range<String.Index>)] = []
+    var i = text.startIndex
+    while i < text.endIndex {
+        while i < text.endIndex, text[i] == " " { i = text.index(after: i) }
+        guard i < text.endIndex else { break }
+        var j = i
+        while j < text.endIndex, text[j] != " " { j = text.index(after: j) }
+        out.append((String(text[i..<j]), i..<j)); i = j
+    }
+    return out
+}
+
+/// 접힌 상태: 칠해진 단어를 노란 배경으로
+func markHighlights(_ text: String, _ hs: [Highlight]) -> AttributedString {
+    var out = AttributedString(text)
+    guard !hs.isEmpty else { return out }
+    let pieces = wordPieces(text)
+    for h in hs {
+        let lo = max(0, h.startWord), hi = min(pieces.count - 1, h.endWord)
+        guard lo <= hi else { continue }
+        let r = pieces[lo].range.lowerBound..<pieces[hi].range.upperBound
+        let a = out.index(out.startIndex, offsetByCharacters: text.distance(from: text.startIndex, to: r.lowerBound))
+        let b = out.index(out.startIndex, offsetByCharacters: text.distance(from: text.startIndex, to: r.upperBound))
+        out[a..<b].backgroundColor = Theme.marker
+    }
+    return out
+}
+
+/// 펼친 상태: 단어 조각을 탭해 구간을 고르고 "이게 뭐야? 🖍"로 묻는다 (첫 단어·끝 단어 두 번 누르기)
+struct MarkerWords: View {
+    var text: String
+    var highlights: [Highlight]
+    var onAsk: (Int, Int, String) async throws -> Void
+    @State private var anchor: Int?
+    @State private var range: ClosedRange<Int>?
+    @State private var asking = false
+    @State private var err: String?
+
+    var body: some View {
+        let pieces = wordPieces(text)
+        VStack(alignment: .leading, spacing: 0) {
+            FlowLayout(spacing: 0) {
+                ForEach(Array(pieces.enumerated()), id: \.offset) { i, p in
+                    let saved = highlights.contains { i >= $0.startWord && i <= $0.endWord }
+                    let picking = range.map { $0.contains(i) } ?? false
+                    Text(p.word + " ")
+                        .font(Theme.print(16)).foregroundStyle(Theme.ink)
+                        .padding(.vertical, 2)
+                        .background(picking ? Theme.markerSelecting : saved ? Theme.marker : .clear)
+                        .frame(height: Theme.lh)
+                        .contentShape(Rectangle())
+                        .onTapGesture { tap(i) }
+                }
+            }
+            if let r = range {
+                let span = pieces[r].map(\.word).joined(separator: " ")
+                HStack(spacing: 14) {
+                    if asking {
+                        Text("묻는 중… 🖍").font(Theme.hand(20)).foregroundStyle(Theme.pencil)
+                    } else {
+                        Tiny(title: "이게 뭐야? 🖍", color: Theme.red) { Task { await ask(r, span) } }
+                        Tiny(title: "취소") { anchor = nil; range = nil; err = nil }
+                    }
+                    if let err { ErrorText(message: err) }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Theme.marker.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .topLeading) {
+                    Triangle().fill(Theme.marker.opacity(0.6)).frame(width: 12, height: 8).offset(x: 16, y: -7)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func tap(_ i: Int) {
+        guard !asking else { return }
+        err = nil
+        if let a = anchor, let r = range, r.count == 1, r.lowerBound == a {
+            range = min(a, i)...max(a, i)          // 두 번째 탭: 그 사이를 한 덩어리로 (앞 단어여도 됨)
+        } else {
+            anchor = i; range = i...i              // 첫 탭 또는 세 번째 탭: 새 시작
+        }
+    }
+
+    private func ask(_ r: ClosedRange<Int>, _ span: String) async {
+        asking = true; err = nil
+        do { try await onAsk(r.lowerBound, r.upperBound, span); anchor = nil; range = nil }
+        catch { err = error.localizedDescription }
+        asking = false
+    }
+}
+
+struct Triangle: Shape {
+    func path(in r: CGRect) -> Path { var p = Path(); p.move(to: CGPoint(x: r.midX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY)); p.closeSubpath(); return p }
+}
+
+/// 형광펜 메모 한 줄: "구절 → 뜻 (이유) · 비슷한 말: …" + ×
+struct MarkerMemo: View {
+    var h: Highlight
+    var onDelete: ((Highlight) async -> Void)?
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            (Text(h.span).fontWeight(.bold).foregroundColor(Color(hex: 0x2A2412)) + Text(" →\u{FE0E} \(h.answer.meaning)")
+             + Text(h.answer.why.isEmpty ? "" : " (\(h.answer.why))").font(Theme.hand(18))
+             + Text(h.answer.similar.isEmpty ? "" : " · 비슷한 말: \(h.answer.similar)").font(Theme.hand(18)))
+                .font(Theme.hand(20)).foregroundStyle(Color(hex: 0x5B5440))
+                .lineSpacing(0)
+            Spacer(minLength: 0)
+            if let onDelete {
+                Button { Task { await onDelete(h) } } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Theme.marker.opacity(0.55))
+        .padding(.vertical, 3)
     }
 }

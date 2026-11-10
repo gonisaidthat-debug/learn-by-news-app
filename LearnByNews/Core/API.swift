@@ -142,6 +142,13 @@ final class API {
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }
 
+    // MARK: 형광펜
+    struct AskBody: Encodable { var startWord: Int; var endWord: Int; var span: String }
+    func ask(_ sentenceId: String, startWord: Int, endWord: Int, span: String) async throws -> AskResult {
+        try await send("POST", "/api/sentences/\(sentenceId)/ask", body: AskBody(startWord: startWord, endWord: endWord, span: span))
+    }
+    func deleteHighlight(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/highlights/\(id)") }
+
     // MARK: bookmark (서버에 하나)
     func bookmark() async throws -> Bookmark? {
         // 없으면 본문이 "null" → Optional로 해석

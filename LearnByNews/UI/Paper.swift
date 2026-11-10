@@ -60,7 +60,7 @@ struct BlankLine: View { var body: some View { Color.clear.frame(height: Theme.l
 
 /// 등급 도장. 왼쪽 여백의 동그라미
 struct Stamp: View {
-    enum Kind { case grade(Grade), busy, error, redo, question, pin, session }
+    enum Kind { case grade(Grade), busy, error, redo, question, pin, session, marker }
     var kind: Kind
     var small = false
 
@@ -72,6 +72,7 @@ struct Stamp: View {
         case .redo: return "↻\u{FE0E}"
         case .question: return "?"
         case .pin: return "📌\u{FE0E}"
+        case .marker: return "🖍"
         case .session: return "✂\u{FE0E}"
         }
     }
@@ -80,7 +81,7 @@ struct Stamp: View {
         case .grade(let g): return Theme.grade(g)
         case .busy, .error, .session: return Theme.red
         case .redo, .question: return Theme.pencil
-        case .pin: return Theme.ink
+        case .pin, .marker: return Theme.ink
         }
     }
     private var dash: [CGFloat]? {
@@ -98,6 +99,9 @@ struct Stamp: View {
         ZStack {
             if case .pin = kind {
                 RoundedRectangle(cornerRadius: 3).fill(Theme.stickyColors[0]).shadow(color: .black.opacity(0.15), radius: 2, x: 1, y: 2)
+                Text(label).font(.system(size: 16))
+            } else if case .marker = kind {
+                RoundedRectangle(cornerRadius: 3).fill(Theme.marker).shadow(color: .black.opacity(0.15), radius: 2, x: 1, y: 2)
                 Text(label).font(.system(size: 16))
             } else {
                 if case .busy = kind {} else {

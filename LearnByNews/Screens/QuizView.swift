@@ -3,7 +3,7 @@ import SwiftUI
 /// 시험지 (웹 Quiz.tsx)
 @MainActor
 final class QuizModel: ObservableObject {
-    enum Deck: String, CaseIterable { case all, issue, phrase }
+    enum Deck: String, CaseIterable { case all, issue, phrase, highlight }
     @Published var all: [QuizItem]?
     @Published var deck: Deck = .all
     @Published var items: [QuizItem] = []
@@ -18,6 +18,7 @@ final class QuizModel: ObservableObject {
     var done: Bool { all != nil && i >= items.count }
     var issueCount: Int { (all ?? []).filter { $0.kind == .issue }.count }
     var phraseCount: Int { (all ?? []).filter { $0.kind == .phrase }.count }
+    var highlightCount: Int { (all ?? []).filter { $0.kind == .highlight }.count }
     var fresh: Int { items.filter { $0.lastCorrect == nil }.count }
     var missed: Int { items.filter { $0.lastCorrect == false }.count }
 
@@ -68,7 +69,7 @@ struct QuizView: View {
                             Text("시험지")
                             HStack(spacing: 10) {
                                 ForEach(QuizModel.Deck.allCases, id: \.self) { d in
-                                    let label = d == .all ? "전부" : d == .issue ? "빨간 줄 \(m.issueCount)" : "포스트잇 \(m.phraseCount)"
+                                    let label = d == .all ? "전부" : d == .issue ? "빨간 줄 \(m.issueCount)" : d == .phrase ? "포스트잇 \(m.phraseCount)" : "형광펜 \(m.highlightCount)"
                                     Tiny(title: label, color: m.deck == d ? Theme.ink : Theme.pencil, size: 19) { m.restart(d); focused = true }
                                         .overlay(alignment: .bottom) { if m.deck == d { Rectangle().fill(Theme.red).frame(height: 2) } }
                                 }
@@ -113,10 +114,11 @@ struct QuizView: View {
             }
         } else if let it = m.current {
             let isPhrase = it.kind == .phrase
-            Entry(stamp: AnyView(Stamp(kind: isPhrase ? .pin : .question))) {
+            let isMarker = it.kind == .highlight
+            Entry(stamp: AnyView(Stamp(kind: isPhrase ? .pin : isMarker ? .marker : .question))) {
                 if let t = it.sentenceText, !t.isEmpty { Text(markSource(t, it.source)).enLine() }
                 else { Text(it.source).enLine() }
-                (Text(isPhrase ? "포스트잇 " : "밑줄 친 ") + Text(it.source).foregroundColor(Theme.ink).underline(true, color: Theme.red) + Text(" — 무슨 뜻?")).pencil()
+                (Text(isPhrase ? "포스트잇 " : isMarker ? "형광펜 " : "밑줄 친 ") + Text(it.source).foregroundColor(Theme.ink).underline(true, color: Theme.red) + Text(" — 무슨 뜻?")).pencil()
                 if !m.revealed {
                     TextField("답을 쓰고 Enter (안 써도 됨)", text: $m.answer, axis: .vertical)
                         .font(Theme.hand(22)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
@@ -129,6 +131,10 @@ struct QuizView: View {
                     if !m.answer.isEmpty { Text(m.answer).koLine() }
                     if isPhrase {
                         Sticky(phrase: it.source, meaning: it.meaning, index: 0).padding(.vertical, 10)
+                    } else if isMarker {
+                        (Text(it.source).fontWeight(.bold).foregroundColor(Color(hex: 0x2A2412)) + Text(" →\u{FE0E} \(it.meaning)") + Text((it.why ?? "").isEmpty ? "" : " (\(it.why!))").font(Theme.hand(18)))
+                            .font(Theme.hand(20)).foregroundStyle(Color(hex: 0x5B5440))
+                            .padding(.horizontal, 10).padding(.vertical, 5).background(Theme.marker.opacity(0.55)).padding(.vertical, 3)
                     } else {
                         (Text(it.source).underline(true, color: Theme.red) + Text(" →\u{FE0E} \(it.meaning)") + Text((it.why ?? "").isEmpty ? "" : " (\(it.why!))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A))).redpen()
                         if let mine = it.mine, !mine.isEmpty {

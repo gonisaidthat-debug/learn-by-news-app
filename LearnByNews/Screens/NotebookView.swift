@@ -280,6 +280,21 @@ final class NotebookModel: ObservableObject {
         do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
     }
 
+    /// 형광펜 묻기: 메모를 붙이고, 서버가 표현장에 붙인 포스트잇도 합친다 (온라인 전용, 폴백 없음)
+    func ask(_ sid: String, start: Int, end: Int, span: String) async throws {
+        guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
+        let r = try await API.shared.ask(sid, startWord: start, endWord: end, span: span)
+        AppLog.shared.info("marker", "asked", ["sentence": sid, "words": "\(start)-\(end)"])
+        data?.highlights.append(r.highlight)
+        Cache.shared.upsertHighlight(r.highlight)
+        if let p = r.phrase, !(data?.phrases.contains { $0.id == p.id } ?? true) { data?.phrases.append(p); Cache.shared.upsertPhrase(p) }
+    }
+    func deleteHighlight(_ h: Highlight) async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
+        do { try await API.shared.deleteHighlight(h.id); data?.highlights.removeAll { $0.id == h.id }; Cache.shared.removeHighlight(id: h.id) }
+        catch { err = error.localizedDescription }
+    }
+
     /// 세션마다 이 공책에서 마지막으로 채점한 문장 뒤에 "여기까지" 줄
     func markers(_ sessions: [StudySession]) -> [String: StudySession] {
         guard let d = data else { return [:] }
@@ -439,7 +454,10 @@ struct NotebookView: View {
                 onRedo: m.browse ? nil : { m.startRedo(x); focused = true },
                 highlight: focusId == x.id,
                 bookmarked: m.bookmark?.sentenceId == x.id,
-                onBookmark: { Task { await m.toggleBookmark(x.id) } }
+                onBookmark: { Task { await m.toggleBookmark(x.id) } },
+                highlights: d.highlights.filter { $0.sentenceId == x.id },
+                onAsk: { st, en, sp in try await m.ask(x.id, start: st, end: en, span: sp) },
+                onDeleteHighlight: { h in await m.deleteHighlight(h) }
             )
             .id(x.id)
         } else {

@@ -103,6 +103,8 @@ struct MockState {
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
         sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
+        highlights = [["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
+                       "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
     }
 
@@ -137,6 +139,7 @@ struct MockState {
             a["sentences"] = sents(of: id)
             a["phrases"] = phrases.filter { $0["article_id"] as? String == id }
             a["reviews"] = reviews.filter { $0["article_id"] as? String == id }.sorted { ($0["created_at"] as! Int64) > ($1["created_at"] as! Int64) }
+            a["highlights"] = highlights.filter { $0["article_id"] as? String == id }
             return (200, a)
         case "PATCH /api/articles/:id":
             if let i = articles.firstIndex(where: { $0["id"] as? String == id }) { for (k, v) in body { articles[i][k] = v } }
@@ -223,6 +226,15 @@ struct MockState {
                               "source": p["phrase"]!, "mine": "", "meaning": p["meaning"]!, "why": "", "issued_at": p["created_at"]!,
                               "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0])
             }
+            for h in highlights {
+                let key = "h|\(h["id"]!)"; let l = last[key]
+                let s = sentences.first { $0["id"] as? String == h["sentence_id"] as? String }
+                let a = articles.first { $0["id"] as? String == h["article_id"] as? String }
+                let ans = h["answer"] as! [String: Any]
+                items.append(["key": key, "kind": "highlight", "sentence_id": h["sentence_id"]!, "article_id": h["article_id"]!, "article_title": a?["title"] ?? "", "sentence_idx": s?["idx"] ?? 0, "sentence_text": s?["text"] ?? "",
+                              "source": h["span"]!, "mine": "", "meaning": ans["meaning"]!, "why": ans["why"]!, "issued_at": h["created_at"]!,
+                              "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0])
+            }
             return (200, items)
         case "POST /api/quiz/results":
             quizResults.append(["id": nextId("q"), "key": body["key"] ?? "", "source": body["source"] ?? "", "correct": body["correct"] ?? false, "created_at": Date().ms, "kind": (body["key"] as? String ?? "").contains("|") ? "issue" : "phrase"])
@@ -258,6 +270,19 @@ struct MockState {
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
             }
             return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults])
+        case "POST /api/sentences/:id/ask":
+            guard let sent = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
+            let span = body["span"] as? String ?? ""
+            let h: [String: Any] = ["id": nextId("h"), "sentence_id": id, "article_id": sent["article_id"]!, "start_word": body["start_word"] ?? 0, "end_word": body["end_word"] ?? 0, "span": span,
+                                    "answer": ["meaning": "(모의) \(span)의 뜻", "why": "문맥상 이런 뜻", "similar": "similar phrase"], "created_at": Date().ms]
+            highlights.append(h)
+            let a = articles.first { $0["id"] as? String == sent["article_id"] as? String }
+            let p: [String: Any] = ["id": nextId("p"), "phrase": span, "meaning": "(모의) \(span)의 뜻", "sentence_id": id, "article_id": sent["article_id"]!, "created_at": Date().ms, "sentence_text": sent["text"]!, "article_title": a?["title"] ?? ""]
+            phrases.append(p)
+            var out = h; out["phrase"] = p
+            return (200, out)
+        case "DELETE /api/highlights/:id":
+            highlights.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
         case "GET /api/bookmark":
             guard let b = bookmark, let s = sentences.first(where: { $0["id"] as? String == b["sentence_id"] as? String }) else { return (200, NSNull()) }
             let a = articles.first { $0["id"] as? String == b["article_id"] as? String }

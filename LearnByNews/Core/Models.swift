@@ -358,6 +358,18 @@ struct Highlight: Codable, Identifiable, Hashable {
     var createdAt: Int64
 }
 
+/// POST /api/sentences/:id/ask 응답: Highlight & {phrase}
+struct AskResult: Decodable {
+    var highlight: Highlight
+    var phrase: Phrase?
+    enum CodingKeys: String, CodingKey { case phrase }
+    init(from decoder: Decoder) throws {
+        highlight = try Highlight(from: decoder)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        phrase = try c.decodeIfPresent(Phrase.self, forKey: .phrase)
+    }
+}
+
 // MARK: - 오프라인 내보내기 (GET /api/export)
 
 struct ExportPayload: Decodable {
