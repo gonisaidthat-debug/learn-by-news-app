@@ -29,15 +29,47 @@ func markSource(_ text: String, _ source: String) -> AttributedString {
     return out
 }
 
-/// 이전 시도 한 줄: 작은 도장 + 연필로 줄 그은 글씨
+/// 이전 시도 한 줄: 작은 도장 + 연필로 줄 그은 글씨 + 시각. 누르면 그때의 첨삭이 펼쳐진다
 struct HistoryLine: View {
     var attempt: Attempt
+    @State private var open = false
+
+    private var when: String {
+        let d = Date(ms: attempt.createdAt)
+        return "\(d.monthDay) \(d.hm)"
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Stamp(kind: .grade(attempt.grade), small: true).opacity(0.6).padding(.top, 3)
-            Text(attempt.translation.isEmpty ? "건너뜀" : attempt.translation)
-                .strikethrough(true, color: Theme.pencil)
-                .pencil()
+        VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Stamp(kind: .grade(attempt.grade), small: true).opacity(0.6)
+                    Text(attempt.translation.isEmpty ? "건너뜀" : attempt.translation)
+                        .strikethrough(true, color: Theme.pencil)
+                        .pencil()
+                    Spacer(minLength: 6)
+                    Text(when).font(Theme.hand(15)).foregroundStyle(Theme.pencil).opacity(0.8).fixedSize()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                let fb = attempt.feedback
+                Group {
+                    if fb.issues.isEmpty, fb.grade != .skip {
+                        Text("지적 없음").pencil(size: 20)
+                    }
+                    ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
+                        (Text(i.source).underline(true, color: Theme.red) + Text(" →\u{FE0E} \(i.meaning)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A)))
+                            .redpen(size: 21)
+                    }
+                    if !fb.reference.isEmpty {
+                        (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil(size: 21)
+                    }
+                }
+                .padding(.leading, 32)
+                .opacity(0.85)
+            }
         }
     }
 }
