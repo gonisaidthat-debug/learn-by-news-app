@@ -29,6 +29,8 @@ extension Notification.Name {
     static let lbnAttemptGraded = Notification.Name("lbn.attemptGraded")
     /// 임시 공책 id가 서버 id로 바뀌었다. userInfo: from, to
     static let lbnArticleRenamed = Notification.Name("lbn.articleRenamed")
+    /// 오프라인에서 쓴 응용 답이 채점돼 돌아왔다. userInfo: drill(Drill)
+    static let lbnDrillGraded = Notification.Name("lbn.drillGraded")
 }
 
 /// 오프라인 캐시 동기화 (GET /api/export) + 오프라인 큐 전송
@@ -127,6 +129,11 @@ final class SyncManager: ObservableObject {
                     try await API.shared.setBookmark(articleId: real(b.articleId), sentenceId: real(b.sentenceId), round: b.round)
                 case "bookmark_delete":
                     try await API.shared.clearBookmark()
+                case "drill_answer":
+                    let b = try JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload)
+                    let d = try await API.shared.answerDrill(b.id, answer: b.answer)
+                    DrillStore.shared.didGrade(d)
+                    NotificationCenter.default.post(name: .lbnDrillGraded, object: nil, userInfo: ["drill": d])
                 case "quiz_result":
                     let b = try JSONDecoder.api.decode(API.QuizResultBody.self, from: op.payload)
                     let _: API.OK = try await API.shared.send("POST", "/api/quiz/results", body: b)
@@ -157,6 +164,7 @@ final class SyncManager: ObservableObject {
                 return
             } catch {
                 AppLog.shared.error("queue", "dropped \(op.kind): \(error.localizedDescription)")
+                if op.kind == "drill_answer", let b = try? JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload) { DrillStore.shared.dropPending(b.id) }
                 if op.kind == "attempt", let b = try? JSONDecoder.api.decode(AttemptOp.self, from: op.payload) {
                     NotificationCenter.default.post(name: .lbnAttemptGraded, object: nil, userInfo: ["attemptId": b.attemptId, "sentenceId": b.sentenceId, "error": error.localizedDescription])
                 }
@@ -177,6 +185,7 @@ final class SyncManager: ObservableObject {
     struct SentenceOp: Codable { var sentenceId: String; var dir: String? }
     struct ArticlePatchOp: Codable { var articleId: String; var source: String? }
     struct BookmarkOp: Codable { var articleId: String; var sentenceId: String; var round: Int? }
+    struct DrillAnswerOp: Codable { var id: String; var answer: String; var answeredAtLocal: Int64; var phrase: String?; var korean: String? }
 
     // MARK: 핵심 루프의 오프라인 겸용 동작
 

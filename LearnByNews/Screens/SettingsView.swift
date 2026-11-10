@@ -6,6 +6,8 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var sync = SyncManager.shared
     @ObservedObject private var net = Connectivity.shared
+    @ObservedObject private var drills = DrillStore.shared
+    @State private var drillMsg: String?
     @State private var msg: String?
     @State private var busy = false
     @State private var showLogs = false
@@ -28,6 +30,15 @@ struct SettingsView: View {
                         HStack { Text("보낼 것"); Spacer(); Text("\(sync.pendingCount - sync.pendingAttempts)개 대기 중").foregroundStyle(Theme.muted) }
                     }
                     if let e = sync.lastError { Text(e).font(.footnote).foregroundStyle(Theme.red) }
+                    Button {
+                        Task {
+                            do { let n = try await drills.prefetch(count: drills.setSize); drillMsg = "\(n)문장 받아 둠" } catch { drillMsg = error.localizedDescription }
+                        }
+                    } label: { Label("응용 문제 미리 받기 (\(drills.setSize)문장)", systemImage: "square.and.arrow.down").foregroundStyle(Theme.ink) }
+                    .disabled(!net.isOnline)
+                    if drills.remainingOffline > 0 || drillMsg != nil {
+                        HStack { Text("받아 둔 응용 문제"); Spacer(); Text(drillMsg ?? "\(drills.remainingOffline)문장").foregroundStyle(Theme.muted) }
+                    }
                 } header: { Text("오프라인") } footer: {
                     Text("공책 열람·이전 시도·총평·표현장·시험지·기록은 저장해 두고 오프라인에서도 본다. 번역 제출·건너뛰기·다시 쓰기·새 공책·포스트잇·시험 결과·책갈피는 오프라인에서도 되고, 연결되면 순서대로 보내 채점된다(채점 시각은 보낸 시각). 총평·형광펜 묻기·응용 채점은 온라인에서만. 앱을 열 때 자동으로 보내고 증분 동기화하며 하루에 한 번 전체를 다시 받는다.")
                 }

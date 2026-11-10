@@ -6,10 +6,11 @@ enum LogBlock: Identifiable {
     case loose(at: Int64, attempts: [LogAttempt])
     case review(at: Int64, review: LogReview)
     case quiz(at: Int64, items: [LogQuiz])
+    case drills(at: Int64, items: [LogDrill])
 
     var at: Int64 {
         switch self {
-        case .session(let at, _, _), .loose(let at, _), .review(let at, _), .quiz(let at, _): return at
+        case .session(let at, _, _), .loose(let at, _), .review(let at, _), .quiz(let at, _), .drills(let at, _): return at
         }
     }
     var id: String {
@@ -18,6 +19,7 @@ enum LogBlock: Identifiable {
         case .loose(let at, _): return "l-\(at)"
         case .review(_, let r): return "r-\(r.id)"
         case .quiz(let at, _): return "q-\(at)"
+        case .drills(let at, _): return "d-\(at)"
         }
     }
 }
@@ -52,6 +54,14 @@ func buildDays(_ log: ActivityLog) -> [LogDay] {
         q.append(x)
     }
     flushQ()
+    // 응용도 30분 묶음
+    var dq: [LogDrill] = []
+    func flushD() { if let f = dq.first { blocks.append(.drills(at: f.answeredAt ?? 0, items: dq)) }; dq = [] }
+    for d in (log.drills ?? []).filter({ $0.answeredAt != nil }).sorted(by: { ($0.answeredAt ?? 0) < ($1.answeredAt ?? 0) }) {
+        if let last = dq.last, (d.answeredAt ?? 0) - (last.answeredAt ?? 0) > 30 * 60_000 { flushD() }
+        dq.append(d)
+    }
+    flushD()
 
     var days: [String: LogDay] = [:]
     let cal = Calendar.current
@@ -137,6 +147,22 @@ struct ActivityLogView: View {
                     Tiny(title: r.title) { router.open(.done(id: r.articleId)) }.lineLimit(1)
                 }
                 Text(r.summary).redpen()
+            }
+        case .drills(let at, let items):
+            let pts = items.compactMap { $0.grade.flatMap { Grade.points[$0] } }
+            let avg = pts.isEmpty ? nil : Int((Double(pts.reduce(0, +)) / Double(pts.count)).rounded())
+            let used = items.filter { $0.usedExpression == true }.count
+            Entry {
+                (Text(Date(ms: at).hm + " ").font(Theme.hand(17)) + Text("응용 \(items.count)문장" + (avg.map { " · 평균 \($0)점" } ?? "") + " · 표현 사용 \(used)/\(items.count)")).pencil()
+                ForEach(items) { d in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        if let g = d.grade { Stamp(kind: .grade(g), small: true) }
+                        Text(d.phrase).font(Theme.hand(18)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                        Text(d.korean).font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(1)
+                        if let a = d.answer, !a.isEmpty { Text(a).font(Theme.hand(18)).foregroundStyle(Theme.blueInk).lineLimit(1) }
+                    }
+                    .frame(height: Theme.lh)
+                }
             }
         case .quiz(let at, let items):
             let right = items.filter(\.correct).count

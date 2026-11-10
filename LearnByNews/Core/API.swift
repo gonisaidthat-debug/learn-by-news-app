@@ -162,6 +162,10 @@ final class API {
     func answerDrill(_ id: String, answer: String) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer)) }
     func deleteDrill(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/drills/\(id)") }
     func drills(days: Int = 30) async throws -> [Drill] { try await send("GET", "/api/drills?days=\(days)") }
+    struct DrillBatchBody: Encodable { var count: Int }
+    struct DrillBatch: Decodable { var drills: [Drill]; var made: Int? }
+    /// 안 푼 문제를 count개까지 채워 전부 돌려준다 (오프라인용 미리 받기, 중복 생성 없음)
+    func batchDrills(count: Int) async throws -> DrillBatch { try await send("POST", "/api/drills/batch", body: DrillBatchBody(count: max(1, min(30, count)))) }
 
     // MARK: 형광펜
     struct AskBody: Encodable { var startWord: Int; var endWord: Int; var span: String }

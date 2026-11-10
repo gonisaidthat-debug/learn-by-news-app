@@ -268,12 +268,27 @@ struct LogQuiz: Codable, Identifiable, Hashable {
     var kind: QuizItem.Kind
 }
 
+struct LogDrill: Codable, Identifiable, Hashable {
+    var id: String
+    var phrase: String
+    var korean: String
+    var answer: String?
+    var grade: Grade?
+    var usedExpression: Bool?
+    var answeredAt: Int64?
+}
+
 struct ActivityLog: Codable {
     var since: Int64
     var attempts: [LogAttempt]
     var sessions: [StudySession]
     var reviews: [LogReview]
     var quiz: [LogQuiz]
+    var drills: [LogDrill]?
+
+    init(since: Int64, attempts: [LogAttempt], sessions: [StudySession], reviews: [LogReview], quiz: [LogQuiz], drills: [LogDrill]? = nil) {
+        self.since = since; self.attempts = attempts; self.sessions = sessions; self.reviews = reviews; self.quiz = quiz; self.drills = drills
+    }
 }
 
 // MARK: - 날짜 도우미

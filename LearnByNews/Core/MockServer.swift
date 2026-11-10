@@ -116,7 +116,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -274,7 +274,10 @@ struct MockState {
                 let a = articles.first { $0["id"] as? String == r["article_id"] as? String }
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
             }
-            return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults])
+            let ds = drills.filter { !($0["feedback"] is NSNull) }.map { d -> [String: Any] in
+                ["id": d["id"]!, "phrase": d["phrase"]!, "korean": d["korean"]!, "answer": d["answer"]!, "grade": d["grade"]!, "used_expression": (d["feedback"] as! [String: Any])["used_expression"]!, "answered_at": d["answered_at"]!]
+            }
+            return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults, "drills": ds])
         case "GET /api/articles/:id/pass":
             return (200, passes[id].map { ["done": $0, "updated_at": Date().ms] as [String: Any] } ?? NSNull())
         case "PUT /api/articles/:id/pass":
@@ -295,6 +298,20 @@ struct MockState {
                                     "korean": "(모의) '\(p["meaning"]!)'를 써서 한 문장을 영어로 옮겨 보자.", "created_at": Date().ms,
                                     "answer": NSNull(), "grade": NSNull(), "feedback": NSNull(), "answered_at": NSNull()]
             drills.append(d); return (200, d)
+        case "POST /api/drills/batch":
+            let count = max(1, min(30, (body["count"] as? Int) ?? 5))
+            var made = 0
+            var used = Set(drills.filter { $0["feedback"] is NSNull }.compactMap { $0["phrase_id"] as? String })
+            while drills.filter({ $0["feedback"] is NSNull }).count < count {
+                guard let p = phrases.first(where: { !used.contains($0["id"] as! String) }) ?? phrases.randomElement() else { break }
+                used.insert(p["id"] as! String)
+                drills.append(["id": nextId("d"), "phrase_id": p["id"]!, "phrase": p["phrase"]!, "meaning": p["meaning"]!,
+                               "korean": "(모의) '\(p["meaning"]!)'를 써서 한 문장을 영어로 옮겨 보자.", "created_at": Date().ms,
+                               "answer": NSNull(), "grade": NSNull(), "feedback": NSNull(), "answered_at": NSNull()])
+                made += 1
+                if made > 60 { break }
+            }
+            return (200, ["drills": drills.filter { $0["feedback"] is NSNull }, "made": made])
         case "POST /api/drills/:id/answer":
             guard let i = drills.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문제"]) }
             let a = body["answer"] as? String ?? ""
