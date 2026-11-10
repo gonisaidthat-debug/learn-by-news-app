@@ -15,7 +15,7 @@ final class NotebookModel: ObservableObject {
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
-    @Published var finishedPass = false   // 마지막 문장을 제출했다 → 마지막 장으로 (새 총평)
+    @Published var finishingPass = false  // 마지막 문장을 제출했다 → 채점이 다 끝나면 마지막 장으로 (새 총평)
     @Published var input = ""
     @Published var inflight: [String: Inflight] = [:]
     @Published var redo: String?         // 다시 쓰는 중인 문장 id
@@ -125,7 +125,8 @@ final class NotebookModel: ObservableObject {
                 let next = pass[i + 1]
                 redo = next; requestScroll(next); focusRequest += 1
             } else {
-                self.pass = nil; redo = nil; finishedPass = true
+                self.pass = nil; redo = nil; finishingPass = true
+                requestScroll("bottom")
             }
             return
         }
@@ -230,15 +231,17 @@ struct NotebookView: View {
             }
             #endif
         }
-        .onChange(of: m.allDone) { _, done in
-            // 모든 문장이 채점되면 마지막 장으로
-            if done, m.inflight.isEmpty, m.redo == nil, !m.browse { router.shelfPath = [.done(id: articleId)] }
-        }
+        .onChange(of: m.allDone) { _, _ in checkFinish() }
+        .onChange(of: m.inflight.isEmpty) { _, _ in checkFinish() }
+        .onChange(of: m.finishingPass) { _, _ in checkFinish() }
         .onChange(of: m.focusRequest) { _, _ in focused = true }
-        .onChange(of: m.finishedPass) { _, f in if f { router.shelfPath = [.done(id: articleId, newReview: true)] } }
-        .onChange(of: m.inflight.isEmpty) { _, empty in
-            if empty, m.allDone, m.redo == nil, !m.browse { router.shelfPath = [.done(id: articleId)] }
-        }
+    }
+
+    /// 모든 문장이 채점됐고 진행 중·오류 상태가 없으면 마지막 장으로.
+    /// 처음부터 다시 쓰기를 마친 뒤라면 새 총평을 요청하게 한다 (채점이 전부 끝난 뒤라야 총평에 반영된다)
+    private func checkFinish() {
+        guard !m.browse, m.redo == nil, m.inflight.isEmpty, m.allDone else { return }
+        router.shelfPath = [.done(id: articleId, newReview: m.finishingPass)]
     }
 
     private func content(_ d: ArticleDetail) -> some View {
