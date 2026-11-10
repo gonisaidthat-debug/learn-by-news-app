@@ -53,7 +53,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
 | DELETE `/api/articles/:id` | — | `{ok}` 기록·표현·총평까지 삭제 |
 | POST `/api/articles/:id/review` | `{score: int\|null}` (클라 계산값 보관용) | `Review` — Claude 호출, 수 초 걸림 |
-| POST `/api/sentences/:id/attempts` | `{translation}` 또는 `{skip:true}`, 선택 `attempt_id`(클라이언트 UUID, 멈추기용) | `Feedback & {translation, created_at}` — translation이면 Claude 호출(약 5~10초), skip은 즉시 |
+| POST `/api/sentences/:id/attempts` | `{translation}` 또는 `{skip:true}`, 선택 `attempt_id`(클라이언트 UUID, 멈추기용) | `Feedback & {translation, created_at}` `& {phrases: Phrase[]}` — **첨삭 표현은 서버가 기본으로 표현장에 저장**하고(같은 문장·같은 표현은 한 번만) 새로 저장된 것을 `phrases`로 돌려준다. 클라이언트는 이를 공책의 phrases에 합쳐 포스트잇을 "붙은" 상태로 그린다. 떼는 건 `DELETE /api/phrases/:id`(goni 결정 2026-11-10) — translation이면 Claude 호출(약 5~10초), skip은 즉시 |
 | DELETE `/api/attempts/:id` | — | `{ok, removed}` **멈추기**: 채점이 끝났으면 그 시도 삭제, 아직이면 묘비를 남겨 결과 도착 시 버림(그 요청은 409 `{cancelled:true}`) |
 | POST `/api/sentences/:id/merge` | `{dir:"prev"\|"next"}` | `{ok, kept, text}` 붙는 쪽 문장과 기록 삭제 |
 | DELETE `/api/sentences/:id` | — | `{ok}` |
@@ -74,6 +74,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 - **문장 분리**는 클라이언트 몫. 첫 줄 제목, URL만 있는 줄은 source, 빈 줄 사이가 문단. 약어(월 약어, Mr./Dr./Jr., No., vs., U.S. 등) 뒤는 끊지 않고, 소문자·구두점으로 시작하는 조각은 앞에 붙인다. iOS는 `NLTokenizer(unit: .sentence)` + 같은 보정.
 - **제출 즉시 다음 문장**으로 넘어가고 채점은 뒤에서 받는다(여러 개 동시 가능). 결과가 오면 그 문장을 펼쳐 보여준다.
 - **멈추기**: 채점 중인 문장에 "멈추기 ↩". 누르면 요청을 취소(URLSessionTask.cancel)하고 `DELETE /api/attempts/:attempt_id`를 보낸 뒤, 그 문장이 다시 입력란이 되고 쓰던 번역이 그대로 들어간다(다시 쓰기 중이었으면 그 자리에서). 제출할 때 attempt_id를 UUID로 만들어 보내야 멈추기가 된다.
+- **열람 모드**: 완료 여부·다시 쓰기 진행과 무관하게 전체 문장과 최신 번역·첨삭·이전 시도를 보여주는 화면. 다시 쓰기 중 "이전 회차 열람"(별도 화면으로 push, 진행 상태는 유지), 마지막 장 "공책 전체 열람", 기록·시험지의 문장 링크가 여기로 온다.
 - **처음부터 다시 쓰기**(마지막 장 버튼): 첫 문장부터 순서대로 다시 쓰기 모드로 돈다(진행 표시 "다시 n / m"). **화면은 처음 하는 것처럼 비운다**: 이번에 새로 제출한 문장만 위에 쌓이고, 아직 안 쓴 문장(이전 번역·도장)은 보이지 않는다. 이전 번역은 데이터로 남아 펼치면 "이전 시도"로만 보인다(goni 결정 2026-11-10). **진행 상태는 기기에 저장**(UserDefaults, 공책별 ids·done)해 앱을 껐다 켜거나 다른 화면에 다녀와도 그 자리에서 이어진다. 마지막 장은 진행 중이면 "처음부터 다시 쓰기 이어서 (n / m) →"를 보여주고 총평을 자동 요청하지 않는다. 저장이 없을 때는 "최근 24시간 안에 다시 쓴 앞쪽 문장 수"로 추정해 "오늘 다시 쓴 n문장 다음부터 이어서 →"를 보여준다. 중단·완료 시 저장을 지운다. 각 제출은 새 attempt(이전 것은 history). 중간에 취소 가능. 마지막 문장을 제출하면 공책에 머물며 채점이 전부 끝나길 기다렸다가 마지막 장으로 가서 새 총평을 자동 요청한다(`POST /api/articles/:id/review`, 기존 총평은 그대로 남음). 채점 오류로 "다시 시도" 상태인 문장이 있으면 이동하지 않는다. 서버 변경 없음.
 - **세션 시작점은 클라이언트가 보관**(웹은 localStorage). 앱은 UserDefaults. 시작 전에는 입력 불가. "오늘 여기까지"는 `POST /api/sessions {started_at}`. 기기 간 시작점은 공유되지 않는다(필요해지면 서버로 옮긴다).
 - 참고 번역 기본 펼침. 등급 도장·빨간 밑줄(issue.mine을 번역에서 찾아 표시)·포스트잇 저장 토글은 웹과 같은 의미.
