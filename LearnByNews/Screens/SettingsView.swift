@@ -3,6 +3,7 @@ import SwiftUI
 /// 설정: 로그 보내기·보기·지우기, 로그아웃
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthModel
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var sync = SyncManager.shared
     @ObservedObject private var net = Connectivity.shared
     @State private var msg: String?
@@ -20,12 +21,15 @@ struct SettingsView: View {
                     .disabled(sync.syncing || !net.isOnline)
                     HStack { Text("마지막 동기화"); Spacer(); Text(sync.lastSyncAt.map { Date(ms: $0).fullLabel } ?? "아직 없음").foregroundStyle(Theme.muted) }
                     HStack { Text("연결"); Spacer(); Text(net.isOnline ? "온라인" : "오프라인").foregroundStyle(net.isOnline ? Theme.grade(.A) : Theme.red) }
-                    if sync.pendingCount > 0 {
-                        HStack { Text("보낼 것"); Spacer(); Text("\(sync.pendingCount)개 대기 중").foregroundStyle(Theme.muted) }
+                    if sync.pendingAttempts > 0 {
+                        HStack { Text("대기 중 채점"); Spacer(); Text("\(sync.pendingAttempts)개 · 연결되면 보낸다").foregroundStyle(Theme.muted) }
+                    }
+                    if sync.pendingCount > sync.pendingAttempts {
+                        HStack { Text("보낼 것"); Spacer(); Text("\(sync.pendingCount - sync.pendingAttempts)개 대기 중").foregroundStyle(Theme.muted) }
                     }
                     if let e = sync.lastError { Text(e).font(.footnote).foregroundStyle(Theme.red) }
                 } header: { Text("오프라인") } footer: {
-                    Text("공책 열람·이전 시도·총평·표현장·시험지·기록은 저장해 두고 오프라인에서도 본다. 채점·총평·새 공책은 온라인에서만. 시험 결과와 포스트잇은 연결되면 순서대로 보낸다. 앱을 열 때 자동으로 증분 동기화하고 하루에 한 번 전체를 다시 받는다.")
+                    Text("공책 열람·이전 시도·총평·표현장·시험지·기록은 저장해 두고 오프라인에서도 본다. 번역 제출·건너뛰기·다시 쓰기·새 공책·포스트잇·시험 결과·책갈피는 오프라인에서도 되고, 연결되면 순서대로 보내 채점된다(채점 시각은 보낸 시각). 총평·형광펜 묻기·응용 채점은 온라인에서만. 앱을 열 때 자동으로 보내고 증분 동기화하며 하루에 한 번 전체를 다시 받는다.")
                 }
                 Section("로그 (버그 추적용)") {
                     Button { Task { await upload() } } label: { Label(busy ? "보내는 중…" : "로그 보내기", systemImage: "paperplane").foregroundStyle(Theme.ink) }.disabled(busy)
@@ -52,6 +56,7 @@ struct SettingsView: View {
             .navigationTitle("설정")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.desk, for: .navigationBar)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
             .sheet(isPresented: $showLogs) { LocalLogView() }
             .confirmationDialog("로컬 로그를 지울까요?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("지우기", role: .destructive) { AppLog.shared.clear(); msg = "지웠다" }

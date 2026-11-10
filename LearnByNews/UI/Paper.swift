@@ -60,7 +60,7 @@ struct BlankLine: View { var body: some View { Color.clear.frame(height: Theme.l
 
 /// 등급 도장. 왼쪽 여백의 동그라미
 struct Stamp: View {
-    enum Kind { case grade(Grade), busy, error, redo, question, pin, session, marker }
+    enum Kind { case grade(Grade), busy, error, redo, question, pin, session, marker, waiting }
     var kind: Kind
     var small = false
 
@@ -74,20 +74,21 @@ struct Stamp: View {
         case .pin: return "📌\u{FE0E}"
         case .marker: return "🖍"
         case .session: return "✂\u{FE0E}"
+        case .waiting: return "⏱\u{FE0E}"
         }
     }
     private var color: Color {
         switch kind {
         case .grade(let g): return Theme.grade(g)
         case .busy, .error, .session: return Theme.red
-        case .redo, .question: return Theme.pencil
+        case .redo, .question, .waiting: return Theme.pencil
         case .pin, .marker: return Theme.ink
         }
     }
     private var dash: [CGFloat]? {
         switch kind {
         case .redo, .session: return [5, 3]
-        case .question: return [2, 3]
+        case .question, .waiting: return [2, 3]
         default: return nil
         }
     }
@@ -103,6 +104,10 @@ struct Stamp: View {
             } else if case .marker = kind {
                 RoundedRectangle(cornerRadius: 3).fill(Theme.marker).shadow(color: .black.opacity(0.15), radius: 2, x: 1, y: 2)
                 Text(label).font(.system(size: 16))
+            } else if case .waiting = kind {
+                Circle().fill(Color.white.opacity(0.4))
+                Circle().strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [2, 3]))
+                Image(systemName: "clock").font(.system(size: small ? 12 : 14, weight: .semibold))
             } else {
                 if case .busy = kind {} else {
                     Circle().fill(Color.white.opacity(0.4))

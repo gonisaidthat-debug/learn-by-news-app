@@ -362,6 +362,72 @@ final class Cache {
         try? ctx.save()
     }
 
+    // MARK: 오프라인에서 공책 구조를 바꿀 때 캐시에 먼저 반영 (서버에 보내질 때까지 화면이 맞도록)
+
+    /// 새 공책(임시 id). 전송 뒤 renameArticle로 서버 id로 바꾼다
+    func insertArticle(id: String, title: String, source: String, sentences: [SplitSentence]) {
+        ctx.insert(CachedArticle(id: id, title: title, source: source, createdAt: Date().ms))
+        for (i, s) in sentences.enumerated() { ctx.insert(CachedSentence(id: "\(id)-\(i)", articleId: id, idx: i, paragraph: s.paragraph, text: s.text)) }
+        try? ctx.save()
+    }
+    /// 임시 공책 id → 서버 id. 문장은 idx로 맞춰 서버 문장 id로 바꾼다. (임시 문장 id → 서버 문장 id) 표를 돌려준다
+    func renameArticle(from temp: String, to real: ArticleDetail) -> [String: String] {
+        var map: [String: String] = [:]
+        if let a = all(CachedArticle.self).first(where: { $0.id == temp }) { ctx.delete(a) }
+        ctx.insert(CachedArticle(id: real.id, title: real.title, source: real.source ?? "", createdAt: real.createdAt))
+        let temps = all(CachedSentence.self).filter { $0.articleId == temp }
+        for t in temps {
+            if let r = real.sentences.first(where: { $0.idx == t.idx }) { map[t.id] = r.id }
+            ctx.delete(t)
+        }
+        for r in real.sentences { ctx.insert(CachedSentence(id: r.id, articleId: real.id, idx: r.idx, paragraph: r.paragraph, text: r.text)) }
+        for x in all(CachedAttempt.self) where x.articleId == temp { x.articleId = real.id; if let n = map[x.sentenceId] { x.sentenceId = n } }
+        for x in all(CachedPhrase.self) where x.articleId == temp { x.articleId = real.id; if let n = map[x.sentenceId] { x.sentenceId = n } }
+        if let b = all(CachedBookmark.self).first, b.articleId == temp { b.articleId = real.id; if let n = map[b.sentenceId] { b.sentenceId = n } }
+        try? ctx.save()
+        return map
+    }
+    func deleteArticleLocal(_ id: String) {
+        for x in all(CachedArticle.self) where x.id == id { ctx.delete(x) }
+        for x in all(CachedSentence.self) where x.articleId == id { ctx.delete(x) }
+        for x in all(CachedAttempt.self) where x.articleId == id { ctx.delete(x) }
+        for x in all(CachedPhrase.self) where x.articleId == id { ctx.delete(x) }
+        for x in all(CachedReview.self) where x.articleId == id { ctx.delete(x) }
+        for x in all(CachedHighlight.self) where x.articleId == id { ctx.delete(x) }
+        try? ctx.save()
+    }
+    func setSourceLocal(_ id: String, _ source: String) {
+        if let a = all(CachedArticle.self).first(where: { $0.id == id }) { a.source = source; try? ctx.save() }
+    }
+    /// 문장 제거 (뒤 문장 idx 당김)
+    func deleteSentenceLocal(_ sid: String) {
+        guard let s = all(CachedSentence.self).first(where: { $0.id == sid }) else { return }
+        let aid = s.articleId, idx = s.idx
+        ctx.delete(s)
+        for x in all(CachedAttempt.self) where x.sentenceId == sid { ctx.delete(x) }
+        for x in all(CachedSentence.self) where x.articleId == aid && x.idx > idx { x.idx -= 1 }
+        try? ctx.save()
+    }
+    /// 합치기 (서버와 같은 규칙: prev면 앞 문장이 남고 이 문장이 붙는다, next면 이 문장이 남고 다음 문장이 붙는다). 남은 문장 id를 돌려준다
+    @discardableResult
+    func mergeLocal(_ sid: String, dir: String) -> String? {
+        let sents = all(CachedSentence.self)
+        guard let s = sents.first(where: { $0.id == sid }) else { return nil }
+        let mine = sents.filter { $0.articleId == s.articleId }.sorted { $0.idx < $1.idx }
+        guard let pos = mine.firstIndex(where: { $0.id == sid }) else { return nil }
+        let other = dir == "prev" ? pos - 1 : pos + 1
+        guard mine.indices.contains(other) else { return nil }
+        let keep = dir == "prev" ? mine[other] : mine[pos]
+        let drop = dir == "prev" ? mine[pos] : mine[other]
+        keep.text = keep.text + " " + drop.text
+        let dropId = drop.id, dropIdx = drop.idx
+        ctx.delete(drop)
+        for x in all(CachedAttempt.self) where x.sentenceId == dropId { ctx.delete(x) }
+        for x in mine where x.idx > dropIdx && x.id != dropId { x.idx -= 1 }
+        try? ctx.save()
+        return keep.id
+    }
+
     // MARK: 오프라인 큐
 
     func enqueue(_ kind: String, _ payload: some Encodable) {
@@ -372,4 +438,5 @@ final class Cache {
     func pending() -> [PendingOp] { all(PendingOp.self).sorted { $0.createdAt < $1.createdAt } }
     func remove(_ op: PendingOp) { ctx.delete(op); try? ctx.save() }
     var pendingCount: Int { (try? ctx.fetchCount(FetchDescriptor<PendingOp>())) ?? 0 }
+    func pending(kind: String) -> [PendingOp] { pending().filter { $0.kind == kind } }
 }

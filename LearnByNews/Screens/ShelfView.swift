@@ -24,6 +24,12 @@ struct ShelfView: View {
         NavigationStack(path: $router.shelfPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button { router.showSettings = true } label: { Image(systemName: "gearshape").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(6) }
+                            .buttonStyle(.plain).accessibilityLabel("설정")
+                    }
+                    .padding(.bottom, 2)
                     if let b = bookmark { bookmarkBar(b).padding(.bottom, 12) }
                     sheet
                     SessionBar(model: session).padding(.horizontal, 4).padding(.top, 14)
@@ -73,8 +79,8 @@ struct ShelfView: View {
         do { bookmark = try await API.shared.bookmark(); Cache.shared.setBookmark(bookmark) } catch { /* 오프라인: 캐시 */ }
     }
     private func clearBookmark() async {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
-        do { try await API.shared.clearBookmark(); bookmark = nil; Cache.shared.setBookmark(nil) } catch { err = error.localizedDescription }
+        bookmark = nil; Cache.shared.setBookmark(nil)
+        await SyncManager.shared.clearBookmark()
     }
 
     // MARK: 붙여넣기 종이
@@ -224,7 +230,12 @@ struct ShelfView: View {
     private func loadList() async {
         // 캐시를 먼저 그리고 온라인이면 갱신
         if !loaded, let c = Cache.shared.articles() { list = c }
-        do { list = try await API.shared.articles(); err = nil; offline = false }
+        do {
+            var live = try await API.shared.articles(); err = nil; offline = false
+            // 아직 서버에 못 보낸(임시 id) 공책은 캐시에서 덧붙인다
+            if let temps = Cache.shared.articles()?.filter({ SyncManager.isTemp($0.id) }), !temps.isEmpty { live.insert(contentsOf: temps, at: 0) }
+            list = live
+        }
         catch let e as APIError where e.isNetwork && !list.isEmpty { offline = true; err = nil }
         catch { err = error.localizedDescription }
         loaded = true
@@ -251,11 +262,10 @@ struct ShelfView: View {
     private func create() async {
         let p = parsed
         guard !p.sentences.isEmpty, !busy else { return }
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         busy = true; err = nil
         do {
             let source = (link.isEmpty ? p.source : link).trimmingCharacters(in: .whitespaces)
-            let id = try await API.shared.createArticle(title: p.title, sentences: p.sentences, source: source)
+            let id = try await SyncManager.shared.createArticle(title: p.title, sentences: p.sentences, source: source)
             AppLog.shared.info("shelf", "article created", ["id": id, "sentences": "\(p.sentences.count)"])
             raw = ""; link = ""
             router.shelfPath = [.notebook(id: id)]
@@ -263,7 +273,7 @@ struct ShelfView: View {
         busy = false
     }
     private func remove(_ a: ArticleSummary) async {
-        do { try await API.shared.deleteArticle(a.id); Cache.shared.needsFull = true; await loadList() }
+        do { try await SyncManager.shared.deleteArticle(a.id); await loadList() }
         catch { err = error.localizedDescription }
     }
 }

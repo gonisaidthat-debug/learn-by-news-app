@@ -5,11 +5,12 @@ struct Inflight: Hashable {
     var attemptId: String
     var wasRedo: Bool          // 다시 쓰기 중이던 문장이면 멈출 때 그 자리로 돌아간다
     var error: String?
+    var pending = false        // 오프라인: 큐에 있고 연결되면 채점된다 (대기 도장)
 }
 
 @MainActor
 final class NotebookModel: ObservableObject {
-    let id: String
+    private(set) var id: String        // 오프라인에서 만든 임시 공책이면 전송 뒤 서버 id로 바뀐다
     let focusId: String?
     let restartAfter: Int?
     let browseAll: Bool
@@ -29,8 +30,23 @@ final class NotebookModel: ObservableObject {
     @Published var input = ""
     @Published var inflight: [String: Inflight] = [:]
     @Published var redo: String?         // 다시 쓰는 중인 문장 id
-    @Published var open: String?
+    @Published var open: String? { didSet { scheduleAutoBookmark() } }
     @Published var refOpen: [String: Bool] = [:]
+    private var autoBookmarkTask: Task<Void, Never>?
+
+    /// 펼쳐 본 문장이 책갈피가 된다 ("마지막까지 본 곳"). 0.5초 디바운스, 이미 그 문장이면 생략
+    private func scheduleAutoBookmark() {
+        autoBookmarkTask?.cancel()
+        guard let sid = open, bookmark?.sentenceId != sid else { return }
+        autoBookmarkTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self, self.open == sid, self.bookmark?.sentenceId != sid else { return }
+            let s = self.data?.sentences.first { $0.id == sid }
+            self.bookmark = Bookmark(articleId: self.id, sentenceId: sid, round: self.roundShown, createdAt: Date().ms, articleTitle: self.data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            Cache.shared.setBookmark(self.bookmark)
+            await SyncManager.shared.setBookmark(articleId: self.id, sentenceId: sid, round: self.roundShown)
+        }
+    }
     @Published var lastGraded: String?
     @Published var err: String?
     @Published var scrollTo: String?     // 스크롤 목표 ("bottom" 또는 문장 id)
@@ -39,8 +55,39 @@ final class NotebookModel: ObservableObject {
     private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
     private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
+    private var observers: [NSObjectProtocol] = []
+
     init(id: String, focusId: String?, restartAfter: Int?, browseAll: Bool, round: Int?) {
         self.id = id; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll; self.round = round
+        // 오프라인 큐의 채점이 돌아오면 그 문장을 교체한다
+        observers.append(NotificationCenter.default.addObserver(forName: .lbnAttemptGraded, object: nil, queue: .main) { [weak self] n in
+            Task { @MainActor in self?.graded(n.userInfo ?? [:]) }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: .lbnArticleRenamed, object: nil, queue: .main) { [weak self] n in
+            Task { @MainActor in
+                guard let self, let from = n.userInfo?["from"] as? String, let to = n.userInfo?["to"] as? String, from == self.id else { return }
+                self.id = to
+                self.inflight = Dictionary(uniqueKeysWithValues: self.inflight.map { (SyncManager.shared.real($0.key), $0.value) })
+                await self.reload()
+            }
+        })
+    }
+    deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
+
+    private func graded(_ info: [AnyHashable: Any]) {
+        guard let aid = info["attemptId"] as? String, let (sid, f) = inflight.first(where: { $0.value.attemptId == aid }) else { return }
+        if let r = info["result"] as? AttemptResult { applyResult(sid, r) }
+        else if let e = info["error"] as? String { inflight[sid] = Inflight(translation: f.translation, attemptId: aid, wasRedo: f.wasRedo, error: e) }
+    }
+
+    /// 큐에 남아 있는 이 공책의 채점을 "대기" 상태로 그린다
+    private func mergePendingAttempts(_ d: ArticleDetail) {
+        for op in SyncManager.shared.pendingAttempts(for: id) {
+            let sid = SyncManager.shared.real(op.sentenceId)
+            guard d.sentences.contains(where: { $0.id == sid }), inflight[sid] == nil else { continue }
+            let has = d.sentences.first { $0.id == sid }?.attempt != nil
+            inflight[sid] = Inflight(translation: op.translation, attemptId: op.attemptId, wasRedo: has, pending: true)
+        }
     }
 
     /// 회차 열람용 변환: n번째 총평(오래된 순) 시각까지의 시도만 남긴다. 총평도 n번째까지
@@ -123,7 +170,8 @@ final class NotebookModel: ObservableObject {
                 data = d; beginPass(p)
                 return
             }
-            if d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(); return }
+            mergePendingAttempts(d)
+            if inflight.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(); return }
             data = d; requestScroll("bottom")
         } catch { err = error.localizedDescription }
     }
@@ -140,19 +188,17 @@ final class NotebookModel: ObservableObject {
 
     /// 책갈피 꽂기/빼기 (서버에 하나). 회차 열람 중이면 round도
     func toggleBookmark(_ sid: String) async {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
-        do {
-            if bookmark?.sentenceId == sid {
-                try await API.shared.clearBookmark(); bookmark = nil; Cache.shared.setBookmark(nil)
-                AppLog.shared.info("bookmark", "cleared")
-            } else {
-                try await API.shared.setBookmark(articleId: id, sentenceId: sid, round: roundShown)
-                let s = data?.sentences.first { $0.id == sid }
-                bookmark = Bookmark(articleId: id, sentenceId: sid, round: roundShown, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
-                Cache.shared.setBookmark(bookmark)
-                AppLog.shared.info("bookmark", "set", ["sentence": sid, "round": "\(roundShown ?? 0)"])
-            }
-        } catch { err = error.localizedDescription }
+        if bookmark?.sentenceId == sid {
+            bookmark = nil; Cache.shared.setBookmark(nil)
+            await SyncManager.shared.clearBookmark()
+            AppLog.shared.info("bookmark", "cleared")
+        } else {
+            let s = data?.sentences.first { $0.id == sid }
+            bookmark = Bookmark(articleId: id, sentenceId: sid, round: roundShown, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            Cache.shared.setBookmark(bookmark)
+            await SyncManager.shared.setBookmark(articleId: id, sentenceId: sid, round: roundShown)
+            AppLog.shared.info("bookmark", "set", ["sentence": sid, "round": "\(roundShown ?? 0)"])
+        }
     }
 
     func reload() async {
@@ -178,17 +224,30 @@ final class NotebookModel: ObservableObject {
     func send(_ sid: String, _ translation: String, wasRedo: Bool? = nil) {
         let attemptId = UUID().uuidString.lowercased()
         let redoing = wasRedo ?? (data?.sentences.first { $0.id == sid }?.attempt != nil)
+        AppLog.shared.info("notebook", translation.isEmpty ? "skip" : "submit", ["sentence": sid, "attempt": attemptId, "chars": "\(translation.count)", "online": "\(Connectivity.shared.isOnline)"])
+        // 오프라인(또는 아직 서버에 없는 임시 공책): 큐에 넣고 "채점 대기"로. 연결되면 순서대로 채점된다
+        if !Connectivity.shared.isOnline || SyncManager.isTemp(sid) {
+            queue(sid, translation, attemptId: attemptId, redoing: redoing); return
+        }
         inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing)
-        AppLog.shared.info("notebook", translation.isEmpty ? "skip" : "submit", ["sentence": sid, "attempt": attemptId, "chars": "\(translation.count)"])
         tasks[sid] = Task {
             defer { tasks[sid] = nil }
             do { let r = try await API.shared.attempt(sid, translation: translation, attemptId: attemptId); if !stopped.contains(attemptId) { applyResult(sid, r) } }
+            catch let e as APIError where e.isNetwork {
+                // 보내는 중 끊김: 큐로 돌린다 (같은 attempt_id라 서버에 중복되지 않는다)
+                if stopped.contains(attemptId) { return }
+                queue(sid, translation, attemptId: attemptId, redoing: redoing)
+            }
             catch {
                 // 멈춘 요청의 오류(취소, 409 cancelled)는 보여주지 않는다
                 if stopped.contains(attemptId) || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                 inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, error: error.localizedDescription)
             }
         }
+    }
+    private func queue(_ sid: String, _ translation: String, attemptId: String, redoing: Bool) {
+        SyncManager.shared.queueAttempt(attemptId: attemptId, sentenceId: sid, articleId: id, translation: translation)
+        inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, pending: true)
     }
 
     /// 멈추기: 요청 취소 → 서버에 DELETE → 그 문장을 다시 입력란으로, 쓰던 번역은 그대로
@@ -201,16 +260,12 @@ final class NotebookModel: ObservableObject {
         if f.wasRedo { redo = sid } else { redo = nil }
         input = f.translation
         focusRequest += 1
-        Task {
-            do { let r = try await API.shared.cancelAttempt(f.attemptId); AppLog.shared.info("notebook", "stop ok", ["attempt": f.attemptId, "removed": "\(r.removed ?? false)"]) }
-            catch { AppLog.shared.warn("notebook", "stop failed: \(error.localizedDescription)", ["attempt": f.attemptId]) }
-        }
+        Task { await SyncManager.shared.stopAttempt(attemptId: f.attemptId, sentenceId: sid, articleId: id) }
     }
 
     /// 현재 문장을 제출(또는 건너뛰기)하고 즉시 다음 문장으로
     func submit(skip: Bool) {
         guard let cur = current else { return }
-        guard Connectivity.shared.isOnline, !offline else { err = onlineOnlyMessage; return }
         let t = skip ? "" : input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !skip && t.isEmpty { return }
         err = nil
@@ -256,17 +311,14 @@ final class NotebookModel: ObservableObject {
     }
 
     func merge(_ sid: String, dir: String) async {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
-        do { _ = try await API.shared.merge(sid, dir: dir); Cache.shared.needsFull = true; AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
+        do { try await SyncManager.shared.mergeSentence(sid, dir: dir); AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
         catch { err = error.localizedDescription }
     }
 
     /// 문장을 공책에서 뺀다. 빈 공책이 되면 true
     func remove(_ sid: String) async -> Bool {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return false }
         do {
-            try await API.shared.deleteSentence(sid)
-            Cache.shared.needsFull = true
+            try await SyncManager.shared.deleteSentence(sid)
             AppLog.shared.info("notebook", "remove sentence", ["sentence": sid])
             guard var d = data else { return false }
             d.sentences.removeAll { $0.id == sid }
@@ -292,8 +344,7 @@ final class NotebookModel: ObservableObject {
     }
 
     func setSource(_ url: String) async {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
-        do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
+        do { try await SyncManager.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
     }
 
     /// 형광펜 묻기: 메모를 붙이고, 서버가 표현장에 붙인 포스트잇도 합친다 (온라인 전용, 폴백 없음)
@@ -444,10 +495,11 @@ struct NotebookView: View {
         if m.redo == x.id {
             inputBlock(x)
         } else if let f = m.inflight[x.id] {
-            Entry(stamp: AnyView(Stamp(kind: f.error == nil ? .busy : .error))) {
+            Entry(stamp: AnyView(Stamp(kind: f.error != nil ? .error : f.pending ? .waiting : .busy))) {
                 Text(x.text).enLine()
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if f.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) } else { Text(f.translation).koLine() }
+                    if f.pending { Text("연결되면 채점").font(Theme.hand(17)).foregroundStyle(Theme.pencil) }
                     if f.error == nil { Tiny(title: "멈추기 ↩\u{FE0E}") { m.stop(x.id); focused = true } }
                 }
                 if let e = f.error {
@@ -485,9 +537,7 @@ struct NotebookView: View {
         let redo = m.redo != nil
         return Entry(stamp: redo ? AnyView(Stamp(kind: .redo)) : nil) {
             Text(s.text).font(Theme.print(16)).foregroundStyle(redo ? Theme.pencil : Theme.ink).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
-            if m.offline {
-                Text("\(onlineOnlyMessage) · 지금은 오프라인").redpen()
-            } else if !session.inSession {
+            if !session.inSession {
                 Button { session.begin(); focused = true } label: {
                     Text("공부 시작 ▶\u{FE0E} 을 누르면 여기에 쓸 수 있다").redpen()
                 }.buttonStyle(.plain)
@@ -534,9 +584,9 @@ struct NotebookView: View {
                         if let prev, prev.paragraph == cur.paragraph { Tiny(title: "↑\u{FE0E} 앞에 붙이기") { Task { await m.merge(cur.id, dir: "prev") } } }
                         if let next, next.attempt == nil, next.paragraph == cur.paragraph { Tiny(title: "↓\u{FE0E} 뒤와 합치기") { Task { await m.merge(cur.id, dir: "next") } } }
                     }
-                    if waiting > 0 { MutedText(text: "채점 \(waiting)개 기다리는 중…") }
+                    if waiting > 0 { MutedText(text: m.inflight.values.contains { $0.pending } ? "채점 대기 \(waiting)개 · 연결되면 보낸다" : "채점 \(waiting)개 기다리는 중…") }
                 } else {
-                    MutedText(text: waiting > 0 ? "채점 \(waiting)개 기다리는 중…" : "끝")
+                    MutedText(text: waiting > 0 ? (m.inflight.values.contains { $0.pending } ? "채점 대기 \(waiting)개 · 연결되면 보낸다" : "채점 \(waiting)개 기다리는 중…") : "끝")
                 }
             }
         }

@@ -7,8 +7,23 @@ final class DoneModel: ObservableObject {
     let newReview: Bool   // 처음부터 다시 쓰기가 끝나면 기존 총평이 있어도 새로 받는다
     @Published var data: ArticleDetail?
     @Published var err: String?
-    @Published var open: String?
+    @Published var open: String? { didSet { scheduleAutoBookmark() } }
     @Published var refOpen: [String: Bool] = [:]
+    private var autoBookmarkTask: Task<Void, Never>?
+
+    /// 펼쳐 본 문장이 책갈피가 된다 (0.5초 디바운스)
+    private func scheduleAutoBookmark() {
+        autoBookmarkTask?.cancel()
+        guard let sid = open, bookmark?.sentenceId != sid else { return }
+        autoBookmarkTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self, self.open == sid, self.bookmark?.sentenceId != sid else { return }
+            let s = self.data?.sentences.first { $0.id == sid }
+            self.bookmark = Bookmark(articleId: self.id, sentenceId: sid, round: nil, createdAt: Date().ms, articleTitle: self.data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            Cache.shared.setBookmark(self.bookmark)
+            await SyncManager.shared.setBookmark(articleId: self.id, sentenceId: sid, round: nil)
+        }
+    }
     @Published var reviewing = false
     @Published var reviewErr: String?
     @Published var showOld = false
@@ -69,8 +84,7 @@ final class DoneModel: ObservableObject {
     }
 
     func setSource(_ url: String) async {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
-        do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
+        do { try await SyncManager.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
     }
 
     func ask(_ sid: String, start: Int, end: Int, span: String) async throws {
@@ -86,16 +100,13 @@ final class DoneModel: ObservableObject {
     }
 
     func toggleBookmark(_ sid: String) async {
-        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
-        do {
-            if bookmark?.sentenceId == sid { try await API.shared.clearBookmark(); bookmark = nil; Cache.shared.setBookmark(nil) }
-            else {
-                try await API.shared.setBookmark(articleId: id, sentenceId: sid, round: nil)
-                let s = data?.sentences.first { $0.id == sid }
-                bookmark = Bookmark(articleId: id, sentenceId: sid, round: nil, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
-                Cache.shared.setBookmark(bookmark)
-            }
-        } catch { err = error.localizedDescription }
+        if bookmark?.sentenceId == sid { bookmark = nil; Cache.shared.setBookmark(nil); await SyncManager.shared.clearBookmark() }
+        else {
+            let s = data?.sentences.first { $0.id == sid }
+            bookmark = Bookmark(articleId: id, sentenceId: sid, round: nil, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            Cache.shared.setBookmark(bookmark)
+            await SyncManager.shared.setBookmark(articleId: id, sentenceId: sid, round: nil)
+        }
     }
 }
 

@@ -103,7 +103,9 @@ enum Route: Hashable {
 /// 탭·화면 이동. 시험지·기록에서 "공책에서 보기"처럼 탭을 건너 이동할 때 쓴다
 @MainActor
 final class Router: ObservableObject {
-    enum Tab: Hashable { case shelf, phrases, quiz, drills, log, settings }
+    enum Tab: Hashable { case shelf, phrases, quiz, drills, log }
+    /// 설정은 탭이 아니라 기사 탭 오른쪽 위 톱니 → 시트 (탭이 6개면 iPhone에서 "More"로 밀린다)
+    @Published var showSettings = false
     @Published var tab: Tab = .shelf
     @Published var shelfPath: [Route] = []
     /// ⌘N: 공책 목록의 붙여넣기 칸으로 포커스
@@ -126,7 +128,7 @@ final class Router: ObservableObject {
             case "quiz": tab = .quiz
             case "drills": tab = .drills
             case "log": tab = .log
-            case "settings": tab = .settings
+            case "settings": showSettings = true
             default: break
             }
         }
@@ -194,8 +196,8 @@ struct MainTabs: View {
             QuizView().tabItem { Label("시험지", systemImage: "questionmark.square") }.tag(Router.Tab.quiz)
             DrillsView().tabItem { Label("응용", systemImage: "pencil.and.outline") }.tag(Router.Tab.drills)
             ActivityLogView().tabItem { Label("기록", systemImage: "calendar") }.tag(Router.Tab.log)
-            SettingsView().tabItem { Label("설정", systemImage: "gearshape") }.tag(Router.Tab.settings)
         }
         .tint(Theme.red)
+        .sheet(isPresented: $router.showSettings) { SettingsView() }
     }
 }
