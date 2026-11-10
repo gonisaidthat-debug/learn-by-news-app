@@ -54,9 +54,15 @@ struct LoginView: View {
     }
 
     private func submit() async {
-        guard !pw.isEmpty, !busy else { return }
+        guard !busy else { return }
+        // 한글 조합 중인 글자를 먼저 확정한다: 포커스를 내리면 마크된 텍스트가 커밋된 뒤 값이 읽힌다
+        focused = false
+        try? await Task.sleep(for: .milliseconds(80))
+        let value = pw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { focused = true; return }
         busy = true; err = nil
-        err = await auth.login(pw)
+        err = await auth.login(value)
         busy = false
+        if err != nil { focused = true }
     }
 }

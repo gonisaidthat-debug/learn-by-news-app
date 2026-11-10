@@ -38,7 +38,7 @@ final class SyncManager: ObservableObject {
 
     /// 앱 시작·포그라운드 복귀: 온라인이면 증분. 하루 한 번 또는 삭제 뒤엔 전체
     func autoSync() async {
-        guard Connectivity.shared.isOnline, Keychain.get() != nil else { return }
+        guard Connectivity.shared.isOnline, (API.token ?? Keychain.get()) != nil else { return }
         let c = Cache.shared
         let dayAgo = Date().ms - 86_400_000
         let full = c.exportedAt == nil || c.needsFull || (c.lastFullAt ?? 0) < dayAgo

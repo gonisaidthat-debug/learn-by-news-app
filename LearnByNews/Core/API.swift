@@ -35,10 +35,13 @@ final class API {
 
     struct Empty: Encodable {}
 
+    /// 이번 실행 동안의 비밀번호. 로그인 때 넣고, 시작 때 Keychain에서 읽는다. Keychain 저장이 실패해도 세션은 동작한다
+    static var token: String? = Keychain.get()
+
     /// 모든 요청의 Authorization 값. 헤더는 ASCII만 실리므로 비밀번호(한글 가능)를 percent-encoding한다.
     /// 서버가 decodeURIComponent 해서 비교한다. Keychain에는 원문 그대로 둔다.
     static func authHeader() -> String {
-        let raw = Keychain.get() ?? ""
+        let raw = token ?? Keychain.get() ?? ""
         return "Bearer " + (raw.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")
     }
 
@@ -59,7 +62,8 @@ final class API {
         }
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
         if http.statusCode == 401 {
-            AppLog.shared.warn("api", "\(method) \(path) 401")
+            AppLog.shared.warn("api", "\(method) \(path) 401", ["tokenChars": "\((Self.token ?? Keychain.get() ?? "").count)"])
+            Self.token = nil
             Keychain.delete()
             await MainActor.run { NotificationCenter.default.post(name: .lbnUnauthorized, object: nil) }
             throw APIError.unauthorized

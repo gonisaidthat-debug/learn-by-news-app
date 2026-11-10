@@ -32,7 +32,9 @@ final class AuthModel: ObservableObject {
     }
 
     func check() async {
-        guard Keychain.get() != nil else { state = .loggedOut; return }
+        Keychain.selfTest()
+        API.token = Keychain.get()
+        guard API.token != nil else { state = .loggedOut; return }
         if biometricEnabled && Self.biometricAvailable { state = .locked; await unlock(); return }
         await enter()
     }
@@ -74,14 +76,19 @@ final class AuthModel: ObservableObject {
         Task { await unlock() }
     }
 
-    func login(_ pw: String) async -> String? {
-        Keychain.set(pw)
+    /// 비밀번호로 로그인. 앞뒤 공백·개행은 잘라낸다. 값은 로그에 남기지 않고 길이만 남긴다
+    func login(_ raw: String) async -> String? {
+        let pw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        API.token = pw
+        let saved = Keychain.set(pw)
+        AppLog.shared.info("auth", "login try", ["chars": "\(pw.count)", "utf8": "\(pw.utf8.count)", "trimmed": "\(pw.count != raw.count)", "keychainSaved": "\(saved)"])
         do { try await API.shared.checkAuth(); state = .loggedIn; AppLog.shared.info("auth", "login ok"); return nil }
-        catch APIError.unauthorized { return "비밀번호가 틀렸습니다" }
-        catch { return error.localizedDescription }
+        catch APIError.unauthorized { API.token = nil; return "비밀번호가 틀렸습니다" }
+        catch let e as APIError where e.isNetwork { API.token = nil; Keychain.delete(); AppLog.shared.error("auth", "login network failure: \(e.localizedDescription)"); return "서버에 연결할 수 없다: \(e.localizedDescription)" }
+        catch { API.token = nil; Keychain.delete(); AppLog.shared.error("auth", "login failed: \(error.localizedDescription)"); return "서버 오류: \(error.localizedDescription)" }
     }
 
-    func logout() { Keychain.delete(); state = .loggedOut }
+    func logout() { API.token = nil; Keychain.delete(); state = .loggedOut }
 }
 
 enum Route: Hashable {
