@@ -39,7 +39,8 @@ Sentence   { id, idx, paragraph, text, attempt: Attempt|null, history: Attempt[]
 Phrase     { id, phrase, meaning, sentence_id, article_id, created_at, sentence_text?, article_title? }
 Review     { id, score: int|null, created_at, summary, patterns: [{title, detail}], praise }
 Session    { id, started_at, ended_at, attempts, score: int|null, articles: string[], created_at }
-QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title, sentence_idx, sentence_text,
+Highlight  { id, sentence_id, article_id, start_word, end_word, span, answer: {meaning, why, similar}, created_at }
+QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, article_title, sentence_idx, sentence_text,
              source, mine, meaning, why, issued_at, last_correct: bool|null, last_at, tries, wrong }
 ```
 
@@ -49,7 +50,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 | GET `/api/auth` | — | `{ok:true}` (비밀번호 확인용) |
 | GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, review_count, grades:{A?,B?,C?,D?,skip?}}]` 최신순. `review_count` = 총평 개수 = 완주 회차 |
 | POST `/api/articles` | `{title, source?, sentences:[{paragraph, text}]}` 문장 분리는 클라이언트 | `{id}` |
-| GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[]}` reviews 최신순 |
+| GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[], highlights: Highlight[]}` reviews 최신순 |
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
 | DELETE `/api/articles/:id` | — | `{ok}` 기록·표현·총평까지 삭제 |
 | POST `/api/articles/:id/review` | `{score: int\|null}` (클라 계산값 보관용) | `Review` — Claude 호출, 수 초 걸림 |
@@ -68,6 +69,8 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 | GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions, reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` |
 | GET `/api/export?since=<ms>` | — | `{exported_at, since, articles, sentences, attempts(feedback 파싱됨), phrases, reviews(review 파싱됨), quiz_results, sessions(articles 파싱됨)}` 오프라인 캐시용. since가 있으면 append-only 표만 증분, articles·sentences는 항상 전체. 삭제는 전체 내보내기로만 반영 |
 | GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다 |
+| POST `/api/sentences/:id/ask` | `{start_word, end_word, span}` (단어 인덱스는 공백 분리 기준 0부터) | `Highlight & {phrase: Phrase|null}` — Claude가 구절을 `{meaning, why, similar}`로 설명(하루 상한 포함). 구절은 표현장에도 기본으로 붙는다 |
+| DELETE `/api/highlights/:id` | — | `{ok}` |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
@@ -79,6 +82,7 @@ QuizItem   { key, kind: "issue"|"phrase", sentence_id, article_id, article_title
 - **열람 모드**: 완료 여부·다시 쓰기 진행과 무관하게 전체 문장과 최신 번역·첨삭·이전 시도를 보여주는 화면. 다시 쓰기 중 "이전 회차 열람"(별도 화면으로 push, 진행 상태는 유지), 마지막 장 "공책 전체 열람", 기록·시험지의 문장 링크가 여기로 온다.
 - **회차 열람**(공책 목록 카드의 "1회차 2회차 …" 링크, 진행 중이면 "n회차 진행 중"은 공책으로): 회차 = n번째 총평. 각 문장의 번역을 "그 총평 시각까지의 마지막 시도"로 바꿔 열람 화면에 보여준다(이전 시도도 그 시점까지만, 총평도 n번째까지). 탭 "n회차 열람". 클라이언트가 history(created_at)로 계산, 서버 변경 없음.
 - **책갈피**(goni 요청 2026-11-10): 문장 항목의 메뉴(길게 누르기 또는 ⋯)에 "책갈피 꽂기/빼기". 한 번에 하나. 꽂힌 문장은 오른쪽 위 빨간 리본. 회차 열람 중이면 round도 저장. 공책 목록 맨 위에 "🔖 책갈피 · 기사 · n번째 문장 · (회차)" 띠, 누르면 그 문장이 펼쳐진 열람 화면(회차 있으면 그 회차)으로. 띠의 ×로 뺌. 오프라인이면 캐시된 책갈피로 이동.
+- **형광펜**(goni 결정 2026-11-10, "첫 단어·끝 단어 두 번 누르기"): 펼친 문장의 원문을 단어 조각(공백 분리, 인덱스 0부터)으로 그린다. 단어를 탭하면 노랗게, 다른 단어를 탭하면 그 사이가 한 덩어리로(앞 단어를 탭해도 됨). 말풍선 "이게 뭐야? 🖍" → `POST /api/sentences/:id/ask` → 문장 아래 노란 메모(구절 → 뜻 (이유) · 비슷한 말), 칠한 단어는 계속 노랗게. 응답의 phrase는 공책 phrases에 합쳐 포스트잇 "붙은" 상태로. 시험지에 "형광펜" 묶음(kind highlight, 🖍 도장). 오프라인에서는 묻기 불가("온라인에서만").
 - **처음부터 다시 쓰기**(마지막 장 버튼): 첫 문장부터 순서대로 다시 쓰기 모드로 돈다(진행 표시 "다시 n / m"). **화면은 처음 하는 것처럼 비운다**: 이번에 새로 제출한 문장만 위에 쌓이고, 아직 안 쓴 문장(이전 번역·도장)은 보이지 않는다. 이전 번역은 데이터로 남아 펼치면 "이전 시도"로만 보인다(goni 결정 2026-11-10). **진행 상태는 기기에 저장**(UserDefaults, 공책별 ids·done)해 앱을 껐다 켜거나 다른 화면에 다녀와도 그 자리에서 이어진다. 마지막 장은 진행 중이면 "처음부터 다시 쓰기 이어서 (n / m) →"를 보여주고 총평을 자동 요청하지 않는다. 저장이 없을 때는 "최근 24시간 안에 다시 쓴 앞쪽 문장 수"로 추정해 "오늘 다시 쓴 n문장 다음부터 이어서 →"를 보여준다. 중단·완료 시 저장을 지운다. 각 제출은 새 attempt(이전 것은 history). 중간에 취소 가능. 마지막 문장을 제출하면 공책에 머물며 채점이 전부 끝나길 기다렸다가 마지막 장으로 가서 새 총평을 자동 요청한다(`POST /api/articles/:id/review`, 기존 총평은 그대로 남음). 채점 오류로 "다시 시도" 상태인 문장이 있으면 이동하지 않는다. 서버 변경 없음.
 - **세션 시작점은 클라이언트가 보관**(웹은 localStorage). 앱은 UserDefaults. 시작 전에는 입력 불가. "오늘 여기까지"는 `POST /api/sessions {started_at}`. 기기 간 시작점은 공유되지 않는다(필요해지면 서버로 옮긴다).
 - 참고 번역 기본 펼침. 등급 도장·빨간 밑줄(issue.mine을 번역에서 찾아 표시)·포스트잇 저장 토글은 웹과 같은 의미.
