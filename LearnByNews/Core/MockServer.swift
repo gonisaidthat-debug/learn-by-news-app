@@ -114,7 +114,9 @@ struct MockState {
                 let ss = sents(of: a["id"] as! String)
                 var g: [String: Int] = [:]
                 for s in ss { if let at = s["attempt"] as? [String: Any], let gr = at["grade"] as? String { g[gr, default: 0] += 1 } }
-                var o = a; o["sentence_count"] = ss.count; o["done_count"] = g.values.reduce(0, +); o["grades"] = g; return o
+                var o = a; o["sentence_count"] = ss.count; o["done_count"] = g.values.reduce(0, +); o["grades"] = g
+                o["review_count"] = reviews.filter { $0["article_id"] as? String == a["id"] as? String }.count
+                return o
             })
         case "POST /api/articles":
             let id = nextId("a")

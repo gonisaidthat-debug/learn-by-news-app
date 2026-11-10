@@ -88,14 +88,19 @@ struct ShelfView: View {
     private var notebooks: some View {
         VStack(spacing: 12) {
             ForEach(Array(list.enumerated()), id: \.element.id) { i, a in
+                // 이 기기에 다시 쓰기 진행 상태가 있으면 "n회차 진행 중"으로, 누르면 공책에서 이어진다
+                let prog = RedoProgress.load(a.id).flatMap { $0.remaining.isEmpty ? nil : $0 }
+                let status: String = prog.map { "\($0.ids.count - $0.remaining.count) / \(a.sentenceCount)" }
+                    .map { "\(a.rounds + 1)회차 진행 중 \($0)" }
+                    ?? (a.isDone ? (a.rounds >= 2 ? "완료 · \(a.rounds)회차" : "완료") : "\(a.doneCount) / \(a.sentenceCount)")
                 HStack(spacing: 0) {
                     Button {
-                        router.shelfPath = [a.isDone ? .done(id: a.id) : .notebook(id: a.id)]
+                        router.shelfPath = [(a.isDone && prog == nil) ? .done(id: a.id) : .notebook(id: a.id)]
                     } label: {
                         HStack(alignment: .center, spacing: 16) {
                             Text(a.title).font(Theme.hand(24)).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
-                            MutedText(text: a.isDone ? "완료" : "\(a.doneCount) / \(a.sentenceCount)").fixedSize()
+                            MutedText(text: status).fixedSize()
                         }
                         .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
                         .contentShape(Rectangle())

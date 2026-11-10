@@ -109,8 +109,10 @@ struct ArticleSummary: Codable, Identifiable, Hashable {
     var sentenceCount: Int
     var doneCount: Int
     var grades: [String: Int]
+    var reviewCount: Int?          // 총평 개수 = 완주 회차
 
     var isDone: Bool { doneCount >= sentenceCount }
+    var rounds: Int { reviewCount ?? 0 }
     func count(_ g: Grade) -> Int { grades[g.rawValue] ?? 0 }
 }
 
