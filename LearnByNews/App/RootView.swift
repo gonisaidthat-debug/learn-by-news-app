@@ -146,6 +146,7 @@ struct RootView: View {
         }
         .task { await auth.check() }
         .onAppear { Self.applyMacWindowSize() }
+        .onChange(of: auth.state) { _, st in if st == .loggedIn { Task { await SyncManager.shared.autoSync() } } }
     }
 
     /// 맥(Catalyst): 창 최소 크기 720×600

@@ -170,6 +170,9 @@ struct ActivityLogView: View {
     }
 
     private func load() async {
-        do { log = try await API.shared.activityLog(days: days); err = nil } catch { err = error.localizedDescription }
+        if let c = Cache.shared.activityLog(days: days) { log = c }
+        do { log = try await API.shared.activityLog(days: days); err = nil }
+        catch let e as APIError where e.isNetwork { if log == nil { err = e.localizedDescription } }
+        catch { err = error.localizedDescription }
     }
 }

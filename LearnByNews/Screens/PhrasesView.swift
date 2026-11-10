@@ -74,10 +74,13 @@ struct PhrasesView: View {
     }
 
     private func load() async {
-        do { list = try await API.shared.phrases(q: q); err = nil } catch { err = error.localizedDescription }
+        if let c = Cache.shared.phrases(q: q) { list = c }
+        do { list = try await API.shared.phrases(q: q); err = nil }
+        catch let e as APIError where e.isNetwork { err = Cache.shared.isEmpty ? e.localizedDescription : nil }
+        catch { err = error.localizedDescription }
     }
     private func remove(_ p: Phrase) async {
-        do { try await API.shared.deletePhrase(p.id); list.removeAll { $0.id == p.id }; AppLog.shared.info("phrases", "removed", ["id": p.id]) }
+        do { try await SyncManager.shared.deletePhrase(id: p.id); list.removeAll { $0.id == p.id }; AppLog.shared.info("phrases", "removed", ["id": p.id]) }
         catch { err = error.localizedDescription }
     }
 }

@@ -15,6 +15,7 @@ final class NotebookModel: ObservableObject {
     let browseAll: Bool
     let round: Int?           // 회차 열람: n번째 총평 시각까지의 마지막 시도로 보여준다
     @Published var roundShown: Int?
+    @Published var offline = false        // 서버에 못 닿아 캐시를 보여주는 중 (입력 불가)
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
@@ -70,8 +71,19 @@ final class NotebookModel: ObservableObject {
     var allDone: Bool { data?.sentences.allSatisfy { $0.attempt != nil } ?? false }
 
     func load(onDone: @escaping () -> Void) async {
+        // 열람은 캐시를 먼저 그린다
+        if browse, data == nil, let c = Cache.shared.article(id) {
+            if let round, let r = Self.asOfRound(c, round) { data = r; roundShown = round } else { data = c }
+            open = focusId
+        }
         do {
-            let d = try await API.shared.article(id)
+            let d: ArticleDetail
+            do { d = try await API.shared.article(id); offline = false }
+            catch let e as APIError where e.isNetwork {
+                // 오프라인: 캐시로 보여준다. 쓰기는 막힌다
+                guard let c = Cache.shared.article(id) else { throw e }
+                d = c; offline = true
+            }
             if browse {
                 if let round, let r = Self.asOfRound(d, round) { data = r; roundShown = round } else { data = d }
                 open = focusId; if let focusId { requestScroll(focusId) }
@@ -108,7 +120,9 @@ final class NotebookModel: ObservableObject {
     }
 
     func reload() async {
-        do { data = try await API.shared.article(id) } catch { err = error.localizedDescription }
+        do { data = try await API.shared.article(id); offline = false }
+        catch let e as APIError where e.isNetwork { if let c = Cache.shared.article(id) { data = c; offline = true } else { err = e.localizedDescription } }
+        catch { err = error.localizedDescription }
     }
 
     func applyResult(_ sid: String, _ r: AttemptResult) {
@@ -160,8 +174,10 @@ final class NotebookModel: ObservableObject {
     /// 현재 문장을 제출(또는 건너뛰기)하고 즉시 다음 문장으로
     func submit(skip: Bool) {
         guard let cur = current else { return }
+        guard Connectivity.shared.isOnline, !offline else { err = onlineOnlyMessage; return }
         let t = skip ? "" : input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !skip && t.isEmpty { return }
+        err = nil
         let wasRedo = redo != nil
         input = ""
         send(cur.id, t, wasRedo: wasRedo)
@@ -201,14 +217,17 @@ final class NotebookModel: ObservableObject {
     }
 
     func merge(_ sid: String, dir: String) async {
-        do { _ = try await API.shared.merge(sid, dir: dir); AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
+        do { _ = try await API.shared.merge(sid, dir: dir); Cache.shared.needsFull = true; AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
         catch { err = error.localizedDescription }
     }
 
     /// 문장을 공책에서 뺀다. 빈 공책이 되면 true
     func remove(_ sid: String) async -> Bool {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return false }
         do {
             try await API.shared.deleteSentence(sid)
+            Cache.shared.needsFull = true
             AppLog.shared.info("notebook", "remove sentence", ["sentence": sid])
             guard var d = data else { return false }
             d.sentences.removeAll { $0.id == sid }
@@ -224,15 +243,17 @@ final class NotebookModel: ObservableObject {
         guard var d = data else { return }
         do {
             if let ex = d.phrases.first(where: { $0.sentenceId == sid && $0.phrase == e.phrase }) {
-                try await API.shared.deletePhrase(ex.id); d.phrases.removeAll { $0.id == ex.id }
+                try await SyncManager.shared.deletePhrase(id: ex.id); d.phrases.removeAll { $0.id == ex.id }
             } else {
-                let p = try await API.shared.savePhrase(e, sentenceId: sid, articleId: d.id); d.phrases.append(p)
+                let p = try await SyncManager.shared.savePhrase(e, sentenceId: sid, articleId: d.id, articleTitle: d.title, sentenceText: d.sentences.first { $0.id == sid }?.text)
+                d.phrases.append(p)
             }
             data = d
         } catch { err = error.localizedDescription }
     }
 
     func setSource(_ url: String) async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
     }
 
@@ -404,7 +425,9 @@ struct NotebookView: View {
         let redo = m.redo != nil
         return Entry(stamp: redo ? AnyView(Stamp(kind: .redo)) : nil) {
             Text(s.text).font(Theme.print(16)).foregroundStyle(redo ? Theme.pencil : Theme.ink).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
-            if !session.inSession {
+            if m.offline {
+                Text("\(onlineOnlyMessage) · 지금은 오프라인").redpen()
+            } else if !session.inSession {
                 Button { session.begin(); focused = true } label: {
                     Text("공부 시작 ▶\u{FE0E} 을 누르면 여기에 쓸 수 있다").redpen()
                 }.buttonStyle(.plain)

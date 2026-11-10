@@ -22,7 +22,10 @@ final class QuizModel: ObservableObject {
     var missed: Int { items.filter { $0.lastCorrect == false }.count }
 
     func load() async {
-        do { all = try await API.shared.quiz(); rebuild() } catch { err = error.localizedDescription }
+        if all == nil, let c = Cache.shared.quiz() { all = c; rebuild() }
+        do { all = try await API.shared.quiz(); rebuild(); err = nil }
+        catch let e as APIError where e.isNetwork { if all == nil { err = e.localizedDescription } }
+        catch { err = error.localizedDescription }
     }
 
     /// 안 본 것 → 틀린 것 → 맞힌 것(오래된 순). 같은 묶음 안에서는 섞는다
@@ -46,7 +49,7 @@ final class QuizModel: ObservableObject {
         revealed = false; answer = ""; i += 1
         AppLog.shared.info("quiz", correct ? "right" : "wrong", ["key": it.key])
         Task {
-            do { try await API.shared.answerQuiz(it, correct: correct) } catch { err = error.localizedDescription }
+            do { try await SyncManager.shared.answerQuiz(it, correct: correct) } catch { err = error.localizedDescription }
         }
     }
 }

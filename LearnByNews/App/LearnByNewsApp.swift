@@ -29,7 +29,9 @@ struct LearnByNewsApp: App {
                 .onChange(of: phase) { _, p in
                     switch p {
                     case .background: AppLog.shared.markClean(); auth.didEnterBackground()
-                    case .active: AppLog.shared.markDirty(); auth.willEnterForeground(); RootView.applyMacWindowSize()
+                    case .active:
+                        AppLog.shared.markDirty(); auth.willEnterForeground(); RootView.applyMacWindowSize()
+                        if auth.state == .loggedIn { Task { await SyncManager.shared.autoSync() } }
                     default: break
                     }
                 }

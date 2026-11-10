@@ -128,7 +128,7 @@ final class API {
 
     // MARK: quiz
     func quiz() async throws -> [QuizItem] { try await send("GET", "/api/quiz") }
-    struct QuizResultBody: Encodable { var key: String; var sentenceId: String; var source: String; var correct: Bool }
+    struct QuizResultBody: Codable { var key: String; var sentenceId: String; var source: String; var correct: Bool }
     func answerQuiz(_ it: QuizItem, correct: Bool) async throws {
         let _: OK = try await send("POST", "/api/quiz/results", body: QuizResultBody(key: it.key, sentenceId: it.sentenceId, source: it.source, correct: correct))
     }

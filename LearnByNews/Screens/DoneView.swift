@@ -19,8 +19,12 @@ final class DoneModel: ObservableObject {
     init(id: String, newReview: Bool) { self.id = id; self.newReview = newReview }
 
     func load() async {
+        if data == nil, let c = Cache.shared.article(id) { data = c; progress = RedoProgress.load(id) }
         do {
-            let d = try await API.shared.article(id); data = d
+            let d: ArticleDetail
+            do { d = try await API.shared.article(id) }
+            catch let e as APIError where e.isNetwork { if let c = Cache.shared.article(id) { d = c } else { throw e } }
+            data = d
             progress = RedoProgress.load(id)
             estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil
             // 다시 쓰기가 진행 중이면 총평을 자동 요청하지 않는다
@@ -36,6 +40,7 @@ final class DoneModel: ObservableObject {
 
     func requestReview() async {
         guard let d = data, !reviewing else { return }
+        guard Connectivity.shared.isOnline else { reviewErr = onlineOnlyMessage; return }
         reviewing = true; reviewErr = nil
         AppLog.shared.info("done", "review request", ["article": d.id])
         do {
@@ -49,15 +54,17 @@ final class DoneModel: ObservableObject {
         guard var d = data else { return }
         do {
             if let ex = d.phrases.first(where: { $0.sentenceId == sid && $0.phrase == e.phrase }) {
-                try await API.shared.deletePhrase(ex.id); d.phrases.removeAll { $0.id == ex.id }
+                try await SyncManager.shared.deletePhrase(id: ex.id); d.phrases.removeAll { $0.id == ex.id }
             } else {
-                let p = try await API.shared.savePhrase(e, sentenceId: sid, articleId: d.id); d.phrases.append(p)
+                let p = try await SyncManager.shared.savePhrase(e, sentenceId: sid, articleId: d.id, articleTitle: d.title, sentenceText: d.sentences.first { $0.id == sid }?.text)
+                d.phrases.append(p)
             }
             data = d
         } catch { err = error.localizedDescription }
     }
 
     func setSource(_ url: String) async {
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.setSource(id, url); data?.source = url } catch { err = error.localizedDescription }
     }
 }

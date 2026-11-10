@@ -21,6 +21,7 @@ final class SessionModel: ObservableObject {
         AppLog.shared.info("session", "discard")
     }
     func load() async {
+        if sessions.isEmpty, let c = Cache.shared.sessions() { sessions = c }
         do { sessions = try await API.shared.sessions() } catch { AppLog.shared.warn("session", "list failed: \(error.localizedDescription)") }
     }
     func close() async {

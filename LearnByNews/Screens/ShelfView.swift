@@ -12,6 +12,7 @@ struct ShelfView: View {
     /// 다시 쓰기 진행 중인 공책의 이번 회차 등급 (article id → 등급별 개수)
     @State private var roundGrades: [String: [String: Int]] = [:]
     @State private var loaded = false
+    @State private var offline = false     // 서버에 못 닿아 캐시를 보여주는 중
     @State private var toDelete: ArticleSummary?
     @State private var sessionToDelete: StudySession?
     @FocusState private var pasteFocused: Bool
@@ -69,7 +70,7 @@ struct ShelfView: View {
                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .frame(height: 28)
             HStack {
-                MutedText(text: p.sentences.isEmpty ? " " : "문단 \(paragraphs) · 문장 \(p.sentences.count)")
+                MutedText(text: p.sentences.isEmpty ? (offline ? "오프라인 · 저장된 내용을 보여준다" : " ") : "문단 \(paragraphs) · 문장 \(p.sentences.count)")
                 Spacer()
                 Tiny(title: busy ? "공책 만드는 중…" : "새 공책 만들기 →\u{FE0E}", color: Theme.red) { Task { await create() } }
                     .disabled(p.sentences.isEmpty || busy)
@@ -187,7 +188,10 @@ struct ShelfView: View {
         session.start = SessionStore.start
     }
     private func loadList() async {
-        do { list = try await API.shared.articles(); err = nil }
+        // 캐시를 먼저 그리고 온라인이면 갱신
+        if !loaded, let c = Cache.shared.articles() { list = c }
+        do { list = try await API.shared.articles(); err = nil; offline = false }
+        catch let e as APIError where e.isNetwork && !list.isEmpty { offline = true; err = nil }
         catch { err = error.localizedDescription }
         loaded = true
         await loadRoundGrades()
@@ -198,7 +202,7 @@ struct ShelfView: View {
         var out: [String: [String: Int]] = [:]
         for a in list {
             guard let p = RedoProgress.load(a.id), !p.remaining.isEmpty else { continue }
-            guard let d = try? await API.shared.article(a.id) else { continue }
+            guard let d = (try? await API.shared.article(a.id)) ?? Cache.shared.article(a.id) else { continue }
             var g: [String: Int] = [:]
             for s in d.sentences where p.done.contains(s.id) {
                 if let gr = s.attempt?.grade { g[gr.rawValue, default: 0] += 1 }
@@ -210,6 +214,7 @@ struct ShelfView: View {
     private func create() async {
         let p = parsed
         guard !p.sentences.isEmpty, !busy else { return }
+        guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         busy = true; err = nil
         do {
             let source = (link.isEmpty ? p.source : link).trimmingCharacters(in: .whitespaces)
@@ -221,7 +226,7 @@ struct ShelfView: View {
         busy = false
     }
     private func remove(_ a: ArticleSummary) async {
-        do { try await API.shared.deleteArticle(a.id); await loadList() }
+        do { try await API.shared.deleteArticle(a.id); Cache.shared.needsFull = true; await loadList() }
         catch { err = error.localizedDescription }
     }
 }

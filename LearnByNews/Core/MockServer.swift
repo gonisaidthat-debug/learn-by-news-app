@@ -16,6 +16,10 @@ final class MockServer: URLProtocol {
 
     override func startLoading() {
         let req = request
+        // LBN_OFFLINE=1: 모든 요청이 네트워크 오류로 끝난다 (오프라인 캐시 확인용)
+        if ProcessInfo.processInfo.environment["LBN_OFFLINE"] == "1" {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return
+        }
         let path = req.url?.path ?? ""
         let query = req.url?.query ?? ""
         let method = req.httpMethod ?? "GET"
@@ -103,7 +107,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -251,6 +255,26 @@ struct MockState {
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
             }
             return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults])
+        case "GET /api/export":
+            let since = Int64(query.split(separator: "=").dropFirst().joined()) ?? 0
+            var attempts: [[String: Any]] = []
+            for s in sentences {
+                let all = ((s["history"] as? [[String: Any]]) ?? []) + [s["attempt"] as? [String: Any]].compactMap { $0 }
+                for at in all where (at["created_at"] as! Int64) > since {
+                    attempts.append(["id": "\(s["id"]!)-\(at["created_at"]!)", "sentence_id": s["id"]!, "article_id": s["article_id"]!, "translation": at["translation"]!, "grade": at["grade"]!, "feedback": at["feedback"]!, "created_at": at["created_at"]!])
+                }
+            }
+            let revs = reviews.filter { ($0["created_at"] as! Int64) > since }.map { r -> [String: Any] in
+                ["id": r["id"]!, "article_id": r["article_id"]!, "score": r["score"]!, "created_at": r["created_at"]!, "review": ["summary": r["summary"]!, "patterns": r["patterns"]!, "praise": r["praise"]!]]
+            }
+            return (200, ["exported_at": Date().ms, "since": since,
+                          "articles": articles.map { a in var o = a; o["sentence_count"] = sents(of: a["id"] as! String).count; o["done_count"] = 0; return o },
+                          "sentences": sentences.map { ["id": $0["id"]!, "article_id": $0["article_id"]!, "idx": $0["idx"]!, "paragraph": $0["paragraph"]!, "text": $0["text"]!] },
+                          "attempts": attempts,
+                          "phrases": phrases.filter { ($0["created_at"] as! Int64) > since },
+                          "reviews": revs,
+                          "quiz_results": quizResults.filter { ($0["created_at"] as! Int64) > since }.map { ["id": $0["id"]!, "key": $0["key"]!, "sentence_id": "", "source": $0["source"]!, "correct": ($0["correct"] as! Bool) ? 1 : 0, "created_at": $0["created_at"]!] },
+                          "sessions": sessions.filter { ($0["created_at"] as! Int64) > since }])
         case "POST /api/logs":
             let n = (body["entries"] as? [Any])?.count ?? 0
             return (200, ["ok": true, "saved": n])
