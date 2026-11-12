@@ -105,7 +105,7 @@ struct EntryView: View {
         let a = s.attempt!
         let fb = a.feedback
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
-            if expanded, let onAsk { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk, onMemo: onMemo) }
+            if expanded, let onAsk { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight) }
             else { Text(markHighlights(s.text, highlights)).enLine() }
             if expanded {
                 ForEach(highlights) { h in
@@ -396,6 +396,8 @@ struct MarkerWords: View {
     var highlights: [Highlight]
     var onAsk: (Int, Int, String) async throws -> Void
     var onMemo: ((Int, Int, String, String) async throws -> Void)? = nil
+    var onNote: ((Highlight, String) async -> Void)? = nil
+    var onDelete: ((Highlight) async -> Void)? = nil
     @State private var anchor: Int?
     @State private var range: ClosedRange<Int>?
     @State private var asking = false
@@ -403,6 +405,9 @@ struct MarkerWords: View {
     @State private var writing = false      // "메모 ✎" 입력란 열림
     @State private var noteText = ""
     @FocusState private var noteFocused: Bool
+    @State private var picked: Highlight?   // 칠해진 단어를 탭해 고른 기존 형광펜
+    @State private var pickedWord = 0
+    @State private var editingPicked = false
 
     var body: some View {
         let pieces = wordPieces(text)
@@ -410,8 +415,8 @@ struct MarkerWords: View {
             FlowLayout(spacing: 0) {
                 ForEach(Array(pieces.enumerated()), id: \.offset) { i, p in
                     // 같은 형광펜(또는 같은 선택)에 속한 이웃 단어와는 사이 공백까지 한 덩어리로, 모서리는 양끝만 둥글게
-                    let picking = range.map { $0.contains(i) } ?? false
                     let savedRun = highlights.first { i >= $0.startWord && i <= $0.endWord }
+                    let picking = (range.map { $0.contains(i) } ?? false) || (picked != nil && savedRun?.id == picked?.id)
                     let color: Color? = picking ? Theme.markerSelecting : (savedRun != nil ? Theme.marker : nil)
                     let joinNext: Bool = picking ? (range?.contains(i + 1) ?? false) : (savedRun.map { i + 1 <= $0.endWord } ?? false)
                     let joinPrev: Bool = picking ? (range?.contains(i - 1) ?? false) : (savedRun.map { i - 1 >= $0.startWord } ?? false)
@@ -424,6 +429,32 @@ struct MarkerWords: View {
                     .contentShape(Rectangle())
                     .onTapGesture { tap(i) }
                 }
+            }
+            if let h = picked, range == nil {
+                // 기존 형광펜을 골랐다: 내 메모 · 새로 칠하기 · 지우기 · 닫기
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 14) {
+                        if editingPicked {
+                            TextField("내 메모", text: $noteText).font(Theme.hand(21)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                                .focused($noteFocused).submitLabel(.done).autocorrectionDisabled()
+                                .onSubmit { Task { await savePickedNote(h) } }
+                            Tiny(title: "저장") { Task { await savePickedNote(h) } }
+                            Tiny(title: "취소") { editingPicked = false }.keyboardShortcut(.escape, modifiers: [])
+                        } else {
+                            if onNote != nil { Tiny(title: (h.note ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기 ✎\u{FE0E}") { noteText = h.note ?? ""; editingPicked = true; noteFocused = true } }
+                            Tiny(title: "새로 칠하기") { let w = pickedWord; picked = nil; anchor = w; range = w...w }
+                            if let onDelete { Tiny(title: "지우기 ×", color: Theme.red) { Task { await onDelete(h); picked = nil } } }
+                            Tiny(title: "닫기") { picked = nil; editingPicked = false }
+                        }
+                    }
+                    if let err { ErrorText(message: err) }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Theme.markerSelecting.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .topLeading) {
+                    Triangle().fill(Theme.markerSelecting.opacity(0.6)).frame(width: 12, height: 8).offset(x: 16, y: -7)
+                }
+                .padding(.vertical, 4)
             }
             if let r = range {
                 let span = pieces[r].map(\.word).joined(separator: " ")
@@ -463,10 +494,21 @@ struct MarkerWords: View {
         guard !asking else { return }
         err = nil
         if let a = anchor, let r = range, r.count == 1, r.lowerBound == a {
-            range = min(a, i)...max(a, i)          // 두 번째 탭: 그 사이를 한 덩어리로 (앞 단어여도 됨)
-        } else {
-            anchor = i; range = i...i              // 첫 탭 또는 세 번째 탭: 새 시작
+            range = min(a, i)...max(a, i)          // 두 번째 탭(선택 중): 그 사이를 한 덩어리로 (앞 단어여도 됨)
+            return
         }
+        // 선택 중이 아닐 때 이미 칠해진 단어를 탭하면 그 형광펜을 고른다 (다시 탭하면 해제)
+        if range == nil, let h = highlights.first(where: { i >= $0.startWord && i <= $0.endWord }) {
+            editingPicked = false
+            if picked?.id == h.id { picked = nil } else { picked = h; pickedWord = i }
+            return
+        }
+        picked = nil; editingPicked = false
+        anchor = i; range = i...i                  // 첫 탭 또는 세 번째 탭: 새 시작
+    }
+    private func savePickedNote(_ h: Highlight) async {
+        guard let onNote else { return }
+        await onNote(h, noteText.trimmingCharacters(in: .whitespacesAndNewlines)); editingPicked = false; picked = nil
     }
 
     private func ask(_ r: ClosedRange<Int>, _ span: String) async {
