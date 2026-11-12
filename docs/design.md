@@ -51,7 +51,10 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET `/api/auth` | — | `{ok:true}` (비밀번호 확인용) |
 | GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, review_count, pass_done: string[]|null, grades:{A?,B?,C?,D?,skip?}}]` 최신순. `review_count` = 완주 회차, `pass_done` = 다시 쓰기 진행 중이면 이번 회차에 제출한 문장 id들 |
 | POST `/api/articles` | `{title, source?, sentences:[{paragraph, text}]}` 문장 분리는 클라이언트 | `{id}` |
-| GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[], highlights: Highlight[], drill_counts: {[phrase]: number}}` reviews 최신순. `drill_counts` = 이 공책의 표현장 표현·형광펜 구절별 "써 보기" 횟수(채점 끝난 것만) → "써 보기 ✎ · n" 표시용 |
+| GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[], highlights: Highlight[], drill_counts: {[phrase]: number}}` reviews 최신순. Highlight에 `links: HighlightLink[]`, `backlinks: Backlink[]`(= `{id, to_kind, to_id, created_at, from_id, text, note, sentence_id, article_id, title}`), Phrase에 `backlinks: Backlink[]`. `drill_counts` = 이 공책의 표현장 표현·형광펜 구절별 "써 보기" 횟수(채점 끝난 것만) → "써 보기 ✎ · n" 표시용 |
+| GET `/api/related?span=&q=&exclude_sentence=&exclude=` | — | `Related[]` = `{kind: "highlight"\|"phrase", id, text, note, sentence_id, article_id, title, created_at}`. `span`이면 어근이 같은 것(서버가 고름, 겹치는 어근 많은 순), `q`면 구절·메모·뜻 글자 검색. `exclude_sentence`의 것은 뺌 |
+| POST `/api/highlights/:id/links` | `{to_kind, to_id}` | `HighlightLink` = `{id, from_highlight, to_kind, to_id, created_at, text, sentence_id, article_id, title}`. 중복이면 기존 것, 자기 자신은 400 |
+| DELETE `/api/links/:id` | — | `{ok}` |
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
 | DELETE `/api/articles/:id` | — | `{ok}` 기록·표현·총평까지 삭제 |
 | POST `/api/articles/:id/review` | `{score: int\|null}` (클라 계산값 보관용) | `Review` — Claude 호출, 수 초 걸림 |
@@ -73,7 +76,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다 |
 | POST `/api/sentences/:id/ask` | `{start_word, end_word, span}` (단어 인덱스는 공백 분리 기준 0부터) | `Highlight & {phrase: Phrase|null}` — Claude가 구절을 `{meaning, why, similar}`로 설명(하루 상한 포함). 구절은 표현장에도 기본으로 붙는다 |
 | DELETE `/api/highlights/:id` | — | `{ok}` |
-| POST `/api/sentences/:id/memo` | `{start_word, end_word, span, note}` | `Highlight & {phrase}` — Claude 없이 내 메모만 붙인다(answer 빈 값, note에 메모). 표현장에 메모를 뜻으로 붙는다. 오프라인 큐 가능 |
+| POST `/api/sentences/:id/memo` | `{start_word, end_word, span, note, links?: {to_kind, to_id}[]}` | `Highlight & {phrase, links, backlinks: []}` — Claude 없이 내 메모만 붙인다(answer 빈 값, note에 메모). 표현장에 메모를 뜻으로 붙는다. `links`는 메모와 함께 엮을 대상(최대 20, 틀린 건 건너뜀). 오프라인 큐 가능 |
 | PATCH `/api/highlights/:id` | `{note}` | `{ok, note}` 기존 형광펜에 내 메모 넣기·고치기(빈 문자열이면 지움). 오프라인 큐 가능 |
 | POST `/api/drills/next` | `{phrase_id?}` | `Drill`(reference 없음). 안 푼 최근 문제가 있으면 그걸 다시 준다. 없으면 표현장에서 골라 Claude가 한국어 문장을 만든다(호출 1) |
 | POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}` |
