@@ -39,7 +39,7 @@ Sentence   { id, idx, paragraph, text, attempt: Attempt|null, history: Attempt[]
 Phrase     { id, phrase, meaning, sentence_id, article_id, created_at, sentence_text?, article_title? }
 Review     { id, score: int|null, created_at, summary, patterns: [{title, detail}], praise }
 Session    { id, started_at, ended_at, attempts, score: int|null, articles: string[], created_at }
-Highlight  { id, sentence_id, article_id, start_word, end_word, span, answer: {meaning, why, similar}, created_at }
+Highlight  { id, sentence_id, article_id, start_word, end_word, span, answer: {meaning, why, similar}, note: string|null, created_at }
 Drill      { id, phrase_id, phrase, meaning, korean, created_at, answer, grade, feedback: {grade, used_expression, issues[{mine, better, why}], reference, note}|null, answered_at, reference? }
 QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, article_title, sentence_idx, sentence_text,
              source, mine, meaning, why, issued_at, last_correct: bool|null, last_at, tries, wrong }
@@ -73,6 +73,8 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다 |
 | POST `/api/sentences/:id/ask` | `{start_word, end_word, span}` (단어 인덱스는 공백 분리 기준 0부터) | `Highlight & {phrase: Phrase|null}` — Claude가 구절을 `{meaning, why, similar}`로 설명(하루 상한 포함). 구절은 표현장에도 기본으로 붙는다 |
 | DELETE `/api/highlights/:id` | — | `{ok}` |
+| POST `/api/sentences/:id/memo` | `{start_word, end_word, span, note}` | `Highlight & {phrase}` — Claude 없이 내 메모만 붙인다(answer 빈 값, note에 메모). 표현장에 메모를 뜻으로 붙는다. 오프라인 큐 가능 |
+| PATCH `/api/highlights/:id` | `{note}` | `{ok, note}` 기존 형광펜에 내 메모 넣기·고치기(빈 문자열이면 지움). 오프라인 큐 가능 |
 | POST `/api/drills/next` | `{phrase_id?}` | `Drill`(reference 없음). 안 푼 최근 문제가 있으면 그걸 다시 준다. 없으면 표현장에서 골라 Claude가 한국어 문장을 만든다(호출 1) |
 | POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}` |
 | DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
