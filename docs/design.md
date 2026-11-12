@@ -40,7 +40,7 @@ Phrase     { id, phrase, meaning, sentence_id, article_id, created_at, sentence_
 Review     { id, score: int|null, created_at, summary, patterns: [{title, detail}], praise }
 Session    { id, started_at, ended_at, attempts, score: int|null, articles: string[], created_at }
 Highlight  { id, sentence_id, article_id, start_word, end_word, span, answer: {meaning, why, similar}, note: string|null, created_at }
-Drill      { id, phrase_id, phrase, meaning, korean, created_at, kind: "prompt"|"free", sentence_id, answer, grade, feedback: {grade, used_expression, issues[{mine, better, why}], reference, note}|null, answered_at, reference? }
+Drill      { id, phrase_id, phrase, meaning, korean, created_at, kind: "prompt"|"free", sentence_id, answer, grade, feedback: {grade, used_expression, issues[{mine, better, why}], reference, reference_ko, note}|null, answered_at, reference? }
 QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, article_title, sentence_idx, sentence_text,
              source, mine, meaning, why, issued_at, last_correct: bool|null, last_at, tries, wrong }
 ```
