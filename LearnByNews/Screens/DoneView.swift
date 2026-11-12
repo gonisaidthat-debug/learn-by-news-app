@@ -93,6 +93,19 @@ final class DoneModel: ObservableObject {
         data?.highlights.append(r.highlight); Cache.shared.upsertHighlight(r.highlight)
         if let p = r.phrase, !(data?.phrases.contains { $0.id == p.id } ?? true) { data?.phrases.append(p); Cache.shared.upsertPhrase(p) }
     }
+    /// 형광펜 내 메모 (Claude 없음, 오프라인 큐 가능)
+    func memo(_ sid: String, start: Int, end: Int, span: String, note: String) async throws {
+        if let r = try await SyncManager.shared.memo(sentenceId: sid, articleId: id, startWord: start, endWord: end, span: span, note: note) {
+            data?.highlights.append(r.highlight)
+            if let p = r.phrase, !(data?.phrases.contains { $0.id == p.id } ?? true) { data?.phrases.append(p) }
+        } else if let h = Cache.shared.article(id)?.highlights.last(where: { $0.sentenceId == sid && $0.note == note }) {
+            data?.highlights.append(h)
+        }
+    }
+    func setNote(_ h: Highlight, _ note: String) async {
+        if let i = data?.highlights.firstIndex(where: { $0.id == h.id }) { data?.highlights[i].note = note.isEmpty ? nil : note }
+        await SyncManager.shared.setHighlightNote(h.id, note: note)
+    }
     func deleteHighlight(_ h: Highlight) async {
         guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.deleteHighlight(h.id); data?.highlights.removeAll { $0.id == h.id }; Cache.shared.removeHighlight(id: h.id) }
@@ -240,7 +253,9 @@ struct DoneView: View {
                                 onBookmark: { Task { await m.toggleBookmark(s.id) } },
                                 highlights: d.highlights.filter { $0.sentenceId == s.id },
                                 onAsk: { st, en, sp in try await m.ask(s.id, start: st, end: en, span: sp) },
-                                onDeleteHighlight: { h in await m.deleteHighlight(h) }
+                                onDeleteHighlight: { h in await m.deleteHighlight(h) },
+                                onMemo: { st, en, sp, n in try await m.memo(s.id, start: st, end: en, span: sp, note: n) },
+                                onNote: { h, n in await m.setNote(h, n) }
                             )
                         }
                     }

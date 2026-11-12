@@ -177,6 +177,15 @@ final class API {
         try await send("POST", "/api/sentences/\(sentenceId)/ask", body: AskBody(startWord: startWord, endWord: endWord, span: span))
     }
     func deleteHighlight(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/highlights/\(id)") }
+    struct MemoBody: Codable { var startWord: Int; var endWord: Int; var span: String; var note: String }
+    /// 내 메모만 붙인 형광펜 (Claude 없음)
+    func memo(_ sentenceId: String, startWord: Int, endWord: Int, span: String, note: String) async throws -> AskResult {
+        try await send("POST", "/api/sentences/\(sentenceId)/memo", body: MemoBody(startWord: startWord, endWord: endWord, span: span, note: note))
+    }
+    struct NoteBody: Codable { var note: String }
+    struct NoteResult: Decodable { var ok: Bool; var note: String? }
+    /// 기존 형광펜에 내 메모 넣기·고치기 (빈 문자열이면 지움)
+    func setHighlightNote(_ id: String, note: String) async throws { let _: NoteResult = try await send("PATCH", "/api/highlights/\(id)", body: NoteBody(note: note)) }
 
     // MARK: bookmark (서버에 하나)
     func bookmark() async throws -> Bookmark? {

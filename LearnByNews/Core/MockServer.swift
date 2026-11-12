@@ -109,7 +109,7 @@ struct MockState {
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
         highlights = [["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
-                       "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "created_at": h]]
+                       "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "note": "뉴스에서 자주 봄", "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
     }
 
@@ -117,7 +117,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -345,6 +345,20 @@ struct MockState {
             phrases.append(p)
             var out = h; out["phrase"] = p
             return (200, out)
+        case "POST /api/sentences/:id/memo":
+            guard let sent = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
+            let span = body["span"] as? String ?? "", note = body["note"] as? String ?? ""
+            let h: [String: Any] = ["id": nextId("h"), "sentence_id": id, "article_id": sent["article_id"]!, "start_word": body["start_word"] ?? 0, "end_word": body["end_word"] ?? 0, "span": span,
+                                    "answer": ["meaning": "", "why": "", "similar": ""], "note": note, "created_at": Date().ms]
+            highlights.append(h)
+            let a = articles.first { $0["id"] as? String == sent["article_id"] as? String }
+            let p: [String: Any] = ["id": nextId("p"), "phrase": span, "meaning": note, "sentence_id": id, "article_id": sent["article_id"]!, "created_at": Date().ms, "sentence_text": sent["text"]!, "article_title": a?["title"] ?? ""]
+            phrases.append(p)
+            var out = h; out["phrase"] = p
+            return (200, out)
+        case "PATCH /api/highlights/:id":
+            if let i = highlights.firstIndex(where: { $0["id"] as? String == id }) { highlights[i]["note"] = (body["note"] as? String ?? "").isEmpty ? NSNull() : body["note"]! }
+            return (200, ["ok": true, "note": body["note"] ?? ""])
         case "DELETE /api/highlights/:id":
             highlights.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
         case "GET /api/bookmark":

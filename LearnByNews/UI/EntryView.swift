@@ -92,14 +92,17 @@ struct EntryView: View {
     var highlights: [Highlight] = []
     var onAsk: ((Int, Int, String) async throws -> Void)?
     var onDeleteHighlight: ((Highlight) async -> Void)?
+    /// 내 메모: 새로 (start, end, span, note) / 기존 형광펜에 (highlight, note)
+    var onMemo: ((Int, Int, String, String) async throws -> Void)?
+    var onNote: ((Highlight, String) async -> Void)?
 
     var body: some View {
         let a = s.attempt!
         let fb = a.feedback
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
-            if expanded, onAsk != nil { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk!) }
+            if expanded, let onAsk { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk, onMemo: onMemo) }
             else { Text(markHighlights(s.text, highlights)).enLine() }
-            if expanded { ForEach(highlights) { h in MarkerMemo(h: h, onDelete: onDeleteHighlight) } }
+            if expanded { ForEach(highlights) { h in MarkerMemo(h: h, onDelete: onDeleteHighlight, onNote: onNote) } }
             if fb.grade == .skip {
                 HStack(spacing: 10) {
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
@@ -113,8 +116,17 @@ struct EntryView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            // 책갈피 리본: 왼쪽 여백(빨간 세로선 왼쪽), 도장 바로 아래. 본문·×와 겹치지 않는다
-            if bookmarked { Ribbon().offset(x: Theme.marginW / 2 - 6, y: Theme.lh * 0.25 + 34) }
+            // 책갈피 리본 = 토글 버튼. 왼쪽 여백(빨간 세로선 왼쪽), 도장 바로 아래. 평소엔 흐리게, 꽂히면 빨강
+            if let onBookmark {
+                Button(action: onBookmark) {
+                    Ribbon(active: bookmarked).padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(bookmarked ? "책갈피 빼기" : "여기에 책갈피")
+                .offset(x: Theme.marginW / 2 - 16, y: Theme.lh * 0.25 + 30)
+            } else if bookmarked {
+                Ribbon(active: true).offset(x: Theme.marginW / 2 - 6, y: Theme.lh * 0.25 + 34)
+            }
         }
         .overlay(alignment: .topTrailing) {
             // 문장 ×(공책에서 뺀다)는 오른쪽 위, 책갈피와는 반대쪽
@@ -226,17 +238,17 @@ struct SourceLink: View {
 }
 
 
-/// 책갈피 리본: 오른쪽 위에 걸린 빨간 띠
+/// 책갈피 리본. active면 빨강, 아니면 거의 안 보이는 흐린 띠(탭 자리 안내)
 struct Ribbon: View {
+    var active = true
     var body: some View {
         Path { p in
             p.move(to: .zero); p.addLine(to: CGPoint(x: 14, y: 0)); p.addLine(to: CGPoint(x: 14, y: 24))
             p.addLine(to: CGPoint(x: 7, y: 18)); p.addLine(to: CGPoint(x: 0, y: 24)); p.closeSubpath()
         }
-        .fill(Theme.red)
+        .fill(active ? Theme.red : Theme.pencil.opacity(0.18))
         .frame(width: 14, height: 24)
-        .shadow(color: .black.opacity(0.2), radius: 1, y: 1)
-        .accessibilityLabel("책갈피")
+        .shadow(color: active ? .black.opacity(0.2) : .clear, radius: 1, y: 1)
     }
 }
 
@@ -278,10 +290,14 @@ struct MarkerWords: View {
     var text: String
     var highlights: [Highlight]
     var onAsk: (Int, Int, String) async throws -> Void
+    var onMemo: ((Int, Int, String, String) async throws -> Void)? = nil
     @State private var anchor: Int?
     @State private var range: ClosedRange<Int>?
     @State private var asking = false
     @State private var err: String?
+    @State private var writing = false      // "메모 ✎" 입력란 열림
+    @State private var noteText = ""
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         let pieces = wordPieces(text)
@@ -301,12 +317,25 @@ struct MarkerWords: View {
             }
             if let r = range {
                 let span = pieces[r].map(\.word).joined(separator: " ")
-                HStack(spacing: 14) {
-                    if asking {
-                        Text("묻는 중… 🖍").font(Theme.hand(20)).foregroundStyle(Theme.pencil)
-                    } else {
-                        Tiny(title: "이게 뭐야? 🖍", color: Theme.red) { Task { await ask(r, span) } }
-                        Tiny(title: "취소") { anchor = nil; range = nil; err = nil }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 14) {
+                        if asking {
+                            Text("묻는 중… 🖍").font(Theme.hand(20)).foregroundStyle(Theme.pencil)
+                        } else if writing {
+                            // 내가 느낀 걸 적는다. Enter 저장, Esc 취소
+                            TextField("내 메모", text: $noteText)
+                                .font(Theme.hand(21)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                                .focused($noteFocused).submitLabel(.done)
+                                .onSubmit { Task { await saveMemo(r, span) } }
+                                .autocorrectionDisabled()
+                            Tiny(title: "저장") { Task { await saveMemo(r, span) } }
+                            Tiny(title: "취소") { writing = false; noteText = "" }
+                                .keyboardShortcut(.escape, modifiers: [])
+                        } else {
+                            Tiny(title: "이게 뭐야? 🖍", color: Theme.red) { Task { await ask(r, span) } }
+                            if onMemo != nil { Tiny(title: "메모 ✎\u{FE0E}") { writing = true; noteText = ""; noteFocused = true } }
+                            Tiny(title: "취소") { anchor = nil; range = nil; err = nil }
+                        }
                     }
                     if let err { ErrorText(message: err) }
                 }
@@ -336,31 +365,68 @@ struct MarkerWords: View {
         catch { err = error.localizedDescription }
         asking = false
     }
+    private func saveMemo(_ r: ClosedRange<Int>, _ span: String) async {
+        let n = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, let onMemo else { return }
+        err = nil
+        do { try await onMemo(r.lowerBound, r.upperBound, span, n); writing = false; noteText = ""; anchor = nil; range = nil }
+        catch { err = error.localizedDescription }
+    }
 }
 
 struct Triangle: Shape {
     func path(in r: CGRect) -> Path { var p = Path(); p.move(to: CGPoint(x: r.midX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY)); p.closeSubpath(); return p }
 }
 
-/// 형광펜 메모 한 줄: "구절 → 뜻 (이유) · 비슷한 말: …" + ×
+/// 형광펜 메모: "구절 → 뜻 (이유) · 비슷한 말: …" (Claude 답, 있으면) + "✎ 내 메모"(파란 손글씨) + 메모 넣기/고치기 + ×
 struct MarkerMemo: View {
     var h: Highlight
     var onDelete: ((Highlight) async -> Void)?
+    var onNote: ((Highlight, String) async -> Void)? = nil
+    @State private var editing = false
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            (Text(h.span).fontWeight(.bold).foregroundColor(Color(hex: 0x2A2412)) + Text(" →\u{FE0E} \(h.answer.meaning)")
-             + Text(h.answer.why.isEmpty ? "" : " (\(h.answer.why))").font(Theme.hand(18))
-             + Text(h.answer.similar.isEmpty ? "" : " · 비슷한 말: \(h.answer.similar)").font(Theme.hand(18)))
-                .font(Theme.hand(20)).foregroundStyle(Color(hex: 0x5B5440))
-                .lineSpacing(0)
-            Spacer(minLength: 0)
-            if let onDelete {
-                Button { Task { await onDelete(h) } } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
-                    .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if h.hasAnswer {
+                    (Text(h.span).fontWeight(.bold).foregroundColor(Color(hex: 0x2A2412)) + Text(" →\u{FE0E} \(h.answer.meaning)")
+                     + Text(h.answer.why.isEmpty ? "" : " (\(h.answer.why))").font(Theme.hand(18))
+                     + Text(h.answer.similar.isEmpty ? "" : " · 비슷한 말: \(h.answer.similar)").font(Theme.hand(18)))
+                        .font(Theme.hand(20)).foregroundStyle(Color(hex: 0x5B5440))
+                } else {
+                    Text(h.span).font(Theme.hand(20)).fontWeight(.bold).foregroundStyle(Color(hex: 0x2A2412))
+                }
+                Spacer(minLength: 0)
+                if let onDelete {
+                    Button { Task { await onDelete(h) } } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
+                        .buttonStyle(.plain).accessibilityLabel("형광펜 지우기")
+                }
+            }
+            if editing {
+                HStack(spacing: 10) {
+                    TextField("내 메모", text: $text).font(Theme.hand(20)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                        .focused($focused).submitLabel(.done).autocorrectionDisabled()
+                        .onSubmit { Task { await save() } }
+                    Tiny(title: "저장", size: 18) { Task { await save() } }
+                    Tiny(title: "취소", size: 18) { editing = false }.keyboardShortcut(.escape, modifiers: [])
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if let n = h.note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(20)).foregroundStyle(Theme.blueInk) }
+                    if onNote != nil {
+                        Tiny(title: (h.note ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { text = h.note ?? ""; editing = true; focused = true }
+                    }
+                }
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Theme.marker.opacity(0.55))
         .padding(.vertical, 3)
+    }
+    private func save() async {
+        guard let onNote else { return }
+        await onNote(h, text.trimmingCharacters(in: .whitespacesAndNewlines)); editing = false
     }
 }

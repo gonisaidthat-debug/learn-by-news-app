@@ -94,11 +94,12 @@ import SwiftData
     var why: String
     var similar: String
     var createdAt: Int64
+    var note: String?
     init(_ h: Highlight) {
         id = h.id; sentenceId = h.sentenceId; articleId = h.articleId; startWord = h.startWord; endWord = h.endWord; span = h.span
-        meaning = h.answer.meaning; why = h.answer.why; similar = h.answer.similar; createdAt = h.createdAt
+        meaning = h.answer.meaning; why = h.answer.why; similar = h.answer.similar; createdAt = h.createdAt; note = h.note
     }
-    var value: Highlight { Highlight(id: id, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, answer: HighlightAnswer(meaning: meaning, why: why, similar: similar), createdAt: createdAt) }
+    var value: Highlight { Highlight(id: id, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, answer: HighlightAnswer(meaning: meaning, why: why, similar: similar), createdAt: createdAt, note: note) }
 }
 
 /// 푼 응용 문제 (기록 탭용)
@@ -323,7 +324,7 @@ final class Cache {
         for h in all(CachedHighlight.self).sorted(by: { $0.createdAt < $1.createdAt }) {
             let key = "h|\(h.id)"; let l = last[key]; let s = sents[h.sentenceId]
             put(QuizItem(key: key, kind: .highlight, sentenceId: h.sentenceId, articleId: h.articleId, articleTitle: arts[h.articleId]?.title ?? "", sentenceIdx: s?.idx ?? 0, sentenceText: s?.text ?? "",
-                         source: h.span, mine: "", meaning: h.meaning, why: h.why, issuedAt: h.createdAt,
+                         source: h.span, mine: "", meaning: h.meaning.isEmpty ? (h.note ?? "") : h.meaning, why: h.why, issuedAt: h.createdAt,
                          lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0))
         }
         return order.compactMap { items[$0] }
@@ -374,6 +375,9 @@ final class Cache {
     func upsertHighlight(_ h: Highlight) {
         if let e = all(CachedHighlight.self).first(where: { $0.id == h.id }) { ctx.delete(e) }
         ctx.insert(CachedHighlight(h)); try? ctx.save()
+    }
+    func setHighlightNote(id: String, note: String?) {
+        if let e = all(CachedHighlight.self).first(where: { $0.id == id }) { e.note = note; try? ctx.save() }
     }
     func removeHighlight(id: String) {
         if let e = all(CachedHighlight.self).first(where: { $0.id == id }) { ctx.delete(e); try? ctx.save() }

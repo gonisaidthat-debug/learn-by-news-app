@@ -129,6 +129,15 @@ final class SyncManager: ObservableObject {
                     try await API.shared.setBookmark(articleId: real(b.articleId), sentenceId: real(b.sentenceId), round: b.round)
                 case "bookmark_delete":
                     try await API.shared.clearBookmark()
+                case "memo":
+                    let b = try JSONDecoder.api.decode(MemoOp.self, from: op.payload)
+                    let r = try await API.shared.memo(real(b.sentenceId), startWord: b.startWord, endWord: b.endWord, span: b.span, note: b.note)
+                    Cache.shared.removeHighlight(id: b.tempId); Cache.shared.upsertHighlight(r.highlight)
+                    if let p = r.phrase { Cache.shared.upsertPhrase(p) }
+                    var map = idMap; map[b.tempId] = r.highlight.id; idMap = map
+                case "highlight_note":
+                    let b = try JSONDecoder.api.decode(NoteOp.self, from: op.payload)
+                    try await API.shared.setHighlightNote(real(b.highlightId), note: b.note)
                 case "drill_answer":
                     let b = try JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload)
                     let d = try await API.shared.answerDrill(b.id, answer: b.answer)
@@ -186,6 +195,28 @@ final class SyncManager: ObservableObject {
     struct ArticlePatchOp: Codable { var articleId: String; var source: String? }
     struct BookmarkOp: Codable { var articleId: String; var sentenceId: String; var round: Int? }
     struct DrillAnswerOp: Codable { var id: String; var answer: String; var answeredAtLocal: Int64; var phrase: String?; var korean: String? }
+    struct MemoOp: Codable { var tempId: String; var sentenceId: String; var articleId: String; var startWord: Int; var endWord: Int; var span: String; var note: String }
+    struct NoteOp: Codable { var highlightId: String; var note: String }
+
+    /// 형광펜 내 메모 (Claude 없음): 온라인이면 서버, 아니면 임시 id로 캐시 + 큐
+    func memo(sentenceId: String, articleId: String, startWord: Int, endWord: Int, span: String, note: String) async throws -> AskResult? {
+        if Connectivity.shared.isOnline, !Self.isTemp(sentenceId) {
+            do { let r = try await API.shared.memo(sentenceId, startWord: startWord, endWord: endWord, span: span, note: note); Cache.shared.upsertHighlight(r.highlight); if let p = r.phrase { Cache.shared.upsertPhrase(p) }; return r }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        }
+        let temp = "local-" + UUID().uuidString.lowercased()
+        let h = Highlight(id: temp, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, answer: HighlightAnswer(meaning: "", why: "", similar: ""), createdAt: Date().ms, note: note)
+        Cache.shared.upsertHighlight(h)
+        Cache.shared.enqueue("memo", MemoOp(tempId: temp, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, note: note)); refreshCounts()
+        return nil
+    }
+    func setHighlightNote(_ id: String, note: String) async {
+        Cache.shared.setHighlightNote(id: id, note: note.isEmpty ? nil : note)
+        await sendOrQueue("highlight_note", NoteOp(highlightId: id, note: note)) {
+            guard !Self.isTemp(id) else { throw APIError.network("temp") }
+            try await API.shared.setHighlightNote(id, note: note)
+        }
+    }
 
     // MARK: 핵심 루프의 오프라인 겸용 동작
 

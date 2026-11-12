@@ -377,6 +377,25 @@ struct Highlight: Codable, Identifiable, Hashable {
     var span: String
     var answer: HighlightAnswer
     var createdAt: Int64
+    var note: String?          // 내 메모 (Claude 답과 별개)
+
+    init(id: String, sentenceId: String, articleId: String, startWord: Int, endWord: Int, span: String, answer: HighlightAnswer, createdAt: Int64, note: String? = nil) {
+        self.id = id; self.sentenceId = sentenceId; self.articleId = articleId; self.startWord = startWord; self.endWord = endWord; self.span = span; self.answer = answer; self.createdAt = createdAt; self.note = note
+    }
+    enum CodingKeys: String, CodingKey { case id, sentenceId, articleId, startWord, endWord, span, answer, createdAt, note }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        sentenceId = try c.decode(String.self, forKey: .sentenceId)
+        articleId = try c.decodeIfPresent(String.self, forKey: .articleId) ?? ""
+        startWord = try c.decodeIfPresent(Int.self, forKey: .startWord) ?? 0
+        endWord = try c.decodeIfPresent(Int.self, forKey: .endWord) ?? startWord
+        span = try c.decodeIfPresent(String.self, forKey: .span) ?? ""
+        answer = (try? c.decode(HighlightAnswer.self, forKey: .answer)) ?? HighlightAnswer(meaning: "", why: "", similar: "")
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+    var hasAnswer: Bool { !answer.meaning.isEmpty }
 }
 
 /// POST /api/sentences/:id/ask 응답: Highlight & {phrase}
