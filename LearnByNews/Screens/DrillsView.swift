@@ -229,7 +229,7 @@ struct DrillsView: View {
                     ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
                         (Text(i.mine).strikethrough(true, color: Theme.red) + Text(" →\u{FE0E} \(i.better)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A))).redpen()
                     }
-                    if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil() }
+                    if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(17)) + Text(fb.referenceLine)).pencil() }
                     if !fb.note.isEmpty { Text(fb.note).pencil() }
                 }
             }

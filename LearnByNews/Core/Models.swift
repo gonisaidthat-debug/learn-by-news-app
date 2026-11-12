@@ -431,6 +431,7 @@ struct DrillFeedback: Codable, Hashable {
     var usedExpression: Bool
     var issues: [DrillIssue]
     var reference: String
+    var referenceKo: String?     // 참고 영문의 한국어 뜻 한 줄 (예전 기록엔 없을 수 있다)
     var note: String
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -438,8 +439,11 @@ struct DrillFeedback: Codable, Hashable {
         usedExpression = (try? c.decode(Bool.self, forKey: .usedExpression)) ?? (((try? c.decode(Int.self, forKey: .usedExpression)) ?? 0) != 0)
         issues = try c.decodeIfPresent([DrillIssue].self, forKey: .issues) ?? []
         reference = try c.decodeIfPresent(String.self, forKey: .reference) ?? ""
+        referenceKo = try c.decodeIfPresent(String.self, forKey: .referenceKo)
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
     }
+    /// "참고 영문 — 한국어 뜻"
+    var referenceLine: String { reference + ((referenceKo ?? "").isEmpty ? "" : " — \(referenceKo!)") }
 }
 
 struct Drill: Codable, Identifiable, Hashable {

@@ -311,7 +311,7 @@ struct MockState {
             let used = a.lowercased().contains(ph.lowercased().split(separator: " ").first.map(String.init) ?? "")
             let d: [String: Any] = ["id": nextId("d"), "phrase_id": body["phrase_id"] ?? NSNull(), "phrase": ph, "meaning": body["meaning"] ?? "", "korean": "", "kind": "free", "sentence_id": body["sentence_id"] ?? NSNull(),
                                     "created_at": Date().ms, "answer": a, "grade": used ? "B" : "C", "answered_at": Date().ms,
-                                    "feedback": ["grade": used ? "B" : "C", "used_expression": used, "issues": [["mine": String(a.prefix(5)), "better": "(better)", "why": "어순"]], "reference": "(모의 참고) " + a, "note": "자유 작문 좋다."] as [String: Any],
+                                    "feedback": ["grade": used ? "B" : "C", "used_expression": used, "issues": [["mine": String(a.prefix(5)), "better": "(better)", "why": "어순"]], "reference": "(모의 참고) " + a, "reference_ko": "(모의) 한국어 뜻", "note": "자유 작문 좋다."] as [String: Any],
                                     "reference": "(모의 참고) " + a]
             drills.append(d); return (200, d)
         case "POST /api/drills/batch":
@@ -335,7 +335,7 @@ struct MockState {
             drills[i]["answer"] = a; drills[i]["grade"] = used ? "B" : "C"; drills[i]["answered_at"] = Date().ms
             let ref = "(모의 참고 영문) " + a
             drills[i]["feedback"] = ["grade": used ? "B" : "C", "used_expression": used, "issues": [["mine": String(a.prefix(6)), "better": "(better)", "why": "관사·시제"]],
-                                     "reference": ref, "note": used ? "표현은 잘 썼다." : "표현을 꼭 넣어 보자."] as [String: Any]
+                                     "reference": ref, "reference_ko": "(모의) 참고 영문의 한국어 뜻", "note": used ? "표현은 잘 썼다." : "표현을 꼭 넣어 보자."] as [String: Any]
             drills[i]["reference"] = ref
             return (200, drills[i])
         case "DELETE /api/drills/:id":

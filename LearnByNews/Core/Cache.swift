@@ -112,9 +112,12 @@ import SwiftData
     var usedExpression: Bool
     var answeredAt: Int64
     var kind: String?
+    var reference: String?
+    var referenceKo: String?
     init(_ d: Drill) {
         id = d.id; phrase = d.phrase; korean = d.korean; answer = d.answer ?? ""; grade = d.grade?.rawValue ?? ""
         usedExpression = d.feedback?.usedExpression ?? false; answeredAt = d.answeredAt ?? d.createdAt; kind = d.kind
+        reference = d.feedback?.reference ?? d.reference; referenceKo = d.feedback?.referenceKo
     }
 }
 
