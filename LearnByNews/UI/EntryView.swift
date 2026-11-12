@@ -538,15 +538,24 @@ struct MarkerWords: View {
                         if asking {
                             Text("묻는 중… 🖍").font(Theme.hand(20)).foregroundStyle(Theme.pencil)
                         } else if writing {
-                            // 내가 느낀 걸 적는다. Enter 저장, Esc 취소
-                            TextField("내 메모", text: $noteText)
-                                .font(Theme.hand(21)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
-                                .focused($noteFocused).submitLabel(.done)
-                                .onSubmit { Task { await saveMemo(r, span) } }
-                                .autocorrectionDisabled()
-                            Tiny(title: "저장") { Task { await saveMemo(r, span) } }
-                            Tiny(title: "취소") { writing = false; noteText = "" }
-                                .keyboardShortcut(.escape, modifiers: [])
+                            // 내가 느낀 걸 적는다. Enter 저장. 아래 "저장 / 취소"(취소는 선택까지 지워 처음 상태로, 맥 Esc도 같음)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Text(span).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x2A2412)).padding(.horizontal, 6).background(Theme.marker, in: RoundedRectangle(cornerRadius: 4))
+                                    TextField("내 메모", text: $noteText)
+                                        .font(Theme.hand(21)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                                        .focused($noteFocused).submitLabel(.done)
+                                        .onSubmit { Task { await saveMemo(r, span) } }
+                                        .autocorrectionDisabled()
+                                }
+                                HStack(spacing: 16) {
+                                    Tiny(title: "저장", color: Theme.red, size: 18) { Task { await saveMemo(r, span) } }
+                                        .disabled(noteText.trimmingCharacters(in: .whitespaces).isEmpty)
+                                        .opacity(noteText.trimmingCharacters(in: .whitespaces).isEmpty ? 0.4 : 1)
+                                    Tiny(title: "취소", size: 18) { cancelAll() }
+                                        .keyboardShortcut(.escape, modifiers: [])
+                                }
+                            }
                         } else {
                             Tiny(title: "이게 뭐야? 🖍", color: Theme.red) { Task { await ask(r, span) } }
                             if onMemo != nil { Tiny(title: "메모 ✎\u{FE0E}") { writing = true; noteText = ""; noteFocused = true } }
@@ -592,6 +601,9 @@ struct MarkerWords: View {
         catch { err = error.localizedDescription }
         asking = false
     }
+    /// 취소: 메모 상자와 노란 선택을 모두 지워 처음 상태로
+    private func cancelAll() { writing = false; noteText = ""; anchor = nil; range = nil; err = nil }
+
     private func saveMemo(_ r: ClosedRange<Int>, _ span: String) async {
         let n = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty, let onMemo else { return }
