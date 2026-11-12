@@ -425,6 +425,9 @@ struct NotebookView: View {
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
     @State private var toRemove: Sentence?
+    @State private var readingIndex = 0          // 화면 40% 지점의 문장 idx
+    @State private var rowFrames: [String: CGRect] = [:]
+    @State private var lastProgressTick = Date.distantPast
 
     init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil, browseAll: Bool = false, round: Int? = nil) {
         self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll; self.round = round
@@ -471,6 +474,20 @@ struct NotebookView: View {
         .onChange(of: m.focusRequest) { _, _ in focused = true }
     }
 
+    /// 화면 세로 40% 지점에 걸린 문장(없으면 가장 가까운 문장)의 idx
+    private func updateReadingIndex(_ d: ArticleDetail) {
+        let h = UIScreen.main.bounds.height
+        let y = h * 0.4
+        var best: (idx: Int, dist: CGFloat)? = nil
+        for s in d.sentences {
+            guard let f = rowFrames[s.id] else { continue }
+            let dist: CGFloat = f.minY <= y && f.maxY >= y ? 0 : min(abs(f.minY - y), abs(f.maxY - y))
+            if best == nil || dist < best!.dist { best = (s.idx, dist) }
+            if dist == 0 { break }
+        }
+        if let b = best, b.idx != readingIndex { readingIndex = b.idx }
+    }
+
     /// 모든 문장이 채점됐고 진행 중·오류 상태가 없으면 마지막 장으로.
     /// 처음부터 다시 쓰기를 마친 뒤라면 새 총평을 요청하게 한다 (채점이 전부 끝난 뒤라야 총평에 반영된다)
     private func checkFinish() {
@@ -499,6 +516,7 @@ struct NotebookView: View {
                         ForEach(Array(d.sentences.prefix(upto).enumerated()), id: \.element.id) { i, x in
                             if i > 0, d.sentences[i - 1].paragraph != x.paragraph { BlankLine() }
                             row(x, d: d)
+                                .background(GeometryReader { g in Color.clear.preference(key: RowFrames.self, value: [x.id: g.frame(in: .named("scroll"))]) })
                             if let s = markers[x.id] { SessionMark(session: s) }
                             ForEach(m.removed.filter { $0.afterId == x.id }) { r in removedRow(r) }
                         }
@@ -516,6 +534,25 @@ struct NotebookView: View {
                 Color.clear.frame(height: 1).id("bottom")
             }
             .scrollDismissesKeyboard(.interactively)
+            .coordinateSpace(name: "scroll")
+            .onPreferenceChange(RowFrames.self) { frames in
+                // 스크롤 중에만 들어오는 변화. 60ms로 묶어 가볍게
+                rowFrames = frames
+                let now = Date()
+                guard now.timeIntervalSince(lastProgressTick) > 0.06 else { return }
+                lastProgressTick = now
+                updateReadingIndex(d)
+            }
+            .overlay(alignment: .top) {
+                if total > 1 {
+                    ReadingProgressBar(index: readingIndex, total: total,
+                                       paragraphStarts: d.sentences.indices.filter { $0 > 0 && d.sentences[$0].paragraph != d.sentences[$0 - 1].paragraph },
+                                       onSeek: { i in
+                                           if i < upto { withAnimation { proxy.scrollTo(d.sentences[i].id, anchor: .center) } }
+                                           else { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }   // 아직 안 그려진 뒤쪽이면 맨 아래로
+                                       })
+                }
+            }
             .onChange(of: m.scrollTo) { _, t in
                 guard let t else { return }
                 withAnimation { proxy.scrollTo(t, anchor: t == "bottom" ? .bottom : .center) }
@@ -665,6 +702,49 @@ struct SessionMark: View {
         }
         .frame(height: Theme.lh)
         .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
+    }
+}
+
+/// 문장 행의 프레임(스크롤 좌표계) 수집
+struct RowFrames: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
+}
+
+/// 읽는 위치 진행 줄: 채움 폭 = (idx+1)/전체, 문단 경계 눈금, 탭·드래그로 그 비율의 문장으로
+struct ReadingProgressBar: View {
+    var index: Int            // 화면 40% 지점에 걸린 문장 idx
+    var total: Int
+    var paragraphStarts: [Int] // 문단이 시작하는 문장 idx(첫 문단 제외)
+    var onSeek: (Int) -> Void
+
+    var body: some View {
+        let ratio = total > 0 ? Double(index + 1) / Double(total) : 0
+        VStack(alignment: .trailing, spacing: 2) {
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Theme.ink.opacity(0.08))
+                    Rectangle().fill(Theme.red.opacity(0.85)).frame(width: g.size.width * ratio)
+                    ForEach(paragraphStarts, id: \.self) { p in
+                        Rectangle().fill(Theme.ink.opacity(0.25)).frame(width: 1)
+                            .offset(x: g.size.width * Double(p) / Double(max(total, 1)))
+                    }
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { v in seek(v.location.x, g.size.width) }.onEnded { v in seek(v.location.x, g.size.width) })
+            }
+            .frame(height: 10)
+            Text("\(index + 1) / \(total) · \(Int((ratio * 100).rounded()))%")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.pencil)
+                .padding(.trailing, 4)
+        }
+        .padding(.horizontal, 10).padding(.top, 2).padding(.bottom, 4)
+        .background(.ultraThinMaterial.opacity(0.9))
+        .accessibilityLabel("읽는 위치 \(index + 1) / \(total)")
+    }
+    private func seek(_ x: CGFloat, _ w: CGFloat) {
+        guard total > 0, w > 0 else { return }
+        onSeek(max(0, min(total - 1, Int((x / w) * CGFloat(total)))))
     }
 }
 
