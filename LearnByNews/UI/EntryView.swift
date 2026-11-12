@@ -213,6 +213,8 @@ struct TryBox: View {
     @State private var busy = false
     @State private var queued = false
     @State private var msg: String?
+    @State private var past: [Drill] = []      // 같은 표현으로 푼 지난 시도 (최신순, 최대 5)
+    @State private var showRef: String?        // 길게 누른 줄의 참고 영문
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -247,6 +249,24 @@ struct TryBox: View {
                     .onChange(of: answer) { _, v in if v.contains("\n") { answer = v.replacingOccurrences(of: "\n", with: " "); Task { await submit() } } }
                 if busy { Text("선생님이 보는 중… ✎\u{FE0E}").pencil(size: 20) }
             }
+            if !past.isEmpty {
+                Text("지난 시도 \(past.count)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).padding(.top, 4)
+                ForEach(past.prefix(5)) { d in
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            if let g = d.grade { Stamp(kind: .grade(g), small: true) } else { Stamp(kind: .waiting, small: true) }
+                            Text(d.answer ?? "").font(Theme.hand(19)).foregroundStyle(Theme.blueInk).lineLimit(1)
+                            if !d.isFree, !d.korean.isEmpty { Text("· \(d.korean)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(1) }
+                        }
+                        .frame(minHeight: 28)
+                        .contentShape(Rectangle())
+                        .onLongPressGesture { showRef = showRef == d.id ? nil : d.id }   // 길게 누르면 참고 영문
+                        if showRef == d.id, let r = d.feedback?.reference ?? d.reference, !r.isEmpty {
+                            (Text("참고 ").font(Theme.hand(16)) + Text(d.feedback?.referenceLine ?? r)).font(Theme.hand(18)).foregroundStyle(Theme.pencil).padding(.leading, 32)
+                        }
+                    }
+                }
+            }
             HStack(spacing: 16) {
                 if result != nil || queued {
                     Tiny(title: "한 번 더", color: Theme.red, size: 19) { result = nil; queued = false; answer = ""; prompt = nil; focused = true }
@@ -263,6 +283,16 @@ struct TryBox: View {
         .overlay(alignment: .leading) { Rectangle().fill(Theme.tab).frame(width: 3) }
         .padding(.vertical, 6)
         .onAppear { focused = true }
+        .task { await loadPast() }
+    }
+
+    /// 같은 표현으로 푼 지난 시도: 서버(1년), 안 되면 캐시
+    private func loadPast() async {
+        if let all = try? await API.shared.drills(days: 365) {
+            past = all.filter { $0.phrase == expr.phrase && $0.answer != nil }.sorted { ($0.answeredAt ?? 0) > ($1.answeredAt ?? 0) }
+        } else {
+            past = await MainActor.run { Cache.shared.drills(phrase: expr.phrase) }
+        }
     }
 
     private func submit() async {
@@ -270,8 +300,8 @@ struct TryBox: View {
         guard !a.isEmpty, !busy else { return }
         busy = true; msg = nil
         do {
-            if let p = prompt, let onAnswerDrill { result = try await onAnswerDrill(p.id, a) }
-            else if let r = try await onFree(expr, a) { result = r }
+            if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); result = r; past.insert(r, at: 0) }
+            else if let r = try await onFree(expr, a) { result = r; past.insert(r, at: 0) }
             else { queued = true }
         } catch { msg = error.localizedDescription }
         busy = false

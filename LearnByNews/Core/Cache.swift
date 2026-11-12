@@ -334,6 +334,14 @@ final class Cache {
         return order.compactMap { items[$0] }
     }
 
+    /// 같은 표현으로 푼 응용·자유 작문 (최신순). 써 보기 상자의 "지난 시도"
+    func drills(phrase: String) -> [Drill] {
+        all(CachedDrill.self).filter { $0.phrase == phrase }.sorted { $0.answeredAt > $1.answeredAt }.map {
+            Drill(id: $0.id, phraseId: nil, phrase: $0.phrase, meaning: "", korean: $0.korean, createdAt: $0.answeredAt, kind: $0.kind, sentenceId: nil,
+                  answer: $0.answer, grade: Grade(rawValue: $0.grade), feedback: nil, answeredAt: $0.answeredAt, reference: $0.reference)
+        }
+    }
+
     func sessions() -> [StudySession]? {
         guard !isEmpty else { return nil }
         return all(CachedSession.self).sorted { $0.startedAt > $1.startedAt }.map(toSession)
