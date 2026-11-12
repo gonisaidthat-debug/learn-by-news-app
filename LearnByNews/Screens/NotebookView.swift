@@ -36,11 +36,17 @@ final class NotebookModel: ObservableObject {
     @Published var open: String? { didSet { scheduleAutoBookmark() } }
     @Published var refOpen: [String: Bool] = [:]
     private var autoBookmarkTask: Task<Void, Never>?
+    private var openingFromLink = false
 
-    /// 펼쳐 본 문장이 책갈피가 된다 ("마지막까지 본 곳"). 0.5초 디바운스, 이미 그 문장이면 생략
+    /// 책갈피·시험지·기록 링크로 들어오며 자동 펼침: 이건 "내가 본 곳"이 아니므로 자동 책갈피를 걸지 않는다
+    private func openFromLink(_ sid: String?) {
+        openingFromLink = true; open = sid; openingFromLink = false
+    }
+
+    /// 펼쳐 본 문장이 책갈피가 된다 ("마지막까지 본 곳"). 직접 탭해 펼쳤거나 방금 채점돼 펼쳐진 문장에만. 0.5초 디바운스
     private func scheduleAutoBookmark() {
         autoBookmarkTask?.cancel()
-        guard let sid = open, bookmark?.sentenceId != sid else { return }
+        guard !openingFromLink, let sid = open, bookmark?.sentenceId != sid else { return }
         autoBookmarkTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self, self.open == sid, self.bookmark?.sentenceId != sid else { return }
@@ -125,7 +131,7 @@ final class NotebookModel: ObservableObject {
         // 열람은 캐시를 먼저 그린다
         if browse, data == nil, let c = Cache.shared.article(id) {
             if let round, let r = Self.asOfRound(c, round) { data = r; roundShown = round } else { data = c }
-            open = focusId
+            openFromLink(focusId)
         }
         do {
             let d: ArticleDetail
@@ -137,7 +143,7 @@ final class NotebookModel: ObservableObject {
             }
             if browse {
                 if let round, let r = Self.asOfRound(d, round) { data = r; roundShown = round } else { data = d }
-                open = focusId; if let focusId { requestScroll(focusId) }
+                openFromLink(focusId); if let focusId { requestScroll(focusId) }
                 return
             }
             let ids = d.sentences.map(\.id)
