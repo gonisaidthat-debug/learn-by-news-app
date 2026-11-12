@@ -589,14 +589,15 @@ struct NotebookView: View {
     private func updateReadingIndex(_ d: ArticleDetail) {
         let h = UIScreen.main.bounds.height
         let y = h * 0.4
-        var best: (idx: Int, dist: CGFloat)? = nil
-        for s in d.sentences {
+        // 분자는 DB idx가 아니라 "지금 공책에 남아 있는 문장 배열에서의 순서" (문장을 지우면 idx가 띄엄띄엄이라 어긋난다)
+        var best: (pos: Int, dist: CGFloat)? = nil
+        for (pos, s) in d.sentences.enumerated() {
             guard let f = rowFrames[s.id] else { continue }
             let dist: CGFloat = f.minY <= y && f.maxY >= y ? 0 : min(abs(f.minY - y), abs(f.maxY - y))
-            if best == nil || dist < best!.dist { best = (s.idx, dist) }
+            if best == nil || dist < best!.dist { best = (pos, dist) }
             if dist == 0 { break }
         }
-        if let b = best, b.idx != readingIndex { readingIndex = b.idx }
+        if let b = best, b.pos != readingIndex { readingIndex = b.pos }
     }
 
     /// 모든 문장이 채점됐고 진행 중·오류 상태가 없으면 마지막 장으로.
