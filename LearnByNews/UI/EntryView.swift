@@ -213,8 +213,8 @@ struct TryBox: View {
     @State private var busy = false
     @State private var queued = false
     @State private var msg: String?
-    @State private var past: [Drill] = []      // 같은 표현으로 푼 지난 시도 (최신순, 최대 5)
-    @State private var showRef: String?        // 길게 누른 줄의 참고 영문
+    @State private var past: [Drill] = []      // 같은 표현으로 푼 지난 시도 (최신순, 최대 10)
+    @State private var openPast: String?       // 탭해서 펼친 지난 시도
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -251,18 +251,32 @@ struct TryBox: View {
             }
             if !past.isEmpty {
                 Text("지난 시도 \(past.count)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).padding(.top, 4)
-                ForEach(past.prefix(5)) { d in
+                ForEach(past.prefix(10)) { d in
+                    let isOpen = openPast == d.id
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             if let g = d.grade { Stamp(kind: .grade(g), small: true) } else { Stamp(kind: .waiting, small: true) }
-                            Text(d.answer ?? "").font(Theme.hand(19)).foregroundStyle(Theme.blueInk).lineLimit(1)
-                            if !d.isFree, !d.korean.isEmpty { Text("· \(d.korean)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(1) }
+                            Text(d.answer ?? "").font(Theme.hand(19)).foregroundStyle(Theme.blueInk).lineLimit(isOpen ? nil : 1)
+                            if !d.isFree, !d.korean.isEmpty { Text("· \(d.korean)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(isOpen ? nil : 1) }
+                            Spacer(minLength: 4)
+                            if let t = d.answeredAt { let dt = Date(ms: t); Text("\(dt.monthDay) \(dt.hm)").font(Theme.hand(15)).foregroundStyle(Theme.pencil).fixedSize() }
                         }
                         .frame(minHeight: 28)
                         .contentShape(Rectangle())
-                        .onLongPressGesture { showRef = showRef == d.id ? nil : d.id }   // 길게 누르면 참고 영문
-                        if showRef == d.id, let r = d.feedback?.reference ?? d.reference, !r.isEmpty {
-                            (Text("참고 ").font(Theme.hand(16)) + Text(d.feedback?.referenceLine ?? r)).font(Theme.hand(18)).foregroundStyle(Theme.pencil).padding(.leading, 32)
+                        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { openPast = isOpen ? nil : d.id } }   // 탭하면 첨삭 전체
+                        if isOpen, let fb = d.feedback {
+                            VStack(alignment: .leading, spacing: 0) {
+                                if fb.usedExpression { Text("✓\u{FE0E} \"\(d.phrase)\" 사용").handLine(size: 20, color: Theme.grade(.A)) }
+                                else { Text("✗\u{FE0E} \"\(d.phrase)\"를 쓰지 않았다").redpen(size: 20) }
+                                ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
+                                    (Text(i.mine).strikethrough(true, color: Theme.red) + Text(" →\u{FE0E} \(i.better)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(17)).foregroundColor(Color(hex: 0xC0565A))).redpen(size: 20)
+                                }
+                                if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(16)) + Text(fb.referenceLine)).pencil(size: 20) }
+                                if !fb.note.isEmpty { Text(fb.note).pencil(size: 20) }
+                            }
+                            .padding(.leading, 32).padding(.bottom, 4)
+                        } else if isOpen {
+                            Text("채점 대기 중이거나 첨삭이 없다").pencil(size: 19).padding(.leading, 32)
                         }
                     }
                 }

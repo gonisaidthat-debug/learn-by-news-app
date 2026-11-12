@@ -114,10 +114,12 @@ import SwiftData
     var kind: String?
     var reference: String?
     var referenceKo: String?
+    var feedback: Data?          // DrillFeedback JSON (지난 시도 펼쳐 보기용)
     init(_ d: Drill) {
         id = d.id; phrase = d.phrase; korean = d.korean; answer = d.answer ?? ""; grade = d.grade?.rawValue ?? ""
         usedExpression = d.feedback?.usedExpression ?? false; answeredAt = d.answeredAt ?? d.createdAt; kind = d.kind
         reference = d.feedback?.reference ?? d.reference; referenceKo = d.feedback?.referenceKo
+        feedback = d.feedback.flatMap { try? JSONEncoder.api.encode($0) }
     }
 }
 
@@ -338,7 +340,7 @@ final class Cache {
     func drills(phrase: String) -> [Drill] {
         all(CachedDrill.self).filter { $0.phrase == phrase }.sorted { $0.answeredAt > $1.answeredAt }.map {
             Drill(id: $0.id, phraseId: nil, phrase: $0.phrase, meaning: "", korean: $0.korean, createdAt: $0.answeredAt, kind: $0.kind, sentenceId: nil,
-                  answer: $0.answer, grade: Grade(rawValue: $0.grade), feedback: nil, answeredAt: $0.answeredAt, reference: $0.reference)
+                  answer: $0.answer, grade: Grade(rawValue: $0.grade), feedback: $0.feedback.flatMap { try? JSONDecoder.api.decode(DrillFeedback.self, from: $0) }, answeredAt: $0.answeredAt, reference: $0.reference)
         }
     }
 
