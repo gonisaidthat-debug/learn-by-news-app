@@ -391,6 +391,21 @@ final class NotebookModel: ObservableObject {
         if let i = data?.highlights.firstIndex(where: { $0.id == h.id }) { data?.highlights[i].note = note.isEmpty ? nil : note }
         await SyncManager.shared.setHighlightNote(h.id, note: note)
     }
+    /// 포스트잇에서 바로 써 보기 (자유 작문). 오프라인이면 큐 → nil
+    func freeDrill(_ sid: String, _ e: Expression, answer: String) async throws -> Drill? {
+        let pid = data?.phrases.first { $0.sentenceId == sid && $0.phrase == e.phrase }?.id
+        return try await SyncManager.shared.freeDrill(API.DrillFreeBody(phrase: e.phrase, meaning: e.meaning, phraseId: pid, sentenceId: sid, answer: answer))
+    }
+    /// "문제 내줘": 표현장에 붙어 있으면 그 표현으로 한국어 문장을 받는다. 없으면 nil
+    func drillFor(_ sid: String, _ e: Expression) async throws -> Drill? {
+        guard let pid = data?.phrases.first(where: { $0.sentenceId == sid && $0.phrase == e.phrase })?.id, !SyncManager.isTemp(pid) else { return nil }
+        guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
+        return try await API.shared.nextDrill(phraseId: pid)
+    }
+    func answerDrill(_ id: String, _ answer: String) async throws -> Drill {
+        guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
+        return try await API.shared.answerDrill(id, answer: answer)
+    }
     func deleteHighlight(_ h: Highlight) async {
         guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.deleteHighlight(h.id); data?.highlights.removeAll { $0.id == h.id }; Cache.shared.removeHighlight(id: h.id) }
@@ -619,7 +634,10 @@ struct NotebookView: View {
                 onAsk: { st, en, sp in try await m.ask(x.id, start: st, end: en, span: sp) },
                 onDeleteHighlight: { h in await m.deleteHighlight(h) },
                 onMemo: { st, en, sp, n in try await m.memo(x.id, start: st, end: en, span: sp, note: n) },
-                onNote: { h, n in await m.setNote(h, n) }
+                onNote: { h, n in await m.setNote(h, n) },
+                onFree: { e, a in try await m.freeDrill(x.id, e, answer: a) },
+                onDrillFor: { e in try await m.drillFor(x.id, e) },
+                onAnswerDrill: { id, a in try await m.answerDrill(id, a) }
             )
             .id(x.id)
         } else {

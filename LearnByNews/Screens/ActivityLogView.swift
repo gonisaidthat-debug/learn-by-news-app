@@ -158,7 +158,7 @@ struct ActivityLogView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         if let g = d.grade { Stamp(kind: .grade(g), small: true) }
                         Text(d.phrase).font(Theme.hand(18)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
-                        Text(d.korean).font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(1)
+                        Text(d.isFree ? "자유 작문" : d.korean).font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(1)
                         if let a = d.answer, !a.isEmpty { Text(a).font(Theme.hand(18)).foregroundStyle(Theme.blueInk).lineLimit(1) }
                     }
                     .frame(height: Theme.lh)

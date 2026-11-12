@@ -111,9 +111,10 @@ import SwiftData
     var grade: String
     var usedExpression: Bool
     var answeredAt: Int64
+    var kind: String?
     init(_ d: Drill) {
         id = d.id; phrase = d.phrase; korean = d.korean; answer = d.answer ?? ""; grade = d.grade?.rawValue ?? ""
-        usedExpression = d.feedback?.usedExpression ?? false; answeredAt = d.answeredAt ?? d.createdAt
+        usedExpression = d.feedback?.usedExpression ?? false; answeredAt = d.answeredAt ?? d.createdAt; kind = d.kind
     }
 }
 
@@ -353,7 +354,7 @@ final class Cache {
             LogQuiz(id: $0.id, key: $0.key, source: $0.source, correct: $0.correct, createdAt: $0.createdAt, kind: $0.key.hasPrefix("p|") ? .phrase : $0.key.hasPrefix("h|") ? .highlight : .issue)
         }
         let drills = all(CachedDrill.self).filter { $0.answeredAt >= since }.sorted { $0.answeredAt < $1.answeredAt }.map {
-            LogDrill(id: $0.id, phrase: $0.phrase, korean: $0.korean, answer: $0.answer, grade: Grade(rawValue: $0.grade), usedExpression: $0.usedExpression, answeredAt: $0.answeredAt)
+            LogDrill(id: $0.id, phrase: $0.phrase, korean: $0.korean, kind: $0.kind, answer: $0.answer, grade: Grade(rawValue: $0.grade), usedExpression: $0.usedExpression, answeredAt: $0.answeredAt)
         }
         return ActivityLog(since: since, attempts: attempts, sessions: sessions, reviews: reviews, quiz: quiz, drills: drills)
     }

@@ -95,6 +95,11 @@ struct EntryView: View {
     /// 내 메모: 새로 (start, end, span, note) / 기존 형광펜에 (highlight, note)
     var onMemo: ((Int, Int, String, String) async throws -> Void)?
     var onNote: ((Highlight, String) async -> Void)?
+    /// 포스트잇에서 바로 "써 보기": 자유 작문 채점(nil이면 큐에 들어감), 문제 내줘(표현장에 없으면 nil), 문제 답 채점
+    var onFree: ((Expression, String) async throws -> Drill?)?
+    var onDrillFor: ((Expression) async throws -> Drill?)?
+    var onAnswerDrill: ((String, String) async throws -> Drill)?
+    @State private var tryExpr: Expression?
 
     var body: some View {
         let a = s.attempt!
@@ -102,7 +107,12 @@ struct EntryView: View {
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
             if expanded, let onAsk { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk, onMemo: onMemo) }
             else { Text(markHighlights(s.text, highlights)).enLine() }
-            if expanded { ForEach(highlights) { h in MarkerMemo(h: h, onDelete: onDeleteHighlight, onNote: onNote) } }
+            if expanded {
+                ForEach(highlights) { h in
+                    MarkerMemo(h: h, onDelete: onDeleteHighlight, onNote: onNote,
+                               onTry: onFree == nil ? nil : { tryExpr = Expression(phrase: h.span, meaning: h.hasAnswer ? h.answer.meaning : (h.note ?? "")) })
+                }
+            }
             if fb.grade == .skip {
                 HStack(spacing: 10) {
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
@@ -162,23 +172,118 @@ struct EntryView: View {
         ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h) }
         if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
         if !fb.expressions.isEmpty {
-            StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase)
+            StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase,
+                      onTry: onFree == nil ? nil : { e in tryExpr = e })
+        }
+        if let e = tryExpr, let onFree {
+            TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil })
         }
     }
 }
 
-/// 포스트잇 줄 (가로로 흐르고 넘치면 줄바꿈)
+/// 포스트잇 줄 (가로로 흐르고 넘치면 줄바꿈). 포스트잇마다 작은 "써 보기 ✎"
 struct StickyRow: View {
     var items: [(Expression, Bool, Int)]
     var onTap: (Expression) -> Void
+    var onTry: ((Expression) -> Void)? = nil
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
-                Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved) }
-                    .buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 2) {
+                    Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved) }
+                        .buttonStyle(.plain)
+                    if let onTry { Tiny(title: "써 보기 ✎\u{FE0E}", size: 17) { onTry(e) }.padding(.leading, 6) }
+                }
             }
         }
         .padding(.vertical, 10)
+    }
+}
+
+/// 포스트잇에서 바로 써 보기: "<표현> — 이 표현으로 네 문장 하나" + 영어 입력 → 채점. "문제 내줘"면 한국어 문장을 받아 같은 상자에서 푼다
+struct TryBox: View {
+    var expr: Expression
+    var onFree: (Expression, String) async throws -> Drill?
+    var onDrillFor: ((Expression) async throws -> Drill?)?
+    var onAnswerDrill: ((String, String) async throws -> Drill)?
+    var onClose: () -> Void
+    @State private var answer = ""
+    @State private var result: Drill?
+    @State private var prompt: Drill?       // "문제 내줘"로 받은 한국어 문장
+    @State private var busy = false
+    @State private var queued = false
+    @State private var msg: String?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let p = prompt, result == nil {
+                (Text(expr.phrase).fontWeight(.bold) + Text(" — 이 문장을 영어로")).handLine(size: 20, color: Theme.pencil)
+                Text(p.korean).handLine(size: 23, color: Theme.ink)
+            } else if result == nil {
+                (Text(expr.phrase).fontWeight(.bold) + Text(" — 이 표현으로 네 문장 하나")).handLine(size: 20, color: Theme.pencil)
+            }
+            if let r = result, let fb = r.feedback {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Stamp(kind: .grade(fb.grade), small: true)
+                    Text(r.answer ?? answer).koLine()
+                }
+                if fb.usedExpression { Text("✓\u{FE0E} \"\(expr.phrase)\" 사용").handLine(size: 21, color: Theme.grade(.A)) }
+                else { Text("✗\u{FE0E} \"\(expr.phrase)\"를 쓰지 않았다").redpen(size: 21) }
+                ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
+                    (Text(i.mine).strikethrough(true, color: Theme.red) + Text(" →\u{FE0E} \(i.better)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(18)).foregroundColor(Color(hex: 0xC0565A))).redpen(size: 21)
+                }
+                if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil(size: 21) }
+                if !fb.note.isEmpty { Text(fb.note).pencil(size: 21) }
+            } else if queued {
+                HStack(spacing: 10) { Stamp(kind: .waiting, small: true); Text(answer).koLine() }
+                Text("연결되면 채점").pencil(size: 20)
+            } else {
+                TextField(busy ? "채점 중…" : "영어로 쓴다", text: $answer, axis: .vertical)
+                    .font(Theme.hand(22)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                    .modifier(RuledText(uiFont: Theme.handUI(22), lh: Theme.lh))
+                    .textInputAutocapitalization(.sentences).autocorrectionDisabled()
+                    .focused($focused).disabled(busy)
+                    .onChange(of: answer) { _, v in if v.contains("\n") { answer = v.replacingOccurrences(of: "\n", with: " "); Task { await submit() } } }
+                if busy { Text("선생님이 보는 중… ✎\u{FE0E}").pencil(size: 20) }
+            }
+            HStack(spacing: 16) {
+                if result != nil || queued {
+                    Tiny(title: "한 번 더", color: Theme.red, size: 19) { result = nil; queued = false; answer = ""; prompt = nil; focused = true }
+                } else if !busy {
+                    if onDrillFor != nil, prompt == nil { Tiny(title: "문제 내줘", size: 19) { Task { await askPrompt() } } }
+                }
+                Tiny(title: "닫기", size: 19) { onClose() }
+                if let msg { ErrorText(message: msg) }
+            }
+            .frame(minHeight: Theme.lh)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Theme.tab.opacity(0.25))
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.tab).frame(width: 3) }
+        .padding(.vertical, 6)
+        .onAppear { focused = true }
+    }
+
+    private func submit() async {
+        let a = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !a.isEmpty, !busy else { return }
+        busy = true; msg = nil
+        do {
+            if let p = prompt, let onAnswerDrill { result = try await onAnswerDrill(p.id, a) }
+            else if let r = try await onFree(expr, a) { result = r }
+            else { queued = true }
+        } catch { msg = error.localizedDescription }
+        busy = false
+    }
+    private func askPrompt() async {
+        guard let onDrillFor else { return }
+        busy = true; msg = nil
+        do {
+            if let d = try await onDrillFor(expr) { prompt = d; focused = true }
+            else { msg = "포스트잇을 먼저 붙여 줘" }
+        } catch { msg = error.localizedDescription }
+        busy = false
     }
 }
 
@@ -304,15 +409,20 @@ struct MarkerWords: View {
         VStack(alignment: .leading, spacing: 0) {
             FlowLayout(spacing: 0) {
                 ForEach(Array(pieces.enumerated()), id: \.offset) { i, p in
-                    let saved = highlights.contains { i >= $0.startWord && i <= $0.endWord }
+                    // 같은 형광펜(또는 같은 선택)에 속한 이웃 단어와는 사이 공백까지 한 덩어리로, 모서리는 양끝만 둥글게
                     let picking = range.map { $0.contains(i) } ?? false
-                    Text(p.word + " ")
-                        .font(Theme.print(16)).foregroundStyle(Theme.ink)
-                        .padding(.vertical, 2)
-                        .background(picking ? Theme.markerSelecting : saved ? Theme.marker : .clear)
-                        .frame(height: Theme.lh)
-                        .contentShape(Rectangle())
-                        .onTapGesture { tap(i) }
+                    let savedRun = highlights.first { i >= $0.startWord && i <= $0.endWord }
+                    let color: Color? = picking ? Theme.markerSelecting : (savedRun != nil ? Theme.marker : nil)
+                    let joinNext: Bool = picking ? (range?.contains(i + 1) ?? false) : (savedRun.map { i + 1 <= $0.endWord } ?? false)
+                    let joinPrev: Bool = picking ? (range?.contains(i - 1) ?? false) : (savedRun.map { i - 1 >= $0.startWord } ?? false)
+                    HStack(spacing: 0) {
+                        Text(p.word).font(Theme.print(16)).foregroundStyle(Theme.ink).padding(.vertical, 2)
+                            .background(color ?? .clear, in: UnevenRoundedRectangle(topLeadingRadius: joinPrev ? 0 : 4, bottomLeadingRadius: joinPrev ? 0 : 4, bottomTrailingRadius: joinNext ? 0 : 4, topTrailingRadius: joinNext ? 0 : 4))
+                        Text(" ").font(Theme.print(16)).padding(.vertical, 2).background(joinNext ? (color ?? .clear) : .clear)
+                    }
+                    .frame(height: Theme.lh)
+                    .contentShape(Rectangle())
+                    .onTapGesture { tap(i) }
                 }
             }
             if let r = range {
@@ -383,6 +493,7 @@ struct MarkerMemo: View {
     var h: Highlight
     var onDelete: ((Highlight) async -> Void)?
     var onNote: ((Highlight, String) async -> Void)? = nil
+    var onTry: (() -> Void)? = nil
     @State private var editing = false
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -418,6 +529,7 @@ struct MarkerMemo: View {
                     if onNote != nil {
                         Tiny(title: (h.note ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { text = h.note ?? ""; editing = true; focused = true }
                     }
+                    if let onTry { Tiny(title: "써 보기 ✎\u{FE0E}", size: 17, action: onTry) }
                 }
             }
         }

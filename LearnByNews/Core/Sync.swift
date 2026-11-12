@@ -138,6 +138,11 @@ final class SyncManager: ObservableObject {
                 case "highlight_note":
                     let b = try JSONDecoder.api.decode(NoteOp.self, from: op.payload)
                     try await API.shared.setHighlightNote(real(b.highlightId), note: b.note)
+                case "drill_free":
+                    let b = try JSONDecoder.api.decode(API.DrillFreeBody.self, from: op.payload)
+                    let d = try await API.shared.freeDrill(b)
+                    DrillStore.shared.didGrade(d)
+                    NotificationCenter.default.post(name: .lbnDrillGraded, object: nil, userInfo: ["drill": d])
                 case "drill_answer":
                     let b = try JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload)
                     let d = try await API.shared.answerDrill(b.id, answer: b.answer)
@@ -197,6 +202,16 @@ final class SyncManager: ObservableObject {
     struct DrillAnswerOp: Codable { var id: String; var answer: String; var answeredAtLocal: Int64; var phrase: String?; var korean: String? }
     struct MemoOp: Codable { var tempId: String; var sentenceId: String; var articleId: String; var startWord: Int; var endWord: Int; var span: String; var note: String }
     struct NoteOp: Codable { var highlightId: String; var note: String }
+
+    /// 자유 작문: 온라인이면 바로 채점, 아니면 큐(drill_free) → nil("연결되면 채점")
+    func freeDrill(_ b: API.DrillFreeBody) async throws -> Drill? {
+        if Connectivity.shared.isOnline {
+            do { return try await API.shared.freeDrill(b) }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        }
+        Cache.shared.enqueue("drill_free", b); refreshCounts()
+        return nil
+    }
 
     /// 형광펜 내 메모 (Claude 없음): 온라인이면 서버, 아니면 임시 id로 캐시 + 큐
     func memo(sentenceId: String, articleId: String, startWord: Int, endWord: Int, span: String, note: String) async throws -> AskResult? {

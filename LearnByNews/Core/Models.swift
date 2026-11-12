@@ -272,6 +272,8 @@ struct LogDrill: Codable, Identifiable, Hashable {
     var id: String
     var phrase: String
     var korean: String
+    var kind: String?
+    var isFree: Bool { kind == "free" }
     var answer: String?
     var grade: Grade?
     var usedExpression: Bool?
@@ -447,6 +449,30 @@ struct Drill: Codable, Identifiable, Hashable {
     var meaning: String
     var korean: String
     var createdAt: Int64
+    var kind: String?          // "prompt"(한국어 문장 받아 쓰기) | "free"(자유 작문)
+    var sentenceId: String?
+    var isFree: Bool { kind == "free" }
+
+    init(id: String, phraseId: String?, phrase: String, meaning: String, korean: String, createdAt: Int64, kind: String? = nil, sentenceId: String? = nil, answer: String? = nil, grade: Grade? = nil, feedback: DrillFeedback? = nil, answeredAt: Int64? = nil, reference: String? = nil) {
+        self.id = id; self.phraseId = phraseId; self.phrase = phrase; self.meaning = meaning; self.korean = korean; self.createdAt = createdAt; self.kind = kind; self.sentenceId = sentenceId; self.answer = answer; self.grade = grade; self.feedback = feedback; self.answeredAt = answeredAt; self.reference = reference
+    }
+    enum CodingKeys: String, CodingKey { case id, phraseId, phrase, meaning, korean, createdAt, kind, sentenceId, answer, grade, feedback, answeredAt, reference }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        phraseId = try c.decodeIfPresent(String.self, forKey: .phraseId)
+        phrase = try c.decodeIfPresent(String.self, forKey: .phrase) ?? ""
+        meaning = try c.decodeIfPresent(String.self, forKey: .meaning) ?? ""
+        korean = try c.decodeIfPresent(String.self, forKey: .korean) ?? ""
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        sentenceId = try c.decodeIfPresent(String.self, forKey: .sentenceId)
+        answer = try c.decodeIfPresent(String.self, forKey: .answer)
+        grade = try? c.decodeIfPresent(Grade.self, forKey: .grade)
+        feedback = try? c.decodeIfPresent(DrillFeedback.self, forKey: .feedback)
+        answeredAt = try c.decodeIfPresent(Int64.self, forKey: .answeredAt)
+        reference = try c.decodeIfPresent(String.self, forKey: .reference)
+    }
     var answer: String?
     var grade: Grade?
     var feedback: DrillFeedback?

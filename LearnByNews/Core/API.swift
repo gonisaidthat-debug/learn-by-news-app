@@ -166,6 +166,9 @@ final class API {
     func answerDrill(_ id: String, answer: String) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer)) }
     func deleteDrill(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/drills/\(id)") }
     func drills(days: Int = 30) async throws -> [Drill] { try await send("GET", "/api/drills?days=\(days)") }
+    struct DrillFreeBody: Codable { var phrase: String; var meaning: String?; var phraseId: String?; var sentenceId: String?; var answer: String }
+    /// 자유 작문: 한국어 원문 없이 표현을 써서 지은 내 문장을 채점
+    func freeDrill(_ b: DrillFreeBody) async throws -> Drill { try await send("POST", "/api/drills/free", body: b) }
     struct DrillBatchBody: Encodable { var count: Int }
     struct DrillBatch: Decodable { var drills: [Drill]; var made: Int? }
     /// 안 푼 문제를 count개까지 채워 전부 돌려준다 (오프라인용 미리 받기, 중복 생성 없음)
