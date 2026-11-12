@@ -138,9 +138,10 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
     var phrases: [Phrase]
     var reviews: [Review]
     var highlights: [Highlight]
+    var drillCounts: [String: Int]     // 표현(포스트잇 phrase·형광펜 span)별 채점 끝난 응용·자유 작문 수
 
-    init(id: String, title: String, source: String?, createdAt: Int64, sentences: [Sentence], phrases: [Phrase], reviews: [Review], highlights: [Highlight] = []) {
-        self.id = id; self.title = title; self.source = source; self.createdAt = createdAt; self.sentences = sentences; self.phrases = phrases; self.reviews = reviews; self.highlights = highlights
+    init(id: String, title: String, source: String?, createdAt: Int64, sentences: [Sentence], phrases: [Phrase], reviews: [Review], highlights: [Highlight] = [], drillCounts: [String: Int] = [:]) {
+        self.id = id; self.title = title; self.source = source; self.createdAt = createdAt; self.sentences = sentences; self.phrases = phrases; self.reviews = reviews; self.highlights = highlights; self.drillCounts = drillCounts
     }
 
     init(from decoder: Decoder) throws {
@@ -153,6 +154,7 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
         phrases = try c.decodeIfPresent([Phrase].self, forKey: .phrases) ?? []
         reviews = try c.decodeIfPresent([Review].self, forKey: .reviews) ?? []
         highlights = try c.decodeIfPresent([Highlight].self, forKey: .highlights) ?? []
+        drillCounts = try c.decodeIfPresent([String: Int].self, forKey: .drillCounts) ?? [:]
     }
 
     /// 등급 평균. 건너뜀 제외. 채점된 문장이 없으면 nil (웹 scoreOf와 동일)

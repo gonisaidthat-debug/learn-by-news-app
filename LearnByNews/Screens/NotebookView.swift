@@ -68,6 +68,7 @@ final class NotebookModel: ObservableObject {
 
     init(id: String, focusId: String?, restartAfter: Int?, browseAll: Bool, round: Int?) {
         self.id = id; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll; self.round = round
+        observeDrillGraded()
         // 오프라인 큐의 채점이 돌아오면 그 문장을 교체한다
         observers.append(NotificationCenter.default.addObserver(forName: .lbnAttemptGraded, object: nil, queue: .main) { [weak self] n in
             Task { @MainActor in self?.graded(n.userInfo ?? [:]) }
@@ -82,6 +83,16 @@ final class NotebookModel: ObservableObject {
         })
     }
     deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
+
+    /// 오프라인 큐로 나중에 채점된 자유 작문이 이 공책 문장의 것이면 횟수 +1
+    func observeDrillGraded() {
+        observers.append(NotificationCenter.default.addObserver(forName: .lbnDrillGraded, object: nil, queue: .main) { [weak self] n in
+            Task { @MainActor in
+                guard let self, let d = n.userInfo?["drill"] as? Drill, d.answeredAt != nil else { return }
+                if let sid = d.sentenceId, self.data?.sentences.contains(where: { $0.id == sid }) == true { self.bumpDrillCount(d.phrase) }
+            }
+        })
+    }
 
     private func graded(_ info: [AnyHashable: Any]) {
         guard let aid = info["attemptId"] as? String, let (sid, f) = inflight.first(where: { $0.value.attemptId == aid }) else { return }
@@ -412,6 +423,8 @@ final class NotebookModel: ObservableObject {
         guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
         return try await API.shared.answerDrill(id, answer: answer)
     }
+    /// 써 보기 횟수 +1 (상자에서 채점이 끝났거나, 오프라인 큐의 결과가 돌아왔을 때)
+    func bumpDrillCount(_ phrase: String) { data?.drillCounts[phrase, default: 0] += 1 }
     func deleteHighlight(_ h: Highlight) async {
         guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.deleteHighlight(h.id); data?.highlights.removeAll { $0.id == h.id }; Cache.shared.removeHighlight(id: h.id) }
@@ -643,7 +656,9 @@ struct NotebookView: View {
                 onNote: { h, n in await m.setNote(h, n) },
                 onFree: { e, a in try await m.freeDrill(x.id, e, answer: a) },
                 onDrillFor: { e in try await m.drillFor(x.id, e) },
-                onAnswerDrill: { id, a in try await m.answerDrill(id, a) }
+                onAnswerDrill: { id, a in try await m.answerDrill(id, a) },
+                drillCounts: d.drillCounts,
+                onDrillGraded: { ph in m.bumpDrillCount(ph) }
             )
             .id(x.id)
         } else {

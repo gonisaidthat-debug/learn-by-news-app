@@ -32,7 +32,17 @@ final class DoneModel: ObservableObject {
     @Published var estimated: Int?             // 저장이 없을 때 추정한 "오늘 다시 쓴 앞쪽 문장 수"
     private var autoTried = false
 
-    init(id: String, newReview: Bool) { self.id = id; self.newReview = newReview }
+    private var observer: NSObjectProtocol?
+    init(id: String, newReview: Bool) {
+        self.id = id; self.newReview = newReview
+        observer = NotificationCenter.default.addObserver(forName: .lbnDrillGraded, object: nil, queue: .main) { [weak self] n in
+            Task { @MainActor in
+                guard let self, let d = n.userInfo?["drill"] as? Drill, d.answeredAt != nil else { return }
+                if let sid = d.sentenceId, self.data?.sentences.contains(where: { $0.id == sid }) == true { self.bumpDrillCount(d.phrase) }
+            }
+        }
+    }
+    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
     func load() async {
         if data == nil, let c = Cache.shared.article(id) { data = c; progress = RedoProgress.load(id) }
@@ -121,6 +131,8 @@ final class DoneModel: ObservableObject {
         guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
         return try await API.shared.answerDrill(id, answer: answer)
     }
+    /// 써 보기 횟수 +1 (상자에서 채점이 끝났거나, 오프라인 큐의 결과가 돌아왔을 때)
+    func bumpDrillCount(_ phrase: String) { data?.drillCounts[phrase, default: 0] += 1 }
     func deleteHighlight(_ h: Highlight) async {
         guard Connectivity.shared.isOnline else { err = onlineOnlyMessage; return }
         do { try await API.shared.deleteHighlight(h.id); data?.highlights.removeAll { $0.id == h.id }; Cache.shared.removeHighlight(id: h.id) }
@@ -273,7 +285,9 @@ struct DoneView: View {
                                 onNote: { h, n in await m.setNote(h, n) },
                                 onFree: { e, a in try await m.freeDrill(s.id, e, answer: a) },
                                 onDrillFor: { e in try await m.drillFor(s.id, e) },
-                                onAnswerDrill: { id, a in try await m.answerDrill(id, a) }
+                                onAnswerDrill: { id, a in try await m.answerDrill(id, a) },
+                                drillCounts: d.drillCounts,
+                                onDrillGraded: { ph in m.bumpDrillCount(ph) }
                             )
                         }
                     }

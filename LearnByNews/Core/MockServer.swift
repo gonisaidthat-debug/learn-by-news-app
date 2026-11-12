@@ -108,6 +108,10 @@ struct MockState {
         sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
+        drills = [["id": "d1", "phrase_id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "korean": "", "kind": "free", "sentence_id": "s1", "created_at": now - 7_200_000,
+                   "answer": "The Fed decided to hold rates steady this month.", "grade": "A", "answered_at": now - 7_200_000,
+                   "feedback": ["grade": "A", "used_expression": true, "issues": [], "reference": "The Fed held rates steady this month.", "reference_ko": "연준은 이번 달 금리를 동결했다.", "note": "자연스럽다."] as [String: Any],
+                   "reference": "The Fed held rates steady this month."]]
         highlights = [["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
                        "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "note": "뉴스에서 자주 봄", "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
@@ -146,6 +150,10 @@ struct MockState {
             a["phrases"] = phrases.filter { $0["article_id"] as? String == id }
             a["reviews"] = reviews.filter { $0["article_id"] as? String == id }.sorted { ($0["created_at"] as! Int64) > ($1["created_at"] as! Int64) }
             a["highlights"] = highlights.filter { $0["article_id"] as? String == id }
+            var counts: [String: Int] = [:]
+            let keys = Set((a["phrases"] as! [[String: Any]]).map { $0["phrase"] as! String } + (a["highlights"] as! [[String: Any]]).map { $0["span"] as! String })
+            for d in drills where !(d["feedback"] is NSNull) { let ph = d["phrase"] as! String; if keys.contains(ph) { counts[ph, default: 0] += 1 } }
+            a["drill_counts"] = counts
             return (200, a)
         case "PATCH /api/articles/:id":
             if let i = articles.firstIndex(where: { $0["id"] as? String == id }) { for (k, v) in body { articles[i][k] = v } }

@@ -273,7 +273,11 @@ final class Cache {
         }
         let reviews = all(CachedReview.self).filter { $0.articleId == id }.sorted { $0.createdAt > $1.createdAt }.map(toReview)
         let highlights = all(CachedHighlight.self).filter { $0.articleId == id }.sorted { $0.createdAt < $1.createdAt }.map(\.value)
-        return ArticleDetail(id: a.id, title: a.title, source: a.source, createdAt: a.createdAt, sentences: sentences, phrases: phrases, reviews: reviews, highlights: highlights)
+        // 표현별 채점 끝난 응용·자유 작문 수 (이 공책의 포스트잇·형광펜 구절만)
+        let keys = Set(phrases.map(\.phrase) + highlights.map(\.span))
+        var counts: [String: Int] = [:]
+        for d in all(CachedDrill.self) where keys.contains(d.phrase) && !d.grade.isEmpty { counts[d.phrase, default: 0] += 1 }
+        return ArticleDetail(id: a.id, title: a.title, source: a.source, createdAt: a.createdAt, sentences: sentences, phrases: phrases, reviews: reviews, highlights: highlights, drillCounts: counts)
     }
 
     /// 캐시된 책갈피 (제목·문장 번호·본문은 캐시 표에서 채운다)

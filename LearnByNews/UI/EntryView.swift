@@ -99,6 +99,8 @@ struct EntryView: View {
     var onFree: ((Expression, String) async throws -> Drill?)?
     var onDrillFor: ((Expression) async throws -> Drill?)?
     var onAnswerDrill: ((String, String) async throws -> Drill)?
+    var drillCounts: [String: Int] = [:]
+    var onDrillGraded: ((String) -> Void)?      // 상자에서 채점이 끝났다 → 그 표현 횟수 +1
     @State private var tryExpr: Expression?
 
     var body: some View {
@@ -110,7 +112,8 @@ struct EntryView: View {
             if expanded {
                 ForEach(highlights) { h in
                     MarkerMemo(h: h, onDelete: onDeleteHighlight, onNote: onNote,
-                               onTry: onFree == nil ? nil : { tryExpr = Expression(phrase: h.span, meaning: h.hasAnswer ? h.answer.meaning : (h.note ?? "")) })
+                               onTry: onFree == nil ? nil : { let e = Expression(phrase: h.span, meaning: h.hasAnswer ? h.answer.meaning : (h.note ?? "")); tryExpr = tryExpr == e ? nil : e },
+                               tryTitle: tryExpr?.phrase == h.span ? "접기" : tryTitle(h.span), tryCount: tryExpr?.phrase == h.span ? 0 : (drillCounts[h.span] ?? 0))
                 }
             }
             if fb.grade == .skip {
@@ -155,6 +158,12 @@ struct EntryView: View {
         }
     }
 
+    /// "써 보기 ✎" 또는 "써 보기 ✎ · n"
+    private func tryTitle(_ phrase: String) -> String {
+        let n = drillCounts[phrase] ?? 0
+        return n > 0 ? "써 보기 ✎\u{FE0E} · \(n)" : "써 보기 ✎\u{FE0E}"
+    }
+
     @ViewBuilder
     private func marks(_ fb: Feedback) -> some View {
         ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
@@ -173,10 +182,11 @@ struct EntryView: View {
         if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
         if !fb.expressions.isEmpty {
             StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase,
-                      onTry: onFree == nil ? nil : { e in tryExpr = e })
+                      onTry: onFree == nil ? nil : { e in tryExpr = tryExpr == e ? nil : e },
+                      tryLabel: { e in tryExpr == e ? "접기" : tryTitle(e.phrase) }, counts: drillCounts, openPhrase: tryExpr?.phrase)
         }
         if let e = tryExpr, let onFree {
-            TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil })
+            TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil }, onGraded: { onDrillGraded?(e.phrase) })
         }
     }
 }
@@ -186,17 +196,37 @@ struct StickyRow: View {
     var items: [(Expression, Bool, Int)]
     var onTap: (Expression) -> Void
     var onTry: ((Expression) -> Void)? = nil
+    var tryLabel: ((Expression) -> String)? = nil
+    var counts: [String: Int] = [:]
+    var openPhrase: String? = nil
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
                 VStack(alignment: .leading, spacing: 2) {
                     Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved) }
                         .buttonStyle(.plain)
-                    if let onTry { Tiny(title: "써 보기 ✎\u{FE0E}", size: 17) { onTry(e) }.padding(.leading, 6) }
+                    if let onTry {
+                        TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) }
+                            .padding(.leading, 6)
+                    }
                 }
             }
         }
         .padding(.vertical, 10)
+    }
+}
+
+/// "써 보기 ✎ · 2" — 횟수는 잉크색 굵게, 0이면 안 붙임
+struct TryButton: View {
+    var title: String
+    var count: Int
+    var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            (Text(title).foregroundColor(Theme.pencil) + Text(count > 0 ? " · " : "").foregroundColor(Theme.pencil) + Text(count > 0 ? "\(count)" : "").fontWeight(.bold).foregroundColor(Theme.ink))
+                .font(Theme.hand(17))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -207,6 +237,7 @@ struct TryBox: View {
     var onDrillFor: ((Expression) async throws -> Drill?)?
     var onAnswerDrill: ((String, String) async throws -> Drill)?
     var onClose: () -> Void
+    var onGraded: (() -> Void)? = nil
     @State private var answer = ""
     @State private var result: Drill?
     @State private var prompt: Drill?       // "문제 내줘"로 받은 한국어 문장
@@ -314,8 +345,8 @@ struct TryBox: View {
         guard !a.isEmpty, !busy else { return }
         busy = true; msg = nil
         do {
-            if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); result = r; past.insert(r, at: 0) }
-            else if let r = try await onFree(expr, a) { result = r; past.insert(r, at: 0) }
+            if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
+            else if let r = try await onFree(expr, a) { result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
             else { queued = true }
         } catch { msg = error.localizedDescription }
         busy = false
@@ -580,6 +611,8 @@ struct MarkerMemo: View {
     var onDelete: ((Highlight) async -> Void)?
     var onNote: ((Highlight, String) async -> Void)? = nil
     var onTry: (() -> Void)? = nil
+    var tryTitle: String = "써 보기 ✎\u{FE0E}"
+    var tryCount: Int = 0
     @State private var editing = false
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -615,7 +648,7 @@ struct MarkerMemo: View {
                     if onNote != nil {
                         Tiny(title: (h.note ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { text = h.note ?? ""; editing = true; focused = true }
                     }
-                    if let onTry { Tiny(title: "써 보기 ✎\u{FE0E}", size: 17, action: onTry) }
+                    if let onTry { TryButton(title: tryTitle, count: tryCount, action: onTry) }
                 }
             }
         }
