@@ -51,7 +51,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET `/api/auth` | — | `{ok:true}` (비밀번호 확인용) |
 | GET `/api/articles` | — | `[{id, title, source, created_at, sentence_count, done_count, review_count, pass_done: string[]|null, grades:{A?,B?,C?,D?,skip?}}]` 최신순. `review_count` = 완주 회차, `pass_done` = 다시 쓰기 진행 중이면 이번 회차에 제출한 문장 id들 |
 | POST `/api/articles` | `{title, source?, sentences:[{paragraph, text}]}` 문장 분리는 클라이언트 | `{id}` |
-| GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[], highlights: Highlight[]}` reviews 최신순 |
+| GET `/api/articles/:id` | — | `{id, title, source, created_at, sentences: Sentence[], phrases: Phrase[], reviews: Review[], highlights: Highlight[], drill_counts: {[phrase]: number}}` reviews 최신순. `drill_counts` = 이 공책의 표현장 표현·형광펜 구절별 "써 보기" 횟수(채점 끝난 것만) → "써 보기 ✎ · n" 표시용 |
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
 | DELETE `/api/articles/:id` | — | `{ok}` 기록·표현·총평까지 삭제 |
 | POST `/api/articles/:id/review` | `{score: int\|null}` (클라 계산값 보관용) | `Review` — Claude 호출, 수 초 걸림 |
