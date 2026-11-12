@@ -58,7 +58,8 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/sentences/:id/attempts` | `{translation}` 또는 `{skip:true}`, 선택 `attempt_id`(클라이언트 UUID, 멈추기용) | `Feedback & {translation, created_at}` `& {phrases: Phrase[]}` — **첨삭 표현은 서버가 기본으로 표현장에 저장**하고(같은 문장·같은 표현은 한 번만) 새로 저장된 것을 `phrases`로 돌려준다. 클라이언트는 이를 공책의 phrases에 합쳐 포스트잇을 "붙은" 상태로 그린다. 떼는 건 `DELETE /api/phrases/:id`(goni 결정 2026-11-10) — translation이면 Claude 호출(약 5~10초), skip은 즉시 |
 | DELETE `/api/attempts/:id` | — | `{ok, removed}` **멈추기**: 채점이 끝났으면 그 시도 삭제, 아직이면 묘비를 남겨 결과 도착 시 버림(그 요청은 409 `{cancelled:true}`) |
 | POST `/api/sentences/:id/merge` | `{dir:"prev"\|"next"}` | `{ok, kept, text}` 붙는 쪽 문장과 기록 삭제 |
-| DELETE `/api/sentences/:id` | — | `{ok}` |
+| DELETE `/api/sentences/:id` | — | `{ok, trash_id}` — 문장·채점·표현·형광펜을 `trash`에 담고 지운다 |
+| POST `/api/trash/:id/restore` | — | `{ok, sentence_id}` 휴지통에서 그대로 되살림 |
 | GET `/api/phrases?q=` | — | `Phrase[]` 최신순, q는 phrase/meaning LIKE |
 | POST `/api/phrases` | `{phrase, meaning, sentence_id, article_id}` | `Phrase` |
 | DELETE `/api/phrases/:id` | — | `{ok}` |
