@@ -353,6 +353,8 @@ struct TryBox: View {
     @State private var result: Drill?
     @State private var prompt: Drill?       // "문제 내줘"로 받은 한국어 문장
     @State private var busy = false
+    @State private var busyLabel = ""          // "채점 중… ✎" | "문제 내는 중… ✎"
+    @State private var blink = false
     @State private var queued = false
     @State private var msg: String?
     @State private var past: [Drill] = []      // 같은 표현으로 푼 지난 시도 (최신순, 최대 10)
@@ -383,13 +385,12 @@ struct TryBox: View {
                 HStack(spacing: 10) { Stamp(kind: .waiting, small: true); Text(answer).koLine() }
                 Text("연결되면 채점").pencil(size: 20)
             } else {
-                TextField(busy ? "채점 중…" : "영어로 쓴다", text: $answer, axis: .vertical)
+                TextField("영어로 쓴다", text: $answer, axis: .vertical)
                     .font(Theme.hand(22)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
                     .modifier(RuledText(uiFont: Theme.handUI(22), lh: Theme.lh))
                     .textInputAutocapitalization(.sentences).autocorrectionDisabled()
-                    .focused($focused).disabled(busy)
+                    .focused($focused).disabled(busy).opacity(busy ? 0.55 : 1)     // 서버가 일하는 동안 입력란은 비활성·반투명, 글은 그대로
                     .onChange(of: answer) { _, v in if v.contains("\n") { answer = v.replacingOccurrences(of: "\n", with: " "); Task { await submit() } } }
-                if busy { Text("선생님이 보는 중… ✎\u{FE0E}").pencil(size: 20) }
             }
             if !past.isEmpty {
                 Text("지난 시도 \(past.count)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).padding(.top, 4)
@@ -426,10 +427,15 @@ struct TryBox: View {
             HStack(spacing: 16) {
                 if result != nil || queued {
                     Tiny(title: "한 번 더", color: Theme.red, size: 19) { result = nil; queued = false; answer = ""; prompt = nil; focused = true }
-                } else if !busy {
-                    if onDrillFor != nil, prompt == nil { Tiny(title: "문제 내줘", size: 19) { Task { await askPrompt() } } }
+                } else {
+                    if onDrillFor != nil, prompt == nil { Tiny(title: "문제 내줘", size: 19) { Task { await askPrompt() } }.disabled(busy).opacity(busy ? 0.4 : 1) }
                 }
-                Tiny(title: "닫기", size: 19) { onClose() }
+                Tiny(title: "닫기", size: 19) { onClose() }.disabled(busy).opacity(busy ? 0.4 : 1)
+                if busy {
+                    // 서버가 일하는 동안 깜빡이는 연필색 글씨
+                    Text(busyLabel).font(Theme.hand(19)).foregroundStyle(Theme.pencil).opacity(blink ? 0.25 : 1)
+                        .onAppear { blink = false; withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { blink = true } }
+                }
                 if let msg { ErrorText(message: msg) }
             }
             .frame(minHeight: Theme.lh)
@@ -454,7 +460,7 @@ struct TryBox: View {
     private func submit() async {
         let a = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !a.isEmpty, !busy else { return }
-        busy = true; msg = nil
+        busy = true; busyLabel = "채점 중… ✎\u{FE0E}"; msg = nil
         do {
             if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
             else if let r = try await onFree(expr, a) { result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
@@ -464,7 +470,7 @@ struct TryBox: View {
     }
     private func askPrompt() async {
         guard let onDrillFor else { return }
-        busy = true; msg = nil
+        busy = true; busyLabel = "문제 내는 중… ✎\u{FE0E}"; msg = nil
         do {
             if let d = try await onDrillFor(expr) { prompt = d; focused = true }
             else { msg = "포스트잇을 먼저 붙여 줘" }
