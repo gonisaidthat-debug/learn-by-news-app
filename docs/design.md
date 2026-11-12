@@ -40,7 +40,7 @@ Phrase     { id, phrase, meaning, sentence_id, article_id, created_at, sentence_
 Review     { id, score: int|null, created_at, summary, patterns: [{title, detail}], praise }
 Session    { id, started_at, ended_at, attempts, score: int|null, articles: string[], created_at }
 Highlight  { id, sentence_id, article_id, start_word, end_word, span, answer: {meaning, why, similar}, note: string|null, created_at }
-Drill      { id, phrase_id, phrase, meaning, korean, created_at, answer, grade, feedback: {grade, used_expression, issues[{mine, better, why}], reference, note}|null, answered_at, reference? }
+Drill      { id, phrase_id, phrase, meaning, korean, created_at, kind: "prompt"|"free", sentence_id, answer, grade, feedback: {grade, used_expression, issues[{mine, better, why}], reference, note}|null, answered_at, reference? }
 QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, article_title, sentence_idx, sentence_text,
              source, mine, meaning, why, issued_at, last_correct: bool|null, last_at, tries, wrong }
 ```
@@ -80,6 +80,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
 | GET `/api/drills?days=30` | — | 푼 문제 목록 최신순 |
 | POST `/api/drills/batch` | `{count}` 1~30 | `{drills: Drill[], made}` 안 푼 문제를 count개까지 채워 전부(오프라인용 미리 받기) |
+| POST `/api/drills/free` | `{phrase, meaning?, phrase_id?, sentence_id?, answer}` | `Drill`(kind "free", feedback·reference 포함) — 한국어 원문 없이 표현을 써서 지은 내 문장을 채점(호출 1). 오프라인이면 큐(drill_free) |
 | GET / PUT / DELETE `/api/articles/:id/pass` | PUT `{done: string[]}` | GET → `{done, updated_at}|null`. **다시 쓰기 진행 상태는 서버가 진실**. 제출마다 PUT, 완료·중단 시 DELETE. UserDefaults는 캐시(오프라인 큐로 지연 전송 가능) |
 | GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. **공부 세션 시작점도 서버에 하나** |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
