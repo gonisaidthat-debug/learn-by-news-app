@@ -227,13 +227,24 @@ final class SyncManager: ObservableObject {
         Cache.shared.mergeLocal(sid, dir: dir)
         Cache.shared.enqueue("sentence_merge", SentenceOp(sentenceId: sid, dir: dir)); refreshCounts()
     }
-    func deleteSentence(_ sid: String) async throws {
+    /// 문장 제거. 온라인이면 서버 휴지통 id를 돌려주고, 오프라인이면 큐에 넣고 nil
+    func deleteSentence(_ sid: String) async throws -> String? {
         if Connectivity.shared.isOnline, !Self.isTemp(sid) {
-            do { try await API.shared.deleteSentence(sid); Cache.shared.needsFull = true; return }
+            do { let t = try await API.shared.deleteSentence(sid); Cache.shared.needsFull = true; return t }
             catch let e as APIError where e.isNetwork { /* 큐로 */ }
         }
         Cache.shared.deleteSentenceLocal(sid)
         Cache.shared.enqueue("sentence_delete", SentenceOp(sentenceId: sid, dir: nil)); refreshCounts()
+        return nil
+    }
+    /// 큐에 있는 삭제를 취소하고 캐시를 되돌린다. 큐에 없으면(이미 보냄) false
+    func undoQueuedDelete(_ s: Sentence, articleId: String) -> Bool {
+        for op in Cache.shared.pending(kind: "sentence_delete") {
+            if let b = try? JSONDecoder.api.decode(SentenceOp.self, from: op.payload), b.sentenceId == s.id {
+                Cache.shared.remove(op); Cache.shared.restoreSentenceLocal(s, articleId: articleId); refreshCounts(); return true
+            }
+        }
+        return false
     }
     func setSource(_ articleId: String, _ source: String) async throws {
         Cache.shared.setSourceLocal(articleId, source)

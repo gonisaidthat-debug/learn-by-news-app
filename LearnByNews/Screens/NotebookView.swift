@@ -18,6 +18,9 @@ final class NotebookModel: ObservableObject {
     @Published var roundShown: Int?
     @Published var offline = false        // 서버에 못 닿아 캐시를 보여주는 중 (입력 불가)
     @Published var bookmark: Bookmark?
+    /// 이 화면에서 뺀 문장들 (화면을 떠나기 전까지 되살릴 수 있다). 마지막 것이 맨 앞
+    struct Removed: Identifiable { var id: String { sentence.id }; var sentence: Sentence; var trashId: String? }
+    @Published var removed: [Removed] = []
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
     @Published var pass: [String]?
@@ -318,8 +321,10 @@ final class NotebookModel: ObservableObject {
     /// 문장을 공책에서 뺀다. 빈 공책이 되면 true
     func remove(_ sid: String) async -> Bool {
         do {
-            try await SyncManager.shared.deleteSentence(sid)
-            AppLog.shared.info("notebook", "remove sentence", ["sentence": sid])
+            let snapshot = data?.sentences.first { $0.id == sid }
+            let trashId = try await SyncManager.shared.deleteSentence(sid)
+            AppLog.shared.info("notebook", "remove sentence", ["sentence": sid, "trash": trashId ?? "queued"])
+            if let snapshot { removed.insert(Removed(sentence: snapshot, trashId: trashId), at: 0) }
             guard var d = data else { return false }
             d.sentences.removeAll { $0.id == sid }
             if d.sentences.isEmpty { return true }
@@ -328,6 +333,21 @@ final class NotebookModel: ObservableObject {
             if current?.id == sid { input = "" }
         } catch { err = error.localizedDescription }
         return false
+    }
+
+    /// 되살리기: 서버 휴지통에서 복구(온라인) 또는 큐의 삭제 취소(오프라인). 끝나면 공책을 다시 읽는다
+    func restore(_ r: Removed) async {
+        do {
+            if let t = r.trashId {
+                _ = try await API.shared.restoreTrash(t)
+                Cache.shared.needsFull = true
+            } else if !SyncManager.shared.undoQueuedDelete(r.sentence, articleId: id) {
+                err = "이미 서버로 보내져 여기서는 되살릴 수 없다"; return
+            }
+            removed.removeAll { $0.id == r.id }
+            AppLog.shared.info("notebook", "restored sentence", ["sentence": r.sentence.id])
+            await reload()
+        } catch { err = error.localizedDescription }
     }
 
     func togglePhrase(_ sid: String, _ e: Expression) async {
@@ -471,6 +491,7 @@ struct NotebookView: View {
                         SessionBar(model: session, waiting: waiting, hideStart: true)
                             .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
                     }
+                    if let last = m.removed.first { removedBar(last, more: m.removed.count - 1).padding(.top, 10) }
                 }
                 .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()
@@ -488,6 +509,23 @@ struct NotebookView: View {
                 if let s = toRemove { Task { if await m.remove(s.id) { router.shelfPath = [] } } }
             }
         }
+    }
+
+    /// "문장을 뺐다: "…" · 되살리기 ↩ · ×" — 이 화면을 떠나기 전까지
+    private func removedBar(_ r: NotebookModel.Removed, more: Int) -> some View {
+        HStack(spacing: 12) {
+            (Text("문장을 뺐다: ").foregroundColor(Theme.pencil) + Text("\u{201C}\(r.sentence.text)\u{201D}") + Text(more > 0 ? " 외 \(more)개" : "").foregroundColor(Theme.pencil))
+                .font(Theme.hand(19)).foregroundStyle(Theme.ink).lineLimit(2)
+            Spacer(minLength: 0)
+            Tiny(title: "되살리기 ↩\u{FE0E}", color: Theme.red) { Task { await m.restore(r) } }
+            Button { m.removed.removeAll { $0.id == r.id } } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 6) }
+                .buttonStyle(.plain).accessibilityLabel("띠 닫기")
+        }
+        .padding(EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 8))
+        .background(Theme.paper)
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.red).frame(width: 4) }
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
     }
 
     @ViewBuilder

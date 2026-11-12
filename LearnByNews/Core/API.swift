@@ -117,7 +117,11 @@ final class API {
     struct MergeBody: Encodable { var dir: String }
     struct Merged: Decodable { var ok: Bool; var kept: String; var text: String }
     func merge(_ sentenceId: String, dir: String) async throws -> Merged { try await send("POST", "/api/sentences/\(sentenceId)/merge", body: MergeBody(dir: dir)) }
-    func deleteSentence(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/sentences/\(id)") }
+    struct Trashed: Decodable { var ok: Bool; var trashId: String? }
+    /// 문장·채점·표현·형광펜을 서버 휴지통에 담고 지운다. trash_id로 되살릴 수 있다
+    func deleteSentence(_ id: String) async throws -> String? { let r: Trashed = try await send("DELETE", "/api/sentences/\(id)"); return r.trashId }
+    struct Restored: Decodable { var ok: Bool; var sentenceId: String? }
+    func restoreTrash(_ trashId: String) async throws -> String? { let r: Restored = try await send("POST", "/api/trash/\(trashId)/restore"); return r.sentenceId }
 
     // MARK: phrases
     func phrases(q: String = "") async throws -> [Phrase] {

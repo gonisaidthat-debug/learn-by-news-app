@@ -64,6 +64,7 @@ struct MockState {
     var bookmark: [String: Any]? = nil
     var drills: [[String: Any]] = []
     var passes: [String: [String]] = [:]
+    var trash: [String: [String: Any]] = [:]
     var sessionStart: Int64? = nil
     var highlights: [[String: Any]] = []
     var seq = 100
@@ -116,7 +117,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -198,7 +199,14 @@ struct MockState {
         case "DELETE /api/attempts/:id":
             return (200, ["ok": true, "removed": true])
         case "DELETE /api/sentences/:id":
-            sentences.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
+            guard let s = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
+            let t = nextId("t"); trash[t] = s
+            sentences.removeAll { $0["id"] as? String == id }
+            return (200, ["ok": true, "trash_id": t])
+        case "POST /api/trash/:id/restore":
+            guard let s = trash[id] else { return (404, ["error": "휴지통에 없다"]) }
+            sentences.append(s); trash[id] = nil
+            return (200, ["ok": true, "sentence_id": s["id"]!])
         case "GET /api/phrases":
             let q = query.split(separator: "=").dropFirst().joined().removingPercentEncoding?.lowercased() ?? ""
             return (200, phrases.filter { q.isEmpty || ($0["phrase"] as! String).lowercased().contains(q) || ($0["meaning"] as! String).lowercased().contains(q) }.reversed() as [[String: Any]])

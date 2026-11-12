@@ -112,11 +112,16 @@ struct EntryView: View {
                 if expanded { marks(fb) }
             }
         }
+        .overlay(alignment: .topLeading) {
+            // 책갈피 리본: 왼쪽 여백(빨간 세로선 왼쪽), 도장 바로 아래. 본문·×와 겹치지 않는다
+            if bookmarked { Ribbon().offset(x: Theme.marginW / 2 - 6, y: Theme.lh * 0.25 + 34) }
+        }
         .overlay(alignment: .topTrailing) {
-            if bookmarked { Ribbon().padding(.trailing, 10) }
-            else if let onRemove, fb.grade == .skip {
+            // 문장 ×(공책에서 뺀다)는 오른쪽 위, 책갈피와는 반대쪽
+            if let onRemove, fb.grade == .skip {
                 Button(action: onRemove) { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 8).frame(height: Theme.lh) }
                     .buttonStyle(.plain).opacity(0.5)
+                    .accessibilityLabel("공책에서 뺀다").help("공책에서 뺀다")
             }
         }
         .contentShape(Rectangle())
@@ -124,7 +129,7 @@ struct EntryView: View {
         .contextMenu {
             if let onBookmark { Button(bookmarked ? "책갈피 빼기" : "책갈피 꽂기", systemImage: "bookmark", action: onBookmark) }
             if let onRedo { Button("다시 쓰기 ↻\u{FE0E}", action: onRedo) }
-            if let onRemove { Button("공책에서 빼기", role: .destructive, action: onRemove) }
+            if let onRemove { Button("제거 (공책에서 뺀다)", systemImage: "trash", role: .destructive, action: onRemove) }
         }
     }
 

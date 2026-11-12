@@ -429,6 +429,16 @@ final class Cache {
         for x in all(CachedSentence.self) where x.articleId == aid && x.idx > idx { x.idx -= 1 }
         try? ctx.save()
     }
+    /// 오프라인 삭제 취소: 문장과 그 시도들을 캐시에 되돌린다 (idx 자리도 벌려 준다)
+    func restoreSentenceLocal(_ s: Sentence, articleId: String) {
+        for x in all(CachedSentence.self) where x.articleId == articleId && x.idx >= s.idx { x.idx += 1 }
+        ctx.insert(CachedSentence(id: s.id, articleId: articleId, idx: s.idx, paragraph: s.paragraph, text: s.text))
+        for a in s.history + [s.attempt].compactMap({ $0 }) {
+            ctx.insert(CachedAttempt(id: "local-" + UUID().uuidString, sentenceId: s.id, articleId: articleId, translation: a.translation, grade: a.grade.rawValue, feedback: (try? JSONEncoder.api.encode(a.feedback)) ?? Data(), createdAt: a.createdAt))
+        }
+        try? ctx.save()
+    }
+
     /// 합치기 (서버와 같은 규칙: prev면 앞 문장이 남고 이 문장이 붙는다, next면 이 문장이 남고 다음 문장이 붙는다). 남은 문장 id를 돌려준다
     @discardableResult
     func mergeLocal(_ sid: String, dir: String) -> String? {

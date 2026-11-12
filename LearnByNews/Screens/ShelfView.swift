@@ -162,7 +162,7 @@ struct ShelfView: View {
                             Link(destination: url) { Text("↗\u{FE0E}").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 10) }
                         }
                         Button { toDelete = a } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 14) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.plain).accessibilityLabel("공책 버리기")
                     }
                     // 회차별 링크: "1회차 2회차 …" + 진행 중이면 "n회차 진행 중"(공책으로). 총평이 없으면 줄 자체를 숨긴다
                     if a.rounds > 0 {
