@@ -19,7 +19,7 @@ final class NotebookModel: ObservableObject {
     @Published var offline = false        // 서버에 못 닿아 캐시를 보여주는 중 (입력 불가)
     @Published var bookmark: Bookmark?
     /// 이 화면에서 뺀 문장들 (화면을 떠나기 전까지 되살릴 수 있다). 마지막 것이 맨 앞
-    struct Removed: Identifiable { var id: String { sentence.id }; var sentence: Sentence; var trashId: String? }
+    struct Removed: Identifiable { var id: String { sentence.id }; var sentence: Sentence; var trashId: String?; var afterId: String? }   // afterId: 바로 앞 문장(없으면 맨 위)
     @Published var removed: [Removed] = []
     @Published var data: ArticleDetail?
     /// 처음부터 다시 쓰기: 순서대로 다시 쓸 문장 id 목록. 기존 기록은 history로 남는다
@@ -322,9 +322,11 @@ final class NotebookModel: ObservableObject {
     func remove(_ sid: String) async -> Bool {
         do {
             let snapshot = data?.sentences.first { $0.id == sid }
+            let idx = data?.sentences.firstIndex { $0.id == sid } ?? 0
+            let afterId: String? = idx > 0 ? data?.sentences[idx - 1].id : nil
             let trashId = try await SyncManager.shared.deleteSentence(sid)
             AppLog.shared.info("notebook", "remove sentence", ["sentence": sid, "trash": trashId ?? "queued"])
-            if let snapshot { removed.insert(Removed(sentence: snapshot, trashId: trashId), at: 0) }
+            if let snapshot { removed.insert(Removed(sentence: snapshot, trashId: trashId, afterId: afterId), at: 0) }
             guard var d = data else { return false }
             d.sentences.removeAll { $0.id == sid }
             if d.sentences.isEmpty { return true }
@@ -455,6 +457,8 @@ struct NotebookView: View {
             await session.load()
             if !m.browse { focused = true }
             #if DEBUG
+            // 화면 확인용: LBN_AUTOREMOVE=<문장 id> 이면 그 문장을 빼서 되살리기 줄을 보여준다
+            if let sid = ProcessInfo.processInfo.environment["LBN_AUTOREMOVE"], m.data?.sentences.contains(where: { $0.id == sid }) == true { _ = await m.remove(sid) }
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
             if ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1", session.inSession, m.current != nil {
                 m.input = "분석가들은 노동 시장이 더 약해지면 12월 15일까지 인하를 예상한다."; m.submit(skip: false)
@@ -491,10 +495,12 @@ struct NotebookView: View {
                         }
                     }
                     Paper {
+                        ForEach(m.removed.filter { $0.afterId == nil }) { r in removedRow(r) }
                         ForEach(Array(d.sentences.prefix(upto).enumerated()), id: \.element.id) { i, x in
                             if i > 0, d.sentences[i - 1].paragraph != x.paragraph { BlankLine() }
                             row(x, d: d)
                             if let s = markers[x.id] { SessionMark(session: s) }
+                            ForEach(m.removed.filter { $0.afterId == x.id }) { r in removedRow(r) }
                         }
                         if m.redo == nil, !m.browse, let cur = m.current {
                             if let f = m.frontIdx, f > 0, d.sentences[f - 1].paragraph != cur.paragraph { BlankLine() }
@@ -504,7 +510,6 @@ struct NotebookView: View {
                         SessionBar(model: session, waiting: waiting, hideStart: true)
                             .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
                     }
-                    if let last = m.removed.first { removedBar(last, more: m.removed.count - 1).padding(.top, 10) }
                 }
                 .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()
@@ -524,21 +529,20 @@ struct NotebookView: View {
         }
     }
 
-    /// "문장을 뺐다: "…" · 되살리기 ↩ · ×" — 이 화면을 떠나기 전까지
-    private func removedBar(_ r: NotebookModel.Removed, more: Int) -> some View {
-        HStack(spacing: 12) {
-            (Text("문장을 뺐다: ").foregroundColor(Theme.pencil) + Text("\u{201C}\(r.sentence.text)\u{201D}") + Text(more > 0 ? " 외 \(more)개" : "").foregroundColor(Theme.pencil))
-                .font(Theme.hand(19)).foregroundStyle(Theme.ink).lineLimit(2)
+    /// 지운 문장이 있던 자리: "뺀 문장: "…"(취소선) · 되살리기 ↩ · ×" 한 줄(빗금 배경). 이 화면을 떠나기 전까지
+    private func removedRow(_ r: NotebookModel.Removed) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            (Text("뺀 문장: ").foregroundColor(Theme.pencil) + Text(r.sentence.text).strikethrough(true, color: Theme.pencil))
+                .font(Theme.hand(19)).foregroundStyle(Theme.pencil).lineLimit(2)
             Spacer(minLength: 0)
-            Tiny(title: "되살리기 ↩\u{FE0E}", color: Theme.red) { Task { await m.restore(r) } }
-            Button { m.removed.removeAll { $0.id == r.id } } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 6) }
-                .buttonStyle(.plain).accessibilityLabel("띠 닫기")
+            Tiny(title: "되살리기 ↩\u{FE0E}", color: Theme.red, size: 19) { Task { await m.restore(r) } }
+            Button { m.removed.removeAll { $0.id == r.id } } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
+                .buttonStyle(.plain).accessibilityLabel("되살리기 줄 닫기")
         }
-        .padding(EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 8))
-        .background(Theme.paper)
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.red).frame(width: 4) }
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+        .padding(.vertical, 4)
+        .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
+        .frame(minHeight: Theme.lh)
+        .background(Hatch().foregroundStyle(Theme.pencil.opacity(0.12)))
     }
 
     @ViewBuilder
@@ -661,6 +665,19 @@ struct SessionMark: View {
         }
         .frame(height: Theme.lh)
         .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
+    }
+}
+
+/// 빗금 배경
+struct Hatch: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        var x = r.minX - r.height
+        while x < r.maxX {
+            p.move(to: CGPoint(x: x, y: r.maxY)); p.addLine(to: CGPoint(x: x + r.height, y: r.minY))
+            x += 8
+        }
+        return p.strokedPath(StrokeStyle(lineWidth: 1))
     }
 }
 
