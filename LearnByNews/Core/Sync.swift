@@ -301,13 +301,16 @@ final class SyncManager: ObservableObject {
         refreshCounts()
         return temp
     }
-    func mergeSentence(_ sid: String, dir: String) async throws {
+    /// 합치기. 남은(kept) 문장 id를 돌려준다. 서버는 붙는 쪽의 채점·표현·형광펜을 kept로 옮긴다
+    @discardableResult
+    func mergeSentence(_ sid: String, dir: String) async throws -> String? {
         if Connectivity.shared.isOnline, !Self.isTemp(sid) {
-            do { _ = try await API.shared.merge(sid, dir: dir); Cache.shared.needsFull = true; return }
+            do { let r = try await API.shared.merge(sid, dir: dir); Cache.shared.needsFull = true; return r.kept }
             catch let e as APIError where e.isNetwork { /* 큐로 */ }
         }
-        Cache.shared.mergeLocal(sid, dir: dir)
+        let kept = Cache.shared.mergeLocal(sid, dir: dir)
         Cache.shared.enqueue("sentence_merge", SentenceOp(sentenceId: sid, dir: dir)); refreshCounts()
+        return kept
     }
     /// 문장 제거. 온라인이면 서버 휴지통 id를 돌려주고, 오프라인이면 큐에 넣고 nil
     func deleteSentence(_ sid: String) async throws -> String? {

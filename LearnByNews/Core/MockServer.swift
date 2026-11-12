@@ -231,7 +231,17 @@ struct MockState {
             let keep = dir == "prev" ? ss[otherPos] : ss[pos]; let drop = dir == "prev" ? ss[pos] : ss[otherPos]
             let text = (keep["text"] as! String) + " " + (drop["text"] as! String)
             let ki = sentences.firstIndex { $0["id"] as? String == keep["id"] as? String }!
-            sentences[ki]["text"] = text; sentences[ki]["attempt"] = NSNull(); sentences[ki]["history"] = []
+            sentences[ki]["text"] = text
+            // 붙는 쪽의 채점은 kept의 이전 시도로 옮긴다 (서버와 같은 규칙: 기록은 남는다)
+            var hist = (sentences[ki]["history"] as? [[String: Any]]) ?? []
+            hist += (drop["history"] as? [[String: Any]]) ?? []
+            if let da = drop["attempt"] as? [String: Any] { hist.append(da) }
+            sentences[ki]["history"] = hist
+            let keepWords = (keep["text"] as! String).split(separator: " ").count
+            for i in highlights.indices where highlights[i]["sentence_id"] as? String == drop["id"] as? String {
+                highlights[i]["sentence_id"] = keep["id"]!; highlights[i]["start_word"] = (highlights[i]["start_word"] as! Int) + keepWords; highlights[i]["end_word"] = (highlights[i]["end_word"] as! Int) + keepWords
+            }
+            for i in phrases.indices where phrases[i]["sentence_id"] as? String == drop["id"] as? String { phrases[i]["sentence_id"] = keep["id"]! }
             sentences.removeAll { $0["id"] as? String == drop["id"] as? String }
             for (n, s) in sents(of: aid).enumerated() { let j = sentences.firstIndex { $0["id"] as? String == s["id"] as? String }!; sentences[j]["idx"] = n }
             return (200, ["ok": true, "kept": keep["id"]!, "text": text])

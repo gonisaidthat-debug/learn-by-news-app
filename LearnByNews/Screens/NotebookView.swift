@@ -191,6 +191,9 @@ final class NotebookModel: ObservableObject {
                 return
             }
             mergePendingAttempts(d)
+            if let r = Self.pendingRedo.removeValue(forKey: id), d.sentences.contains(where: { $0.id == r }) {
+                data = d; redo = r; input = ""; requestScroll(r); focusRequest += 1; return
+            }
             if inflight.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(); return }
             data = d; requestScroll("bottom")
         } catch { err = error.localizedDescription }
@@ -333,6 +336,23 @@ final class NotebookModel: ObservableObject {
     func merge(_ sid: String, dir: String) async {
         do { try await SyncManager.shared.mergeSentence(sid, dir: dir); AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
         catch { err = error.localizedDescription }
+    }
+
+    /// 열람 화면에서 합친 뒤 공책(쓰기)으로 넘어올 때 바로 다시 쓰기 모드로 열 문장
+    static var pendingRedo: [String: String] = [:]
+
+    /// 채점된 문장끼리 합치기: 기록은 남고, kept 문장에 채점이 있으면 바로 다시 쓰기 모드로 열고 가운데로
+    func mergeGraded(_ sid: String, dir: String) async -> String? {
+        do {
+            let kept = try await SyncManager.shared.mergeSentence(sid, dir: dir)
+            AppLog.shared.info("notebook", "merge graded \(dir)", ["sentence": sid, "kept": kept ?? ""])
+            await reload()
+            if let kept, data?.sentences.first(where: { $0.id == kept })?.attempt != nil {
+                if browse { Self.pendingRedo[id] = kept; return kept }
+                redo = kept; open = nil; input = ""; requestScroll(kept); focusRequest += 1
+            }
+            return kept
+        } catch { err = error.localizedDescription; return nil }
     }
 
     /// 문장을 공책에서 뺀다. 빈 공책이 되면 true
@@ -542,6 +562,20 @@ struct NotebookView: View {
         .onChange(of: m.focusRequest) { _, _ in focused = true }
     }
 
+    /// 채점된 문장 합치기 버튼을 보일지: 같은 문단의 앞/뒤 문장이 있고, 회차 열람·처음부터 다시 쓰기 중이 아닐 때
+    private func mergeTarget(_ x: Sentence, d: ArticleDetail, dir: String) -> (() -> Void)? {
+        guard m.roundShown == nil, !m.passMode, let i = d.sentences.firstIndex(where: { $0.id == x.id }) else { return nil }
+        let j = dir == "prev" ? i - 1 : i + 1
+        guard d.sentences.indices.contains(j), d.sentences[j].paragraph == x.paragraph else { return nil }
+        return {
+            Task {
+                let kept = await m.mergeGraded(x.id, dir: dir)
+                if m.browse, kept != nil { router.shelfPath = [.notebook(id: m.id)] }   // 열람이었으면 공책(쓰기)으로 가서 바로 다시 쓰기
+                else { focused = true }
+            }
+        }
+    }
+
     /// 엮은 문장으로 이동: 같은 공책이면 그 문장을 펼치고 가운데로, 아니면 그 공책의 열람 화면으로
     private func openSentence(_ aid: String, _ sid: String) {
         if aid == m.id, m.data?.sentences.contains(where: { $0.id == sid }) == true {
@@ -689,6 +723,8 @@ struct NotebookView: View {
                 onTogglePhrase: { e in Task { await m.togglePhrase(x.id, e) } },
                 onRemove: m.browse ? nil : { toRemove = x },
                 onRedo: m.browse ? nil : { m.startRedo(x); focused = true },
+                onMergePrev: mergeTarget(x, d: d, dir: "prev"),
+                onMergeNext: mergeTarget(x, d: d, dir: "next"),
                 highlight: focusId == x.id,
                 bookmarked: m.bookmark?.sentenceId == x.id,
                 onBookmark: { Task { await m.toggleBookmark(x.id) } },

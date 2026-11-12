@@ -85,6 +85,9 @@ struct EntryView: View {
     var onTogglePhrase: (Expression) -> Void
     var onRemove: (() -> Void)?
     var onRedo: (() -> Void)?
+    /// 채점된 문장끼리 합치기 (같은 문단의 앞/뒤 문장이 있을 때만). 두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다
+    var onMergePrev: (() -> Void)?
+    var onMergeNext: (() -> Void)?
     var highlight = false
     var bookmarked = false
     var onBookmark: (() -> Void)?
@@ -185,7 +188,14 @@ struct EntryView: View {
             Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
         }
         ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h) }
-        if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
+        if onRedo != nil || onMergePrev != nil || onMergeNext != nil {
+            HStack(spacing: 16) {
+                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo) }
+                if let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+                if let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+            }
+            .frame(height: Theme.lh)
+        }
         if !fb.expressions.isEmpty {
             StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase,
                       onTry: onFree == nil ? nil : { e in tryExpr = tryExpr == e ? nil : e },

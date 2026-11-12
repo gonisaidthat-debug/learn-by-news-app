@@ -509,10 +509,15 @@ final class Cache {
         guard mine.indices.contains(other) else { return nil }
         let keep = dir == "prev" ? mine[other] : mine[pos]
         let drop = dir == "prev" ? mine[pos] : mine[other]
+        let keepWords = keep.text.split(separator: " ").count
         keep.text = keep.text + " " + drop.text
         let dropId = drop.id, dropIdx = drop.idx
         ctx.delete(drop)
-        for x in all(CachedAttempt.self) where x.sentenceId == dropId { ctx.delete(x) }
+        // 붙는 쪽의 채점·표현·형광펜은 kept로 옮긴다 (서버와 같은 규칙). 형광펜 단어 위치는 앞 문장 단어 수만큼 민다
+        for x in all(CachedAttempt.self) where x.sentenceId == dropId { x.sentenceId = keep.id }
+        for x in all(CachedPhrase.self) where x.sentenceId == dropId { x.sentenceId = keep.id }
+        for x in all(CachedHighlight.self) where x.sentenceId == dropId { x.sentenceId = keep.id; x.startWord += keepWords; x.endWord += keepWords }
+        if let b = all(CachedBookmark.self).first, b.sentenceId == dropId { b.sentenceId = keep.id }
         for x in mine where x.idx > dropIdx && x.id != dropId { x.idx -= 1 }
         try? ctx.save()
         return keep.id
