@@ -93,8 +93,13 @@ struct EntryView: View {
     var onAsk: ((Int, Int, String) async throws -> Void)?
     var onDeleteHighlight: ((Highlight) async -> Void)?
     /// 내 메모: 새로 (start, end, span, note) / 기존 형광펜에 (highlight, note)
-    var onMemo: ((Int, Int, String, String) async throws -> Void)?
+    var onMemo: ((Int, Int, String, String, [Related]) async throws -> Void)?
     var onNote: ((Highlight, String) async -> Void)?
+    /// 엮기: 후보 찾기, 링크 추가/풀기, 다른 문장으로 이동
+    var onRelated: ((String?, String?, String?, String?) async -> [Related])?
+    var onAddLink: ((Highlight, Related) async -> Void)?
+    var onRemoveLink: ((Highlight, HighlightLink) async -> Void)?
+    var onOpenSentence: ((String, String) -> Void)?
     /// 포스트잇에서 바로 "써 보기": 자유 작문 채점(nil이면 큐에 들어감), 문제 내줘(표현장에 없으면 nil), 문제 답 채점
     var onFree: ((Expression, String) async throws -> Drill?)?
     var onDrillFor: ((Expression) async throws -> Drill?)?
@@ -107,13 +112,14 @@ struct EntryView: View {
         let a = s.attempt!
         let fb = a.feedback
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
-            if expanded, let onAsk { MarkerWords(text: s.text, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight) }
+            if expanded, let onAsk { MarkerWords(text: s.text, sentenceId: s.id, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight, onRelated: onRelated) }
             else { Text(markHighlights(s.text, highlights)).enLine() }
             if expanded {
                 ForEach(highlights) { h in
                     MarkerMemo(h: h, onDelete: onDeleteHighlight, onNote: onNote,
                                onTry: onFree == nil ? nil : { let e = Expression(phrase: h.span, meaning: h.hasAnswer ? h.answer.meaning : (h.note ?? "")); tryExpr = tryExpr == e ? nil : e },
-                               tryTitle: tryExpr?.phrase == h.span ? "접기" : tryTitle(h.span), tryCount: tryExpr?.phrase == h.span ? 0 : (drillCounts[h.span] ?? 0))
+                               tryTitle: tryExpr?.phrase == h.span ? "접기" : tryTitle(h.span), tryCount: tryExpr?.phrase == h.span ? 0 : (drillCounts[h.span] ?? 0),
+                               onRelated: onRelated, onAddLink: onAddLink, onRemoveLink: onRemoveLink, onOpenSentence: onOpenSentence)
                 }
             }
             if fb.grade == .skip {
@@ -183,7 +189,8 @@ struct EntryView: View {
         if !fb.expressions.isEmpty {
             StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase,
                       onTry: onFree == nil ? nil : { e in tryExpr = tryExpr == e ? nil : e },
-                      tryLabel: { e in tryExpr == e ? "접기" : tryTitle(e.phrase) }, counts: drillCounts, openPhrase: tryExpr?.phrase)
+                      tryLabel: { e in tryExpr == e ? "접기" : tryTitle(e.phrase) }, counts: drillCounts, openPhrase: tryExpr?.phrase,
+                      backlinks: { e in savedPhrases.first { $0.phrase == e.phrase }?.backlinks ?? [] }, onOpenSentence: onOpenSentence)
         }
         if let e = tryExpr, let onFree {
             TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil }, onGraded: { onDrillGraded?(e.phrase) })
@@ -199,6 +206,8 @@ struct StickyRow: View {
     var tryLabel: ((Expression) -> String)? = nil
     var counts: [String: Int] = [:]
     var openPhrase: String? = nil
+    var backlinks: ((Expression) -> [Backlink])? = nil
+    var onOpenSentence: ((String, String) -> Void)? = nil
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
@@ -209,10 +218,102 @@ struct StickyRow: View {
                         TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) }
                             .padding(.leading, 6)
                     }
+                    // 이 표현을 가리키는 형광펜들 (거꾸로 링크)
+                    ForEach(backlinks?(e) ?? []) { b in
+                        BacklinkLine(b: b, onOpen: onOpenSentence).padding(.leading, 6)
+                    }
                 }
             }
         }
         .padding(.vertical, 10)
+    }
+}
+
+/// "← text · 기사제목" (연필색). 탭하면 그 문장으로
+struct BacklinkLine: View {
+    var b: Backlink
+    var onOpen: ((String, String) -> Void)?
+    var body: some View {
+        Button {
+            if let a = b.articleId, let sid = b.sentenceId { onOpen?(a, sid) }
+        } label: {
+            Text("←\u{FE0E} \(b.text ?? "") · \(shorten(b.title ?? ""))").font(Theme.hand(16)).foregroundStyle(Theme.pencil).lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(b.title ?? "")에서 다시 봄")
+        .help("\(b.title ?? "")에서 다시 봄")
+    }
+}
+
+/// "↗ text · 기사제목" (남색, 점선 밑줄) + × 풀기
+struct LinkLine: View {
+    var l: HighlightLink
+    var onOpen: ((String, String) -> Void)?
+    var onRemove: (() -> Void)?
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                if let a = l.articleId, let sid = l.sentenceId { onOpen?(a, sid) }
+            } label: {
+                Text("↗\u{FE0E} \(l.text ?? "") · \(shorten(l.title ?? ""))").font(Theme.hand(17)).foregroundStyle(Theme.blueInk).underline(true, pattern: .dot, color: Theme.blueInk).lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            if let onRemove {
+                Button(action: onRemove) { Text("×").font(.system(size: 13)).foregroundStyle(Theme.pencil).padding(.horizontal, 3) }
+                    .buttonStyle(.plain).accessibilityLabel("엮기 풀기")
+            }
+        }
+    }
+}
+
+func shorten(_ t: String, _ n: Int = 22) -> String { t.count > n ? String(t.prefix(n)) + "…" : t }
+
+/// 엮을 후보 칩들: "전에 본 것 (누르면 엮임)" + 점선 노란 알약, "다른 구절 찾기…"
+struct RelatedChips: View {
+    var span: String
+    var excludeSentence: String?
+    var exclude: String?
+    var selectedKeys: Set<String>
+    var onToggle: (Related) -> Void
+    var load: (String?, String?, String?, String?) async -> [Related]
+    @State private var items: [Related] = []
+    @State private var loaded = false
+    @State private var searching = false
+    @State private var q = ""
+    @FocusState private var qFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text("전에 본 것 (누르면 엮임)").font(Theme.hand(16)).foregroundStyle(Theme.pencil)
+                Tiny(title: searching ? "닫기" : "다른 구절 찾기…", size: 16) { searching.toggle(); if searching { qFocused = true } }
+            }
+            if searching {
+                TextField("구절·메모·뜻으로 찾기", text: $q).font(Theme.hand(19)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                    .focused($qFocused).submitLabel(.search).autocorrectionDisabled()
+                    .onSubmit { Task { items = await load(nil, q, excludeSentence, exclude) } }
+            }
+            if !loaded {
+                Text("찾는 중…").font(Theme.hand(16)).foregroundStyle(Theme.pencil)
+            } else if items.isEmpty {
+                Text(searching && !q.isEmpty ? "없다" : "어근이 같은 구절은 없다").font(Theme.hand(16)).foregroundStyle(Theme.pencil)
+            } else {
+                FlowLayout(spacing: 6) {
+                    ForEach(items) { r in
+                        let on = selectedKeys.contains(r.key)
+                        Button { onToggle(r) } label: {
+                            Text("\(on ? "✓" : "↗\u{FE0E}") \(r.text) · \(shorten(r.title ?? ""))")
+                                .font(Theme.hand(16)).foregroundStyle(on ? Theme.ink : Color(hex: 0x5B5440)).lineLimit(1)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(on ? Theme.marker : Theme.marker.opacity(0.35), in: Capsule())
+                                .overlay(Capsule().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: on ? [] : [3, 2])).foregroundStyle(Theme.ink.opacity(0.35)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .task { items = await load(span, nil, excludeSentence, exclude); loaded = true }
     }
 }
 
@@ -468,11 +569,14 @@ func markHighlights(_ text: String, _ hs: [Highlight]) -> AttributedString {
 /// 펼친 상태: 단어 조각을 탭해 구간을 고르고 "이게 뭐야? 🖍"로 묻는다 (첫 단어·끝 단어 두 번 누르기)
 struct MarkerWords: View {
     var text: String
+    var sentenceId: String = ""
     var highlights: [Highlight]
     var onAsk: (Int, Int, String) async throws -> Void
-    var onMemo: ((Int, Int, String, String) async throws -> Void)? = nil
+    var onMemo: ((Int, Int, String, String, [Related]) async throws -> Void)? = nil
     var onNote: ((Highlight, String) async -> Void)? = nil
     var onDelete: ((Highlight) async -> Void)? = nil
+    var onRelated: ((String?, String?, String?, String?) async -> [Related])? = nil
+    @State private var chosen: [Related] = []     // 메모와 함께 엮을 것
     @State private var anchor: Int?
     @State private var range: ClosedRange<Int>?
     @State private var asking = false
@@ -540,8 +644,13 @@ struct MarkerWords: View {
                         } else if writing {
                             // 내가 느낀 걸 적는다. Enter 저장. 아래 "저장 / 취소"(취소는 선택까지 지워 처음 상태로, 맥 Esc도 같음)
                             VStack(alignment: .leading, spacing: 6) {
+                                Text(span).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x2A2412)).padding(.horizontal, 6).background(Theme.marker, in: RoundedRectangle(cornerRadius: 4))
+                                if let onRelated {
+                                    RelatedChips(span: span, excludeSentence: sentenceId, exclude: nil, selectedKeys: Set(chosen.map(\.key)),
+                                                 onToggle: { r in if let i = chosen.firstIndex(where: { $0.key == r.key }) { chosen.remove(at: i) } else { chosen.append(r) } },
+                                                 load: onRelated)
+                                }
                                 HStack(spacing: 8) {
-                                    Text(span).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x2A2412)).padding(.horizontal, 6).background(Theme.marker, in: RoundedRectangle(cornerRadius: 4))
                                     TextField("내 메모", text: $noteText)
                                         .font(Theme.hand(21)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
                                         .focused($noteFocused).submitLabel(.done)
@@ -601,14 +710,14 @@ struct MarkerWords: View {
         catch { err = error.localizedDescription }
         asking = false
     }
-    /// 취소: 메모 상자와 노란 선택을 모두 지워 처음 상태로
-    private func cancelAll() { writing = false; noteText = ""; anchor = nil; range = nil; err = nil }
+    /// 취소: 메모 상자와 노란 선택, 고른 엮기 후보를 모두 지워 처음 상태로
+    private func cancelAll() { writing = false; noteText = ""; anchor = nil; range = nil; err = nil; chosen = [] }
 
     private func saveMemo(_ r: ClosedRange<Int>, _ span: String) async {
         let n = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty, let onMemo else { return }
         err = nil
-        do { try await onMemo(r.lowerBound, r.upperBound, span, n); writing = false; noteText = ""; anchor = nil; range = nil }
+        do { try await onMemo(r.lowerBound, r.upperBound, span, n, chosen); writing = false; noteText = ""; anchor = nil; range = nil; chosen = [] }
         catch { err = error.localizedDescription }
     }
 }
@@ -625,6 +734,11 @@ struct MarkerMemo: View {
     var onTry: (() -> Void)? = nil
     var tryTitle: String = "써 보기 ✎\u{FE0E}"
     var tryCount: Int = 0
+    var onRelated: ((String?, String?, String?, String?) async -> [Related])? = nil
+    var onAddLink: ((Highlight, Related) async -> Void)? = nil
+    var onRemoveLink: ((Highlight, HighlightLink) async -> Void)? = nil
+    var onOpenSentence: ((String, String) -> Void)? = nil
+    @State private var linking = false
     @State private var editing = false
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -661,8 +775,22 @@ struct MarkerMemo: View {
                         Tiny(title: (h.note ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { text = h.note ?? ""; editing = true; focused = true }
                     }
                     if let onTry { TryButton(title: tryTitle, count: tryCount, action: onTry) }
+                    if onRelated != nil, onAddLink != nil { Tiny(title: linking ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linking.toggle() } }
                 }
             }
+            if linking, let onRelated, let onAddLink {
+                RelatedChips(span: h.span, excludeSentence: h.sentenceId, exclude: h.id, selectedKeys: Set(h.links.map(\.key)),
+                             onToggle: { r in
+                                 Task {
+                                     if let l = h.links.first(where: { $0.key == r.key }) { await onRemoveLink?(h, l) }
+                                     else { await onAddLink(h, r) }
+                                 }
+                             }, load: onRelated)
+                    .padding(.top, 2)
+            }
+            // 엮은 것 / 거꾸로 링크
+            ForEach(h.links) { l in LinkLine(l: l, onOpen: onOpenSentence, onRemove: onRemoveLink == nil ? nil : { Task { await onRemoveLink?(h, l) } }) }
+            ForEach(h.backlinks) { b in BacklinkLine(b: b, onOpen: onOpenSentence) }
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Theme.marker.opacity(0.55))

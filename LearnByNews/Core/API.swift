@@ -180,11 +180,20 @@ final class API {
         try await send("POST", "/api/sentences/\(sentenceId)/ask", body: AskBody(startWord: startWord, endWord: endWord, span: span))
     }
     func deleteHighlight(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/highlights/\(id)") }
-    struct MemoBody: Codable { var startWord: Int; var endWord: Int; var span: String; var note: String }
-    /// 내 메모만 붙인 형광펜 (Claude 없음)
-    func memo(_ sentenceId: String, startWord: Int, endWord: Int, span: String, note: String) async throws -> AskResult {
-        try await send("POST", "/api/sentences/\(sentenceId)/memo", body: MemoBody(startWord: startWord, endWord: endWord, span: span, note: note))
+    struct MemoBody: Codable { var startWord: Int; var endWord: Int; var span: String; var note: String; var links: [LinkTarget]? }
+    /// 내 메모만 붙인 형광펜 (Claude 없음). links는 메모와 함께 엮을 대상
+    func memo(_ sentenceId: String, startWord: Int, endWord: Int, span: String, note: String, links: [LinkTarget] = []) async throws -> AskResult {
+        try await send("POST", "/api/sentences/\(sentenceId)/memo", body: MemoBody(startWord: startWord, endWord: endWord, span: span, note: note, links: links.isEmpty ? nil : links))
     }
+    /// 엮을 후보: span이면 어근이 같은 것, q면 글자 검색. 자기 문장 것은 뺀다
+    func related(span: String?, q: String?, excludeSentence: String?, exclude: String?) async throws -> [Related] {
+        var qs: [String] = []
+        func add(_ k: String, _ v: String?) { if let v, !v.isEmpty { qs.append("\(k)=\(v.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") } }
+        add("span", span); add("q", q); add("exclude_sentence", excludeSentence); add("exclude", exclude)
+        return try await send("GET", "/api/related?" + qs.joined(separator: "&"))
+    }
+    func addLink(_ highlightId: String, to: LinkTarget) async throws -> HighlightLink { try await send("POST", "/api/highlights/\(highlightId)/links", body: to) }
+    func deleteLink(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/links/\(id)") }
     struct NoteBody: Codable { var note: String }
     struct NoteResult: Decodable { var ok: Bool; var note: String? }
     /// 기존 형광펜에 내 메모 넣기·고치기 (빈 문자열이면 지움)

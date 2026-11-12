@@ -131,10 +131,16 @@ final class SyncManager: ObservableObject {
                     try await API.shared.clearBookmark()
                 case "memo":
                     let b = try JSONDecoder.api.decode(MemoOp.self, from: op.payload)
-                    let r = try await API.shared.memo(real(b.sentenceId), startWord: b.startWord, endWord: b.endWord, span: b.span, note: b.note)
+                    let r = try await API.shared.memo(real(b.sentenceId), startWord: b.startWord, endWord: b.endWord, span: b.span, note: b.note, links: (b.links ?? []).map { LinkTarget(toKind: $0.toKind, toId: real($0.toId)) })
                     Cache.shared.removeHighlight(id: b.tempId); Cache.shared.upsertHighlight(r.highlight)
                     if let p = r.phrase { Cache.shared.upsertPhrase(p) }
                     var map = idMap; map[b.tempId] = r.highlight.id; idMap = map
+                case "link_add":
+                    let b = try JSONDecoder.api.decode(LinkOp.self, from: op.payload)
+                    _ = try await API.shared.addLink(real(b.highlightId), to: LinkTarget(toKind: b.toKind ?? "", toId: real(b.toId ?? "")))
+                case "link_delete":
+                    let b = try JSONDecoder.api.decode(LinkOp.self, from: op.payload)
+                    if !Self.isTemp(b.linkId ?? "") { try await API.shared.deleteLink(b.linkId ?? "") }
                 case "highlight_note":
                     let b = try JSONDecoder.api.decode(NoteOp.self, from: op.payload)
                     try await API.shared.setHighlightNote(real(b.highlightId), note: b.note)
@@ -200,7 +206,37 @@ final class SyncManager: ObservableObject {
     struct ArticlePatchOp: Codable { var articleId: String; var source: String? }
     struct BookmarkOp: Codable { var articleId: String; var sentenceId: String; var round: Int? }
     struct DrillAnswerOp: Codable { var id: String; var answer: String; var answeredAtLocal: Int64; var phrase: String?; var korean: String? }
-    struct MemoOp: Codable { var tempId: String; var sentenceId: String; var articleId: String; var startWord: Int; var endWord: Int; var span: String; var note: String }
+    struct MemoOp: Codable { var tempId: String; var sentenceId: String; var articleId: String; var startWord: Int; var endWord: Int; var span: String; var note: String; var links: [LinkTarget]? }
+    struct LinkOp: Codable { var highlightId: String; var toKind: String?; var toId: String?; var linkId: String? }
+
+    /// 엮기: 온라인이면 서버, 아니면 임시 id 링크 + 큐
+    func addLink(_ highlightId: String, to: LinkTarget, candidate: Related?) async throws -> HighlightLink {
+        if Connectivity.shared.isOnline, !Self.isTemp(highlightId), !Self.isTemp(to.toId) {
+            do { return try await API.shared.addLink(highlightId, to: to) }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        }
+        Cache.shared.enqueue("link_add", LinkOp(highlightId: highlightId, toKind: to.toKind, toId: to.toId, linkId: nil)); refreshCounts()
+        return HighlightLink(id: "local-" + UUID().uuidString.lowercased(), fromHighlight: highlightId, toKind: to.toKind, toId: to.toId, createdAt: Date().ms,
+                             text: candidate?.text, sentenceId: candidate?.sentenceId, articleId: candidate?.articleId, title: candidate?.title)
+    }
+    func deleteLink(_ link: HighlightLink, from highlightId: String) async {
+        if Self.isTemp(link.id) {
+            // 아직 안 보낸 엮기면 큐에서 빼면 끝
+            for op in Cache.shared.pending(kind: "link_add") {
+                if let b = try? JSONDecoder.api.decode(LinkOp.self, from: op.payload), b.highlightId == highlightId, b.toId == link.toId, b.toKind == link.toKind { Cache.shared.remove(op) }
+            }
+            refreshCounts(); return
+        }
+        await sendOrQueue("link_delete", LinkOp(highlightId: highlightId, toKind: nil, toId: nil, linkId: link.id)) { try await API.shared.deleteLink(link.id) }
+    }
+
+    /// 엮을 후보. 온라인이면 서버, 아니면 캐시된 형광펜·표현을 어근으로 비교
+    func related(span: String?, q: String?, excludeSentence: String?, exclude: String?) async -> [Related] {
+        if Connectivity.shared.isOnline {
+            if let r = try? await API.shared.related(span: span, q: q, excludeSentence: excludeSentence, exclude: exclude) { return r }
+        }
+        return Cache.shared.related(span: span, q: q, excludeSentence: excludeSentence, exclude: exclude)
+    }
     struct NoteOp: Codable { var highlightId: String; var note: String }
 
     /// 자유 작문: 온라인이면 바로 채점, 아니면 큐(drill_free) → nil("연결되면 채점")
@@ -214,15 +250,15 @@ final class SyncManager: ObservableObject {
     }
 
     /// 형광펜 내 메모 (Claude 없음): 온라인이면 서버, 아니면 임시 id로 캐시 + 큐
-    func memo(sentenceId: String, articleId: String, startWord: Int, endWord: Int, span: String, note: String) async throws -> AskResult? {
+    func memo(sentenceId: String, articleId: String, startWord: Int, endWord: Int, span: String, note: String, links: [LinkTarget] = []) async throws -> AskResult? {
         if Connectivity.shared.isOnline, !Self.isTemp(sentenceId) {
-            do { let r = try await API.shared.memo(sentenceId, startWord: startWord, endWord: endWord, span: span, note: note); Cache.shared.upsertHighlight(r.highlight); if let p = r.phrase { Cache.shared.upsertPhrase(p) }; return r }
+            do { let r = try await API.shared.memo(sentenceId, startWord: startWord, endWord: endWord, span: span, note: note, links: links); Cache.shared.upsertHighlight(r.highlight); if let p = r.phrase { Cache.shared.upsertPhrase(p) }; return r }
             catch let e as APIError where e.isNetwork { /* 큐로 */ }
         }
         let temp = "local-" + UUID().uuidString.lowercased()
         let h = Highlight(id: temp, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, answer: HighlightAnswer(meaning: "", why: "", similar: ""), createdAt: Date().ms, note: note)
         Cache.shared.upsertHighlight(h)
-        Cache.shared.enqueue("memo", MemoOp(tempId: temp, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, note: note)); refreshCounts()
+        Cache.shared.enqueue("memo", MemoOp(tempId: temp, sentenceId: sentenceId, articleId: articleId, startWord: startWord, endWord: endWord, span: span, note: note, links: links.isEmpty ? nil : links)); refreshCounts()
         return nil
     }
     func setHighlightNote(_ id: String, note: String) async {

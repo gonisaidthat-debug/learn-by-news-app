@@ -348,6 +348,43 @@ final class Cache {
         }
     }
 
+    /// 어근: 소문자 → ingly/edly/ing/ed/es/ly/s 중 하나 떼기 → 겹자음 하나 줄이기(ss/ll/ee 제외) → 끝 e 떼기. 3글자 미만·불용어 제외
+    nonisolated static func roots(_ text: String) -> Set<String> {
+        let stop: Set<String> = ["the", "and", "for", "that", "with", "this", "from", "are", "was", "were", "have", "has", "had", "not", "but", "you", "they", "his", "her", "its", "our", "their", "will", "would", "can", "could", "should", "into", "than", "then", "them", "been", "being", "also", "more", "most", "some", "such", "very", "what", "when", "where", "which", "who", "why", "how", "all", "any", "each", "about", "after", "before", "over", "under", "out", "off", "said", "says"]
+        var out = Set<String>()
+        for raw in text.lowercased().split(whereSeparator: { !$0.isLetter }) {
+            var w = String(raw)
+            for suf in ["ingly", "edly", "ing", "ed", "es", "ly", "s"] where w.hasSuffix(suf) && w.count - suf.count >= 3 { w.removeLast(suf.count); break }
+            if w.count >= 4, let l = w.last, w[w.index(w.endIndex, offsetBy: -2)] == l, !["s", "l", "e"].contains(l) { w.removeLast() }
+            if w.hasSuffix("e"), w.count > 3 { w.removeLast() }
+            if w.count >= 3, !stop.contains(w) { out.insert(w) }
+        }
+        return out
+    }
+    /// 두 어근 집합이 겹치는 수 (같거나, 5글자 이상에서 접두 일치)
+    nonisolated static func overlap(_ a: Set<String>, _ b: Set<String>) -> Int {
+        a.reduce(0) { n, x in n + (b.contains { y in x == y || (x.count >= 5 && y.count >= 5 && (x.hasPrefix(y) || y.hasPrefix(x))) } ? 1 : 0) }
+    }
+
+    /// 오프라인 엮기 후보: 캐시된 형광펜·표현에서 어근이 겹치는 것(겹치는 수 많은 순) 또는 q 글자 검색
+    func related(span: String?, q: String?, excludeSentence: String?, exclude: String?) -> [Related] {
+        let arts = Dictionary(uniqueKeysWithValues: all(CachedArticle.self).map { ($0.id, $0.title) })
+        var items: [(Related, Int)] = []
+        let needle = (q ?? "").lowercased()
+        let want = span.map(Self.roots) ?? []
+        for h in all(CachedHighlight.self) where h.sentenceId != excludeSentence && h.id != exclude {
+            let r = Related(kind: "highlight", id: h.id, text: h.span, note: h.note ?? (h.meaning.isEmpty ? nil : h.meaning), sentenceId: h.sentenceId, articleId: h.articleId, title: arts[h.articleId], createdAt: h.createdAt)
+            if !needle.isEmpty { if h.span.lowercased().contains(needle) || (h.note ?? "").lowercased().contains(needle) || h.meaning.lowercased().contains(needle) { items.append((r, 1)) } }
+            else { let n = Self.overlap(want, Self.roots(h.span)); if n > 0 { items.append((r, n)) } }
+        }
+        for p in all(CachedPhrase.self) where p.sentenceId != excludeSentence && p.id != exclude {
+            let r = Related(kind: "phrase", id: p.id, text: p.phrase, note: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, title: arts[p.articleId], createdAt: p.createdAt)
+            if !needle.isEmpty { if p.phrase.lowercased().contains(needle) || p.meaning.lowercased().contains(needle) { items.append((r, 1)) } }
+            else { let n = Self.overlap(want, Self.roots(p.phrase)); if n > 0 { items.append((r, n)) } }
+        }
+        return items.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : ($0.0.createdAt ?? 0) > ($1.0.createdAt ?? 0) }.map(\.0).prefix(30).map { $0 }
+    }
+
     func sessions() -> [StudySession]? {
         guard !isEmpty else { return nil }
         return all(CachedSession.self).sorted { $0.startedAt > $1.startedAt }.map(toSession)

@@ -395,14 +395,48 @@ final class NotebookModel: ObservableObject {
         Cache.shared.upsertHighlight(r.highlight)
         if let p = r.phrase, !(data?.phrases.contains { $0.id == p.id } ?? true) { data?.phrases.append(p); Cache.shared.upsertPhrase(p) }
     }
-    /// 형광펜 내 메모 (Claude 없음, 오프라인 큐 가능)
-    func memo(_ sid: String, start: Int, end: Int, span: String, note: String) async throws {
-        if let r = try await SyncManager.shared.memo(sentenceId: sid, articleId: id, startWord: start, endWord: end, span: span, note: note) {
+    /// 형광펜 내 메모 (Claude 없음, 오프라인 큐 가능). links = 메모와 함께 엮을 것
+    func memo(_ sid: String, start: Int, end: Int, span: String, note: String, links: [Related] = []) async throws {
+        let targets = links.map { LinkTarget(toKind: $0.kind, toId: $0.id) }
+        if let r = try await SyncManager.shared.memo(sentenceId: sid, articleId: id, startWord: start, endWord: end, span: span, note: note, links: targets) {
             data?.highlights.append(r.highlight)
+            for l in r.highlight.links { addBacklinkLocally(from: r.highlight, link: l) }
             if let p = r.phrase, !(data?.phrases.contains { $0.id == p.id } ?? true) { data?.phrases.append(p) }
-        } else if let h = Cache.shared.article(id)?.highlights.last(where: { $0.sentenceId == sid && $0.note == note }) {
+        } else if var h = Cache.shared.article(id)?.highlights.last(where: { $0.sentenceId == sid && $0.note == note }) {
+            h.links = links.map { HighlightLink(id: "local-" + UUID().uuidString.lowercased(), fromHighlight: h.id, toKind: $0.kind, toId: $0.id, createdAt: Date().ms, text: $0.text, sentenceId: $0.sentenceId, articleId: $0.articleId, title: $0.title) }
             data?.highlights.append(h)
+            for l in h.links { addBacklinkLocally(from: h, link: l) }
         }
+    }
+
+    // MARK: 엮기
+    func related(span: String?, q: String?, excludeSentence: String?, exclude: String?) async -> [Related] {
+        await SyncManager.shared.related(span: span, q: q, excludeSentence: excludeSentence, exclude: exclude)
+    }
+    func addLink(_ h: Highlight, _ r: Related) async {
+        guard let i = data?.highlights.firstIndex(where: { $0.id == h.id }) else { return }
+        if data!.highlights[i].links.contains(where: { $0.key == r.key }) { return }
+        do {
+            let l = try await SyncManager.shared.addLink(h.id, to: LinkTarget(toKind: r.kind, toId: r.id), candidate: r)
+            data?.highlights[i].links.append(l)
+            addBacklinkLocally(from: data!.highlights[i], link: l)
+        } catch { err = error.localizedDescription }
+    }
+    func removeLink(_ h: Highlight, _ l: HighlightLink) async {
+        guard let i = data?.highlights.firstIndex(where: { $0.id == h.id }) else { return }
+        data?.highlights[i].links.removeAll { $0.id == l.id }
+        removeBacklinkLocally(linkId: l.id, toKind: l.toKind, toId: l.toId)
+        await SyncManager.shared.deleteLink(l, from: h.id)
+    }
+    /// 대상이 같은 공책의 형광펜/표현이면 그쪽 backlinks도 바로 넣는다
+    private func addBacklinkLocally(from h: Highlight, link l: HighlightLink) {
+        let b = Backlink(id: l.id, toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: h.id, text: h.span, note: h.note, sentenceId: h.sentenceId, articleId: h.articleId, title: data?.title)
+        if l.toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == l.toId }) { data?.highlights[j].backlinks.append(b) }
+        if l.toKind == "phrase", let j = data?.phrases.firstIndex(where: { $0.id == l.toId }) { data?.phrases[j].backlinks = (data?.phrases[j].backlinks ?? []) + [b] }
+    }
+    private func removeBacklinkLocally(linkId: String, toKind: String, toId: String) {
+        if toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == toId }) { data?.highlights[j].backlinks.removeAll { $0.id == linkId } }
+        if toKind == "phrase", let j = data?.phrases.firstIndex(where: { $0.id == toId }) { data?.phrases[j].backlinks?.removeAll { $0.id == linkId } }
     }
     func setNote(_ h: Highlight, _ note: String) async {
         if let i = data?.highlights.firstIndex(where: { $0.id == h.id }) { data?.highlights[i].note = note.isEmpty ? nil : note }
@@ -506,6 +540,15 @@ struct NotebookView: View {
         .onChange(of: m.inflight.isEmpty) { _, _ in checkFinish() }
         .onChange(of: m.finishingPass) { _, _ in checkFinish() }
         .onChange(of: m.focusRequest) { _, _ in focused = true }
+    }
+
+    /// 엮은 문장으로 이동: 같은 공책이면 그 문장을 펼치고 가운데로, 아니면 그 공책의 열람 화면으로
+    private func openSentence(_ aid: String, _ sid: String) {
+        if aid == m.id, m.data?.sentences.contains(where: { $0.id == sid }) == true {
+            m.open = sid; m.requestScroll(sid)
+        } else {
+            router.shelfPath.append(.notebook(id: aid, focus: sid, browse: true))
+        }
     }
 
     /// 화면 세로 40% 지점에 걸린 문장(없으면 가장 가까운 문장)의 idx
@@ -652,8 +695,12 @@ struct NotebookView: View {
                 highlights: d.highlights.filter { $0.sentenceId == x.id },
                 onAsk: { st, en, sp in try await m.ask(x.id, start: st, end: en, span: sp) },
                 onDeleteHighlight: { h in await m.deleteHighlight(h) },
-                onMemo: { st, en, sp, n in try await m.memo(x.id, start: st, end: en, span: sp, note: n) },
+                onMemo: { st, en, sp, n, ls in try await m.memo(x.id, start: st, end: en, span: sp, note: n, links: ls) },
                 onNote: { h, n in await m.setNote(h, n) },
+                onRelated: { sp, q, es, ex in await m.related(span: sp, q: q, excludeSentence: es, exclude: ex) },
+                onAddLink: { h, r in await m.addLink(h, r) },
+                onRemoveLink: { h, l in await m.removeLink(h, l) },
+                onOpenSentence: { aid, sid in openSentence(aid, sid) },
                 onFree: { e, a in try await m.freeDrill(x.id, e, answer: a) },
                 onDrillFor: { e in try await m.drillFor(x.id, e) },
                 onAnswerDrill: { id, a in try await m.answerDrill(id, a) },

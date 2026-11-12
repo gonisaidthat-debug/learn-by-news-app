@@ -65,6 +65,7 @@ struct MockState {
     var drills: [[String: Any]] = []
     var passes: [String: [String]] = [:]
     var trash: [String: [String: Any]] = [:]
+    var links: [[String: Any]] = []   // {id, from_highlight, to_kind, to_id, created_at}
     var sessionStart: Int64? = nil
     var highlights: [[String: Any]] = []
     var seq = 100
@@ -112,16 +113,38 @@ struct MockState {
                    "answer": "The Fed decided to hold rates steady this month.", "grade": "A", "answered_at": now - 7_200_000,
                    "feedback": ["grade": "A", "used_expression": true, "issues": [], "reference": "The Fed held rates steady this month.", "reference_ko": "연준은 이번 달 금리를 동결했다.", "note": "자연스럽다."] as [String: Any],
                    "reference": "The Fed held rates steady this month."]]
-        highlights = [["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
+        links = [["id": "l1", "from_highlight": "h2", "to_kind": "highlight", "to_id": "h1", "created_at": now - 500_000]]
+        highlights = [["id": "h2", "sentence_id": "s7", "article_id": "a2", "start_word": 1, "end_word": 1, "span": "will", "answer": ["meaning": "", "why": "", "similar": ""], "note": "조동사 — hold와 비교", "created_at": now - 600_000],
+                      ["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
                        "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "note": "뉴스에서 자주 봄", "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
     }
 
     private mutating func nextId(_ p: String) -> String { seq += 1; return "\(p)\(seq)" }
+    /// 링크에 대상의 text·문장·기사 붙이기
+    private func decorateLink(_ l: [String: Any]) -> [String: Any] {
+        var o = l
+        if l["to_kind"] as? String == "highlight", let h = highlights.first(where: { $0["id"] as? String == l["to_id"] as? String }) {
+            o["text"] = h["span"]; o["sentence_id"] = h["sentence_id"]; o["article_id"] = h["article_id"]
+            o["title"] = articles.first { $0["id"] as? String == h["article_id"] as? String }?["title"] ?? ""
+        } else if let p = phrases.first(where: { $0["id"] as? String == l["to_id"] as? String }) {
+            o["text"] = p["phrase"]; o["sentence_id"] = p["sentence_id"]; o["article_id"] = p["article_id"]; o["title"] = p["article_title"] ?? ""
+        }
+        return o
+    }
+    /// 거꾸로 링크: 출발 형광펜의 text·note·문장·기사
+    private func decorateBacklink(_ l: [String: Any]) -> [String: Any] {
+        var o: [String: Any] = ["id": l["id"]!, "to_kind": l["to_kind"]!, "to_id": l["to_id"]!, "created_at": l["created_at"]!, "from_id": l["from_highlight"]!]
+        if let h = highlights.first(where: { $0["id"] as? String == l["from_highlight"] as? String }) {
+            o["text"] = h["span"]; o["note"] = h["note"] ?? NSNull(); o["sentence_id"] = h["sentence_id"]; o["article_id"] = h["article_id"]
+            o["title"] = articles.first { $0["id"] as? String == h["article_id"] as? String }?["title"] ?? ""
+        }
+        return o
+    }
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -149,7 +172,15 @@ struct MockState {
             a["sentences"] = sents(of: id)
             a["phrases"] = phrases.filter { $0["article_id"] as? String == id }
             a["reviews"] = reviews.filter { $0["article_id"] as? String == id }.sorted { ($0["created_at"] as! Int64) > ($1["created_at"] as! Int64) }
-            a["highlights"] = highlights.filter { $0["article_id"] as? String == id }
+            a["highlights"] = highlights.filter { $0["article_id"] as? String == id }.map { h -> [String: Any] in
+                var o = h
+                o["links"] = links.filter { $0["from_highlight"] as? String == h["id"] as? String }.map(decorateLink)
+                o["backlinks"] = links.filter { $0["to_kind"] as? String == "highlight" && $0["to_id"] as? String == h["id"] as? String }.map(decorateBacklink)
+                return o
+            }
+            a["phrases"] = (a["phrases"] as! [[String: Any]]).map { p -> [String: Any] in
+                var o = p; o["backlinks"] = links.filter { $0["to_kind"] as? String == "phrase" && $0["to_id"] as? String == p["id"] as? String }.map(decorateBacklink); return o
+            }
             var counts: [String: Int] = [:]
             let keys = Set((a["phrases"] as! [[String: Any]]).map { $0["phrase"] as! String } + (a["highlights"] as! [[String: Any]]).map { $0["span"] as! String })
             for d in drills where !(d["feedback"] is NSNull) { let ph = d["phrase"] as! String; if keys.contains(ph) { counts[ph, default: 0] += 1 } }
@@ -361,6 +392,33 @@ struct MockState {
             phrases.append(p)
             var out = h; out["phrase"] = p
             return (200, out)
+        case "GET /api/related":
+            var params: [String: String] = [:]
+            for kv in query.split(separator: "&") { let p = kv.split(separator: "=", maxSplits: 1).map(String.init); if p.count == 2 { params[p[0]] = p[1].removingPercentEncoding } }
+            let exS = params["exclude_sentence"], ex = params["exclude"], q = (params["q"] ?? "").lowercased()
+            let want = Cache.roots(params["span"] ?? "")
+            var out: [([String: Any], Int)] = []
+            for h in highlights where h["sentence_id"] as? String != exS && h["id"] as? String != ex {
+                let a = articles.first { $0["id"] as? String == h["article_id"] as? String }
+                let note = (h["note"] as? String) ?? ((h["answer"] as? [String: Any])?["meaning"] as? String) ?? ""
+                let r: [String: Any] = ["kind": "highlight", "id": h["id"]!, "text": h["span"]!, "note": note, "sentence_id": h["sentence_id"]!, "article_id": h["article_id"]!, "title": a?["title"] ?? "", "created_at": h["created_at"]!]
+                if !q.isEmpty { if (h["span"] as! String).lowercased().contains(q) || note.lowercased().contains(q) { out.append((r, 1)) } }
+                else { let n = Cache.overlap(want, Cache.roots(h["span"] as! String)); if n > 0 { out.append((r, n)) } }
+            }
+            for p in phrases where p["sentence_id"] as? String != exS && p["id"] as? String != ex {
+                let r: [String: Any] = ["kind": "phrase", "id": p["id"]!, "text": p["phrase"]!, "note": p["meaning"]!, "sentence_id": p["sentence_id"]!, "article_id": p["article_id"]!, "title": p["article_title"] ?? "", "created_at": p["created_at"]!]
+                if !q.isEmpty { if (p["phrase"] as! String).lowercased().contains(q) || (p["meaning"] as! String).lowercased().contains(q) { out.append((r, 1)) } }
+                else { let n = Cache.overlap(want, Cache.roots(p["phrase"] as! String)); if n > 0 { out.append((r, n)) } }
+            }
+            return (200, out.sorted { $0.1 > $1.1 }.map { $0.0 })
+        case "POST /api/highlights/:id/links":
+            let kind = body["to_kind"] as? String ?? "", to = body["to_id"] as? String ?? ""
+            if kind == "highlight", to == id { return (400, ["error": "자기 자신"]) }
+            if let e = links.first(where: { $0["from_highlight"] as? String == id && $0["to_kind"] as? String == kind && $0["to_id"] as? String == to }) { return (200, decorateLink(e)) }
+            let l: [String: Any] = ["id": nextId("l"), "from_highlight": id, "to_kind": kind, "to_id": to, "created_at": Date().ms]
+            links.append(l); return (200, decorateLink(l))
+        case "DELETE /api/links/:id":
+            links.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
         case "POST /api/sentences/:id/memo":
             guard let sent = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
             let span = body["span"] as? String ?? "", note = body["note"] as? String ?? ""
@@ -370,7 +428,12 @@ struct MockState {
             let a = articles.first { $0["id"] as? String == sent["article_id"] as? String }
             let p: [String: Any] = ["id": nextId("p"), "phrase": span, "meaning": note, "sentence_id": id, "article_id": sent["article_id"]!, "created_at": Date().ms, "sentence_text": sent["text"]!, "article_title": a?["title"] ?? ""]
             phrases.append(p)
-            var out = h; out["phrase"] = p
+            var made: [[String: Any]] = []
+            for t in (body["links"] as? [[String: Any]]) ?? [] {
+                let l: [String: Any] = ["id": nextId("l"), "from_highlight": h["id"]!, "to_kind": t["to_kind"] ?? "", "to_id": t["to_id"] ?? "", "created_at": Date().ms]
+                links.append(l); made.append(decorateLink(l))
+            }
+            var out = h; out["phrase"] = p; out["links"] = made; out["backlinks"] = []
             return (200, out)
         case "PATCH /api/highlights/:id":
             if let i = highlights.firstIndex(where: { $0["id"] as? String == id }) { highlights[i]["note"] = (body["note"] as? String ?? "").isEmpty ? NSNull() : body["note"]! }

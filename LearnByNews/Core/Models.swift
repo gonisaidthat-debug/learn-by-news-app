@@ -83,6 +83,11 @@ struct Phrase: Codable, Identifiable, Hashable {
     var createdAt: Int64
     var sentenceText: String?
     var articleTitle: String?
+    var backlinks: [Backlink]?
+
+    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil) {
+        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks
+    }
 }
 
 struct ReviewPattern: Codable, Hashable {
@@ -382,11 +387,13 @@ struct Highlight: Codable, Identifiable, Hashable {
     var answer: HighlightAnswer
     var createdAt: Int64
     var note: String?          // 내 메모 (Claude 답과 별개)
+    var links: [HighlightLink] = []
+    var backlinks: [Backlink] = []
 
     init(id: String, sentenceId: String, articleId: String, startWord: Int, endWord: Int, span: String, answer: HighlightAnswer, createdAt: Int64, note: String? = nil) {
         self.id = id; self.sentenceId = sentenceId; self.articleId = articleId; self.startWord = startWord; self.endWord = endWord; self.span = span; self.answer = answer; self.createdAt = createdAt; self.note = note
     }
-    enum CodingKeys: String, CodingKey { case id, sentenceId, articleId, startWord, endWord, span, answer, createdAt, note }
+    enum CodingKeys: String, CodingKey { case id, sentenceId, articleId, startWord, endWord, span, answer, createdAt, note, links, backlinks }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -398,8 +405,55 @@ struct Highlight: Codable, Identifiable, Hashable {
         answer = (try? c.decode(HighlightAnswer.self, forKey: .answer)) ?? HighlightAnswer(meaning: "", why: "", similar: "")
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        links = (try? c.decodeIfPresent([HighlightLink].self, forKey: .links)) ?? []
+        backlinks = (try? c.decodeIfPresent([Backlink].self, forKey: .backlinks)) ?? []
     }
     var hasAnswer: Bool { !answer.meaning.isEmpty }
+}
+
+// MARK: - 형광펜 엮기 (메모를 전에 본 형광펜/표현장 표현에 잇는다)
+
+struct LinkTarget: Codable, Hashable { var toKind: String; var toId: String }
+
+/// 엮을 후보 (GET /api/related)
+struct Related: Codable, Identifiable, Hashable {
+    var kind: String
+    var id: String
+    var text: String
+    var note: String?
+    var sentenceId: String?
+    var articleId: String?
+    var title: String?
+    var createdAt: Int64?
+    var key: String { "\(kind):\(id)" }
+}
+
+/// 이 형광펜에서 나가는 링크
+struct HighlightLink: Codable, Identifiable, Hashable {
+    var id: String
+    var fromHighlight: String?
+    var toKind: String
+    var toId: String
+    var createdAt: Int64?
+    var text: String?
+    var sentenceId: String?
+    var articleId: String?
+    var title: String?
+    var key: String { "\(toKind):\(toId)" }
+}
+
+/// 거꾸로 링크: 다른 형광펜이 이것을 가리킨다
+struct Backlink: Codable, Identifiable, Hashable {
+    var id: String
+    var toKind: String?
+    var toId: String?
+    var createdAt: Int64?
+    var fromId: String
+    var text: String?
+    var note: String?
+    var sentenceId: String?
+    var articleId: String?
+    var title: String?
 }
 
 /// POST /api/sentences/:id/ask 응답: Highlight & {phrase}
