@@ -225,6 +225,20 @@ struct QuizItem: Codable, Identifiable, Hashable {
     var id: String { key }
 }
 
+/// 세션 총평: 그 시간의 번역·응용을 모아 쓴 세 줄
+struct SessionReview: Codable, Hashable {
+    var summary: String
+    var keep: String
+    var next: String
+    init(summary: String, keep: String, next: String) { self.summary = summary; self.keep = keep; self.next = next }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        keep = try c.decodeIfPresent(String.self, forKey: .keep) ?? ""
+        next = try c.decodeIfPresent(String.self, forKey: .next) ?? ""
+    }
+}
+
 struct StudySession: Codable, Identifiable, Hashable {
     var id: String
     var startedAt: Int64
@@ -234,9 +248,25 @@ struct StudySession: Codable, Identifiable, Hashable {
     var articles: [String]
     var createdAt: Int64
     var drills: Int?           // 그중 응용(써 보기·응용 탭) 수
+    var review: SessionReview?
+    var reviewError: String?   // POST /api/sessions 응답에만: 총평 실패 이유
 
-    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil) {
-        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills
+    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil, review: SessionReview? = nil, reviewError: String? = nil) {
+        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills; self.review = review; self.reviewError = reviewError
+    }
+    enum CodingKeys: String, CodingKey { case id, startedAt, endedAt, attempts, score, articles, createdAt, drills, review, reviewError }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        startedAt = try c.decode(Int64.self, forKey: .startedAt)
+        endedAt = try c.decode(Int64.self, forKey: .endedAt)
+        attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
+        score = try c.decodeIfPresent(Int.self, forKey: .score)
+        articles = try c.decodeIfPresent([String].self, forKey: .articles) ?? []
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        drills = try c.decodeIfPresent(Int.self, forKey: .drills)
+        review = try? c.decodeIfPresent(SessionReview.self, forKey: .review)
+        reviewError = try c.decodeIfPresent(String.self, forKey: .reviewError)
     }
 
     var minutes: Int { max(1, Int((Double(endedAt - startedAt) / 60000).rounded())) }

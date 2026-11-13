@@ -8,6 +8,38 @@ final class SessionModel: ObservableObject {
     @Published var sessions: [StudySession] = []
     @Published var msg: String?
     @Published var busy = false
+    @Published var closed: StudySession?       // 방금 기록한 세션 (총평 표시용)
+    @Published var retrying = false
+    private var observer: NSObjectProtocol?
+
+    init() {
+        // 오프라인에서 닫은 세션이 서버에 기록되면 총평을 붙인다
+        observer = NotificationCenter.default.addObserver(forName: .lbnSessionClosed, object: nil, queue: .main) { [weak self] n in
+            Task { @MainActor in
+                guard let self, let s = n.userInfo?["session"] as? StudySession, let st = n.userInfo?["startedAt"] as? Int64 else { return }
+                if let i = self.sessions.firstIndex(where: { $0.startedAt == st }) { self.sessions[i] = s } else { self.sessions.insert(s, at: 0) }
+                if self.closed?.startedAt == st { self.closed = s; self.msg = "기록했다 · \(s.line)" }
+            }
+        }
+    }
+    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+
+    /// 총평 없는 세션에 다시 시도
+    func retryReview(_ s: StudySession) async {
+        guard Connectivity.shared.isOnline, !retrying else { return }
+        retrying = true
+        do {
+            let r = try await API.shared.sessionReview(s.id)
+            var u = s; u.review = r; u.reviewError = r == nil ? "총평이 비어 있다" : nil
+            if let i = sessions.firstIndex(where: { $0.id == s.id }) { sessions[i] = u }
+            if closed?.id == s.id { closed = u }
+        } catch {
+            var u = s; u.reviewError = error.localizedDescription
+            if let i = sessions.firstIndex(where: { $0.id == s.id }) { sessions[i] = u }
+            if closed?.id == s.id { closed = u }
+        }
+        retrying = false
+    }
 
     var inSession: Bool { start != nil }
 
@@ -52,6 +84,7 @@ final class SessionModel: ObservableObject {
             SessionStore.start = nil; self.start = nil
             await SyncManager.shared.deleteSessionStart()
             msg = "기록했다 · \(s.line)"
+            closed = s
             sessions.insert(s, at: 0)
             AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
         } catch { msg = error.localizedDescription }
@@ -80,7 +113,7 @@ struct SessionBar: View {
                         let d = Date(ms: start)
                         Text((d.isToday ? "" : d.monthDay + " ") + d.hm + "부터")
                             .font(Theme.hand(20)).foregroundStyle(d.isToday ? Theme.ink : Theme.red)
-                        Tiny(title: model.busy ? "기록 중…" : "오늘 여기까지 ✂\u{FE0E}", color: Theme.red) { Task { await model.close() } }
+                        Tiny(title: model.busy ? "총평 쓰는 중… ✎\u{FE0E}" : "오늘 여기까지 ✂\u{FE0E}", color: Theme.red) { Task { await model.close() } }
                             .disabled(model.busy || waiting > 0)
                             .opacity(model.busy || waiting > 0 ? 0.45 : 1)
                         if waiting > 0 { MutedText(text: "채점이 끝나면 누를 수 있다") }
@@ -92,11 +125,41 @@ struct SessionBar: View {
                 if let msg = model.msg {
                     Text(msg).font(Theme.hand(20)).foregroundStyle(Theme.red)
                 }
+                if let c = model.closed, model.msg != nil {
+                    SessionReviewLines(session: c, size: 19, retrying: model.retrying) { Task { await model.retryReview(c) } }
+                }
             }
             .frame(minHeight: Theme.lh)
             .confirmationDialog("시작점을 버릴까요? 그동안 채점한 건 기록 없이 남습니다.", isPresented: $confirmDiscard, titleVisibility: .visible) {
                 Button("버리기", role: .destructive) { model.discard() }
             }
         }
+    }
+}
+
+
+/// 세션 총평 세 줄: summary(빨간 펜) · "✓ keep"(초록) · "→ next"(연필). 없으면 실패 이유 + 다시 시도 / 연결되면 받는다
+struct SessionReviewLines: View {
+    var session: StudySession
+    var size: CGFloat = 17
+    var retrying = false
+    var onRetry: (() -> Void)? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let r = session.review {
+                if !r.summary.isEmpty { Text(r.summary).font(Theme.hand(size + 1)).foregroundStyle(Theme.red) }
+                if !r.keep.isEmpty { Text("✓\u{FE0E} \(r.keep)").font(Theme.hand(size)).foregroundStyle(Theme.grade(.A)) }
+                if !r.next.isEmpty { Text("→\u{FE0E} \(r.next)").font(Theme.hand(size)).foregroundStyle(Theme.pencil) }
+            } else if session.id.hasPrefix("local-") {
+                Text("총평은 연결되면 받는다").font(Theme.hand(size)).foregroundStyle(Theme.pencil)
+            } else if let onRetry {
+                HStack(spacing: 10) {
+                    Text("총평을 못 받았다" + (session.reviewError.map { " (\($0))" } ?? "")).font(Theme.hand(size)).foregroundStyle(Theme.pencil)
+                    Tiny(title: retrying ? "받는 중…" : "다시 시도", color: Theme.red, size: size) { onRetry() }.disabled(retrying)
+                }
+            }
+        }
+        .padding(.leading, 8)
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.red.opacity(0.6)).frame(width: 2) }
     }
 }

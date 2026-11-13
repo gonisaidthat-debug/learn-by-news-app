@@ -106,7 +106,8 @@ struct MockState {
         ]
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
-        sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "drills": 0, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
+        sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "drills": 0, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000,
+                     "review": ["summary": "짧은 세션이었지만 두 문장 다 뜻을 정확히 잡았다.", "keep": "단위와 숫자를 빠뜨리지 않은 것", "next": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현 고르기"]]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
         drills = [["id": "d1", "phrase_id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "korean": "", "kind": "free", "sentence_id": "s1", "created_at": now - 7_200_000,
@@ -317,8 +318,15 @@ struct MockState {
             let g = done.compactMap { pts[$0.1] } + drs.compactMap { pts[$0["grade"] as? String ?? ""] }
             let titles = Array(Set(done.map { $0.2 })).compactMap { id in articles.first { $0["id"] as? String == id }?["title"] as? String }
             let ended = max(done.map(\.0).max() ?? 0, drs.compactMap { $0["answered_at"] as? Int64 }.max() ?? 0)
-            let s: [String: Any] = ["id": nextId("ss"), "started_at": start, "ended_at": ended, "attempts": done.count + drs.count, "drills": drs.count, "score": g.isEmpty ? NSNull() : Int((Double(g.reduce(0, +)) / Double(g.count)).rounded()), "articles": titles, "created_at": Date().ms]
+            let s: [String: Any] = ["id": nextId("ss"), "started_at": start, "ended_at": ended, "attempts": done.count + drs.count, "drills": drs.count, "score": g.isEmpty ? NSNull() : Int((Double(g.reduce(0, +)) / Double(g.count)).rounded()), "articles": titles, "created_at": Date().ms,
+                                    "review": ["summary": "(모의) 오늘은 관용구를 직역하는 버릇이 줄었다.", "keep": "숫자와 고유명사를 정확히 옮긴 것", "next": "weigh on 같은 구동사는 우리말 표현부터 떠올리기"]]
             sessions.append(s); return (200, s)
+        case "POST /api/sessions/:id/review":
+            if let i = sessions.firstIndex(where: { $0["id"] as? String == id }) {
+                if sessions[i]["review"] == nil || sessions[i]["review"] is NSNull { sessions[i]["review"] = ["summary": "(모의 재시도) 총평", "keep": "꾸준함", "next": "다음엔 응용도 같이"] }
+                return (200, ["review": sessions[i]["review"]!])
+            }
+            return (404, ["error": "없는 세션"])
         case "DELETE /api/sessions/:id":
             sessions.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
         case "GET /api/log":

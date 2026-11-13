@@ -629,7 +629,13 @@ struct NotebookView: View {
                             if i > 0, d.sentences[i - 1].paragraph != x.paragraph { BlankLine() }
                             row(x, d: d)
                                 .background(GeometryReader { g in Color.clear.preference(key: RowFrames.self, value: [x.id: g.frame(in: .named("scroll"))]) })
-                            if let s = markers[x.id] { SessionMark(session: s) }
+                            if let s = markers[x.id] {
+                                SessionMark(session: s)
+                                if s.review != nil || s.id.hasPrefix("local-") {
+                                    SessionReviewLines(session: s, size: 16) { Task { await session.retryReview(s) } }
+                                        .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight).padding(.bottom, 4)
+                                }
+                            }
                             ForEach(m.removed.filter { $0.afterId == x.id }) { r in removedRow(r) }
                         }
                         if m.redo == nil, !m.browse, let cur = m.current {

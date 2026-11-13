@@ -235,6 +235,7 @@ struct ActivityLogView: View {
                  + Text(s.score.map { " \($0)점" } ?? "").foregroundColor(Theme.red)
                  + Text(" " + s.articles.joined(separator: ", ")).font(Theme.hand(17)).foregroundColor(Theme.pencil))
                     .koLine()
+                if s.review != nil { SessionReviewLines(session: s, size: 16).padding(.bottom, 4) }
                 attemptLines(attempts, key: b.id)
                 if !drills.isEmpty { drillLines(drills, head: true) }
             }

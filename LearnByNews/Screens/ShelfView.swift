@@ -193,15 +193,20 @@ struct ShelfView: View {
             Text("공부 기록").font(Theme.hand(24)).foregroundStyle(Theme.pencil)
             VStack(spacing: 0) {
                 ForEach(session.sessions) { s in
-                    HStack(spacing: 14) {
-                        Text(s.line).font(Theme.hand(22)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
-                        MutedText(text: s.articles.joined(separator: ", ")).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Button { sessionToDelete = s } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
-                            .buttonStyle(.plain)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 14) {
+                            Text(s.line).font(Theme.hand(22)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                            MutedText(text: s.articles.joined(separator: ", ")).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Button { sessionToDelete = s } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
+                                .buttonStyle(.plain)
+                        }
+                        .frame(height: 36)
+                        if s.review != nil || s.id.hasPrefix("local-") || s.reviewError != nil {
+                            SessionReviewLines(session: s, size: 16, retrying: session.retrying) { Task { await session.retryReview(s) } }.padding(.bottom, 6)
+                        }
                     }
                     .padding(.horizontal, 16)
-                    .frame(height: 36)
                 }
             }
             .background(

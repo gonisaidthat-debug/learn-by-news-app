@@ -25,7 +25,7 @@ final class API {
     static let base = URL(string: "https://learn-by-news.goni-said-that.workers.dev")!
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
-        c.timeoutIntervalForRequest = 90   // 채점·총평은 수 초~수십 초
+        c.timeoutIntervalForRequest = 120  // 채점·총평은 수 초~수십 초 (세션 총평은 10~20초)
         c.waitsForConnectivity = false
         #if DEBUG
         if MockServer.enabled { c.protocolClasses = [MockServer.self] }
@@ -146,6 +146,9 @@ final class API {
     struct SessionBody: Encodable { var startedAt: Int64 }
     func closeSession(startedAt: Int64) async throws -> StudySession { try await send("POST", "/api/sessions", body: SessionBody(startedAt: startedAt)) }
     func deleteSession(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/sessions/\(id)") }
+    struct SessionReviewResult: Decodable { var review: SessionReview? }
+    /// 총평이 없는 세션에 다시 시도
+    func sessionReview(_ id: String) async throws -> SessionReview? { let r: SessionReviewResult = try await send("POST", "/api/sessions/\(id)/review"); return r.review }
 
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }

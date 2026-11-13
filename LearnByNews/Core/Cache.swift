@@ -79,8 +79,10 @@ import SwiftData
     var articles: [String]
     var createdAt: Int64
     var drills: Int?
-    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil) {
+    var review: Data?           // SessionReview JSON
+    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil, review: SessionReview? = nil) {
         self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills
+        self.review = review.flatMap { try? JSONEncoder.api.encode($0) }
     }
 }
 
@@ -228,7 +230,7 @@ final class Cache {
             ctx.insert(CachedReview(id: r.id, articleId: r.articleId, score: r.score, summary: r.review.summary ?? "", patterns: (try? JSONEncoder.api.encode(r.review.patterns ?? [])) ?? Data(), praise: r.review.praise ?? "", createdAt: r.createdAt))
         }
         for q in x.quizResults { ctx.insert(CachedQuizResult(id: q.id, key: q.key, sentenceId: q.sentenceId, source: q.source, correct: q.correct, createdAt: q.createdAt)) }
-        for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills)) }
+        for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review)) }
         try ctx.save()
         exportedAt = x.exportedAt
         if full { lastFullAt = Date().ms; needsFull = false }
@@ -248,7 +250,7 @@ final class Cache {
         Review(id: r.id, score: r.score, createdAt: r.createdAt, summary: r.summary, patterns: (try? JSONDecoder.api.decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise)
     }
     private func toSession(_ s: CachedSession) -> StudySession {
-        StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills)
+        StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review.flatMap { try? JSONDecoder.api.decode(SessionReview.self, from: $0) })
     }
 
     func articles() -> [ArticleSummary]? {
@@ -558,4 +560,9 @@ final class Cache {
     func remove(_ op: PendingOp) { ctx.delete(op); try? ctx.save() }
     var pendingCount: Int { (try? ctx.fetchCount(FetchDescriptor<PendingOp>())) ?? 0 }
     func pending(kind: String) -> [PendingOp] { pending().filter { $0.kind == kind } }
+    /// 임시 세션(오프라인 닫기)을 서버 세션으로 교체
+    func replaceLocalSession(startedAt: Int64, with s: StudySession) {
+        for x in all(CachedSession.self) where x.id.hasPrefix("local-") && x.startedAt == startedAt { ctx.delete(x) }
+        ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review)); try? ctx.save()
+    }
 }

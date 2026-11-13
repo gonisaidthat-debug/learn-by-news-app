@@ -31,6 +31,8 @@ extension Notification.Name {
     static let lbnArticleRenamed = Notification.Name("lbn.articleRenamed")
     /// 오프라인에서 쓴 응용 답이 채점돼 돌아왔다. userInfo: drill(Drill)
     static let lbnDrillGraded = Notification.Name("lbn.drillGraded")
+    /// 오프라인에서 닫은 세션이 서버에 기록됐다(총평 포함). userInfo: session(StudySession), startedAt
+    static let lbnSessionClosed = Notification.Name("lbn.sessionClosed")
 }
 
 /// 오프라인 캐시 동기화 (GET /api/export) + 오프라인 큐 전송
@@ -177,8 +179,9 @@ final class SyncManager: ObservableObject {
                     try await API.shared.deleteSessionStart()
                 case "session_close":
                     let b = try JSONDecoder.api.decode(SessionStartState.self, from: op.payload)
-                    _ = try await API.shared.closeSession(startedAt: b.startedAt)
-                    Cache.shared.needsFull = true   // 임시 세션을 서버 것으로 바꾸기 위해
+                    let s = try await API.shared.closeSession(startedAt: b.startedAt)
+                    Cache.shared.replaceLocalSession(startedAt: b.startedAt, with: s)
+                    NotificationCenter.default.post(name: .lbnSessionClosed, object: nil, userInfo: ["session": s, "startedAt": b.startedAt])
                 default: break
                 }
                 Cache.shared.remove(op)
