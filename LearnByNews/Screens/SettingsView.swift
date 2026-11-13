@@ -54,7 +54,7 @@ struct SettingsView: View {
                     }
                     .disabled(!AuthModel.biometricAvailable)
                 } footer: {
-                    Text("켜면 앱을 열 때 \(AuthModel.biometricName)로 확인한 뒤 저장된 비밀번호로 들어간다. \(Int(AuthModel.relockAfter / 60))분 넘게 비웠다 돌아와도 다시 확인한다.")
+                    Text("켜면 앱을 열 때 \(AuthModel.biometricName)로 확인한 뒤 저장된 비밀번호로 들어간다. \(Int(AuthModel.relockAfter / 60))분 넘게 비웠다 돌아와도 다시 잠긴다. 맥에서는 프롬프트를 자동으로 띄우지 않고 잠금 화면에서 버튼(또는 Enter)을 누를 때만 묻는다.")
                 }
                 Section {
                     Button(role: .destructive) { auth.logout() } label: { Label("로그아웃 (비밀번호 지우기)", systemImage: "rectangle.portrait.and.arrow.right") }

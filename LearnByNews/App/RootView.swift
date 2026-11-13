@@ -35,9 +35,20 @@ final class AuthModel: ObservableObject {
         Keychain.selfTest()
         API.token = Keychain.get()
         guard API.token != nil else { state = .loggedOut; return }
-        if biometricEnabled && Self.biometricAvailable { state = .locked; await unlock(); return }
+        if biometricEnabled && Self.biometricAvailable {
+            state = .locked
+            // 맥: 프롬프트를 자동으로 띄우지 않고 잠금 화면만 둔다 (버튼을 누르면 Touch ID/암호). 아이폰: Face ID 자동
+            if !Self.isMac { await unlock() }
+            return
+        }
         await enter()
     }
+
+    #if targetEnvironment(macCatalyst)
+    static let isMac = true
+    #else
+    static let isMac = false
+    #endif
 
     /// 저장된 비밀번호로 서버 확인 후 들어간다
     private func enter() async {
@@ -73,7 +84,8 @@ final class AuthModel: ObservableObject {
         guard state == .loggedIn, biometricEnabled, Self.biometricAvailable, let t = backgroundedAt, Date().timeIntervalSince(t) > Self.relockAfter else { return }
         backgroundedAt = nil
         state = .locked
-        Task { await unlock() }
+        // 맥은 화면이 켜질 때마다 프롬프트가 뜨면 성가시다 → 잠금 화면만 보여 주고 기다린다
+        if !Self.isMac { Task { await unlock() } }
     }
 
     /// 비밀번호로 로그인. 앞뒤 공백·개행은 잘라낸다. 값은 로그에 남기지 않고 길이만 남긴다
@@ -181,6 +193,7 @@ struct LockView: View {
                 Image(systemName: "faceid").font(.system(size: 44)).foregroundStyle(Theme.pencil)
                 if let e = auth.lockErr { ErrorText(message: e) }
                 Tiny(title: "\(AuthModel.biometricName)로 열기", color: Theme.red, size: 24) { Task { await auth.unlock() } }
+                    .keyboardShortcut(.defaultAction)   // 맥: Enter로도 연다
                 Tiny(title: "비밀번호로 들어가기", size: 20) { auth.state = .loggedOut }
             }
         }
