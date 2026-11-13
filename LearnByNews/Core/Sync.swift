@@ -175,6 +175,10 @@ final class SyncManager: ObservableObject {
                     try await API.shared.putSessionStart(b.startedAt)
                 case "session_start_delete":
                     try await API.shared.deleteSessionStart()
+                case "session_close":
+                    let b = try JSONDecoder.api.decode(SessionStartState.self, from: op.payload)
+                    _ = try await API.shared.closeSession(startedAt: b.startedAt)
+                    Cache.shared.needsFull = true   // 임시 세션을 서버 것으로 바꾸기 위해
                 default: break
                 }
                 Cache.shared.remove(op)

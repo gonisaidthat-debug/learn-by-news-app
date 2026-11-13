@@ -78,8 +78,9 @@ import SwiftData
     var score: Int?
     var articles: [String]
     var createdAt: Int64
-    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64) {
-        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt
+    var drills: Int?
+    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil) {
+        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills
     }
 }
 
@@ -115,11 +116,14 @@ import SwiftData
     var reference: String?
     var referenceKo: String?
     var feedback: Data?          // DrillFeedback JSON (지난 시도 펼쳐 보기용)
+    var sentenceId: String?
+    var phraseId: String?
     init(_ d: Drill) {
         id = d.id; phrase = d.phrase; korean = d.korean; answer = d.answer ?? ""; grade = d.grade?.rawValue ?? ""
         usedExpression = d.feedback?.usedExpression ?? false; answeredAt = d.answeredAt ?? d.createdAt; kind = d.kind
         reference = d.feedback?.reference ?? d.reference; referenceKo = d.feedback?.referenceKo
         feedback = d.feedback.flatMap { try? JSONEncoder.api.encode($0) }
+        sentenceId = d.sentenceId; phraseId = d.phraseId
     }
 }
 
@@ -224,7 +228,7 @@ final class Cache {
             ctx.insert(CachedReview(id: r.id, articleId: r.articleId, score: r.score, summary: r.review.summary ?? "", patterns: (try? JSONEncoder.api.encode(r.review.patterns ?? [])) ?? Data(), praise: r.review.praise ?? "", createdAt: r.createdAt))
         }
         for q in x.quizResults { ctx.insert(CachedQuizResult(id: q.id, key: q.key, sentenceId: q.sentenceId, source: q.source, correct: q.correct, createdAt: q.createdAt)) }
-        for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt)) }
+        for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills)) }
         try ctx.save()
         exportedAt = x.exportedAt
         if full { lastFullAt = Date().ms; needsFull = false }
@@ -244,7 +248,7 @@ final class Cache {
         Review(id: r.id, score: r.score, createdAt: r.createdAt, summary: r.summary, patterns: (try? JSONDecoder.api.decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise)
     }
     private func toSession(_ s: CachedSession) -> StudySession {
-        StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt)
+        StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills)
     }
 
     func articles() -> [ArticleSummary]? {
@@ -404,11 +408,15 @@ final class Cache {
             guard let ar = arts[r.articleId] else { return nil }
             return LogReview(id: r.id, articleId: r.articleId, title: ar.title, score: r.score, createdAt: r.createdAt, summary: r.summary)
         }
-        let quiz = all(CachedQuizResult.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.map {
-            LogQuiz(id: $0.id, key: $0.key, source: $0.source, correct: $0.correct, createdAt: $0.createdAt, kind: $0.key.hasPrefix("p|") ? .phrase : $0.key.hasPrefix("h|") ? .highlight : .issue)
+        let phraseArt = Dictionary(uniqueKeysWithValues: all(CachedPhrase.self).map { ($0.id, $0.articleId) })
+        let quiz = all(CachedQuizResult.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.map { q -> LogQuiz in
+            let aid = sents[q.sentenceId]?.articleId
+            return LogQuiz(id: q.id, key: q.key, source: q.source, correct: q.correct, createdAt: q.createdAt, kind: q.key.hasPrefix("p|") ? .phrase : q.key.hasPrefix("h|") ? .highlight : .issue, articleId: aid, title: aid.flatMap { arts[$0]?.title })
         }
-        let drills = all(CachedDrill.self).filter { $0.answeredAt >= since }.sorted { $0.answeredAt < $1.answeredAt }.map {
-            LogDrill(id: $0.id, phrase: $0.phrase, korean: $0.korean, kind: $0.kind, answer: $0.answer, grade: Grade(rawValue: $0.grade), usedExpression: $0.usedExpression, answeredAt: $0.answeredAt)
+        let drills = all(CachedDrill.self).filter { $0.answeredAt >= since }.sorted { $0.answeredAt < $1.answeredAt }.map { d -> LogDrill in
+            // 기사: 문장 → 없으면 표현 → 없으면 모름
+            let aid = d.sentenceId.flatMap { sents[$0]?.articleId } ?? d.phraseId.flatMap { phraseArt[$0] }
+            return LogDrill(id: d.id, phrase: d.phrase, korean: d.korean, kind: d.kind, answer: d.answer, grade: Grade(rawValue: d.grade), usedExpression: d.usedExpression, answeredAt: d.answeredAt, articleId: aid, title: aid.flatMap { arts[$0]?.title })
         }
         return ActivityLog(since: since, attempts: attempts, sessions: sessions, reviews: reviews, quiz: quiz, drills: drills)
     }
@@ -521,6 +529,22 @@ final class Cache {
         for x in mine where x.idx > dropIdx && x.id != dropId { x.idx -= 1 }
         try? ctx.save()
         return keep.id
+    }
+
+    /// 오프라인에서 "오늘 여기까지": 시작 이후 번역+응용을 세어 임시 세션을 만든다 (서버와 같은 규칙). 둘 다 없으면 nil
+    func closeSessionLocally(startedAt: Int64) -> StudySession? {
+        let atts = all(CachedAttempt.self).filter { $0.createdAt >= startedAt }
+        let drs = all(CachedDrill.self).filter { $0.answeredAt >= startedAt }
+        guard !atts.isEmpty || !drs.isEmpty else { return nil }
+        let grades = atts.compactMap { Grade(rawValue: $0.grade) }.filter { $0 != .skip } + drs.compactMap { Grade(rawValue: $0.grade) }
+        let pts = grades.compactMap { Grade.points[$0] }
+        let score = pts.isEmpty ? nil : Int((Double(pts.reduce(0, +)) / Double(pts.count)).rounded())
+        let arts = Dictionary(uniqueKeysWithValues: all(CachedArticle.self).map { ($0.id, $0.title) })
+        let titles = Array(Set(atts.map(\.articleId))).compactMap { arts[$0] }
+        let ended = max(atts.map(\.createdAt).max() ?? 0, drs.map(\.answeredAt).max() ?? 0)
+        let s = StudySession(id: "local-" + UUID().uuidString.lowercased(), startedAt: startedAt, endedAt: ended, attempts: atts.count + drs.count, score: score, articles: titles, createdAt: Date().ms, drills: drs.count)
+        ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills)); try? ctx.save()
+        return s
     }
 
     // MARK: 오프라인 큐

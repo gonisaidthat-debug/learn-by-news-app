@@ -106,7 +106,7 @@ struct MockState {
         ]
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
-        sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
+        sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "drills": 0, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
         drills = [["id": "d1", "phrase_id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "korean": "", "kind": "free", "sentence_id": "s1", "created_at": now - 7_200_000,
@@ -309,11 +309,15 @@ struct MockState {
                 guard let at = s["attempt"] as? [String: Any], let t = at["created_at"] as? Int64, t >= start else { return nil }
                 return (t, at["grade"] as! String, s["article_id"] as! String)
             }
-            guard !done.isEmpty else { return (400, ["error": "시작 이후 채점한 문장이 없습니다"]) }
+            let drsCheck = drills.filter { !($0["feedback"] is NSNull) && (($0["answered_at"] as? Int64) ?? 0) >= start }
+            guard !done.isEmpty || !drsCheck.isEmpty else { return (400, ["error": "시작 이후 채점한 문장이 없습니다"]) }
             let pts: [String: Int] = ["A": 100, "B": 80, "C": 50, "D": 20]
-            let g = done.compactMap { pts[$0.1] }
+            // 응용(써 보기·응용 탭)도 함께 센다
+            let drs = drills.filter { !($0["feedback"] is NSNull) && (($0["answered_at"] as? Int64) ?? 0) >= start }
+            let g = done.compactMap { pts[$0.1] } + drs.compactMap { pts[$0["grade"] as? String ?? ""] }
             let titles = Array(Set(done.map { $0.2 })).compactMap { id in articles.first { $0["id"] as? String == id }?["title"] as? String }
-            let s: [String: Any] = ["id": nextId("ss"), "started_at": start, "ended_at": done.map(\.0).max()!, "attempts": done.count, "score": g.isEmpty ? NSNull() : Int((Double(g.reduce(0, +)) / Double(g.count)).rounded()), "articles": titles, "created_at": Date().ms]
+            let ended = max(done.map(\.0).max() ?? 0, drs.compactMap { $0["answered_at"] as? Int64 }.max() ?? 0)
+            let s: [String: Any] = ["id": nextId("ss"), "started_at": start, "ended_at": ended, "attempts": done.count + drs.count, "drills": drs.count, "score": g.isEmpty ? NSNull() : Int((Double(g.reduce(0, +)) / Double(g.count)).rounded()), "articles": titles, "created_at": Date().ms]
             sessions.append(s); return (200, s)
         case "DELETE /api/sessions/:id":
             sessions.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
@@ -332,9 +336,20 @@ struct MockState {
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
             }
             let ds = drills.filter { !($0["feedback"] is NSNull) }.map { d -> [String: Any] in
-                ["id": d["id"]!, "phrase": d["phrase"]!, "korean": d["korean"]!, "kind": d["kind"] ?? "prompt", "answer": d["answer"]!, "grade": d["grade"]!, "used_expression": (d["feedback"] as! [String: Any])["used_expression"]!, "answered_at": d["answered_at"]!]
+                let sid = d["sentence_id"] as? String
+                let aid = sentences.first { $0["id"] as? String == sid }?["article_id"] as? String
+                    ?? phrases.first { $0["id"] as? String == d["phrase_id"] as? String }?["article_id"] as? String
+                let title = articles.first { $0["id"] as? String == aid }?["title"] as? String
+                return ["id": d["id"]!, "phrase": d["phrase"]!, "korean": d["korean"]!, "kind": d["kind"] ?? "prompt", "answer": d["answer"]!, "grade": d["grade"]!, "used_expression": (d["feedback"] as! [String: Any])["used_expression"]!, "answered_at": d["answered_at"]!, "article_id": aid ?? NSNull(), "title": title ?? NSNull()]
             }
-            return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": quizResults, "drills": ds])
+            let qs = quizResults.map { q -> [String: Any] in
+                var o = q
+                let sid = (q["key"] as? String ?? "").split(separator: "|").first.map(String.init)
+                let aid = sentences.first { $0["id"] as? String == sid }?["article_id"] as? String
+                o["article_id"] = aid ?? NSNull(); o["title"] = articles.first { $0["id"] as? String == aid }?["title"] ?? NSNull()
+                return o
+            }
+            return (200, ["since": now - 60 * 86_400_000, "attempts": attempts, "sessions": sessions, "reviews": revs, "quiz": qs, "drills": ds])
         case "GET /api/articles/:id/pass":
             return (200, passes[id].map { ["done": $0, "updated_at": Date().ms] as [String: Any] } ?? NSNull())
         case "PUT /api/articles/:id/pass":

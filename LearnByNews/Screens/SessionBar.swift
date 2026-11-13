@@ -41,12 +41,19 @@ final class SessionModel: ObservableObject {
         guard let start, !busy else { return }
         busy = true; msg = nil
         do {
-            let s = try await API.shared.closeSession(startedAt: start)
+            let s: StudySession
+            if Connectivity.shared.isOnline {
+                s = try await API.shared.closeSession(startedAt: start)
+            } else {
+                // 오프라인: 캐시로 번역+응용을 세어 임시 세션, 연결되면 서버에 기록
+                guard let local = Cache.shared.closeSessionLocally(startedAt: start) else { msg = "시작 이후 채점한 문장이 없습니다"; busy = false; return }
+                Cache.shared.enqueue("session_close", SessionStartState(startedAt: start)); s = local
+            }
             SessionStore.start = nil; self.start = nil
             await SyncManager.shared.deleteSessionStart()
             msg = "기록했다 · \(s.line)"
             sessions.insert(s, at: 0)
-            AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)"])
+            AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
         } catch { msg = error.localizedDescription }
         busy = false
     }

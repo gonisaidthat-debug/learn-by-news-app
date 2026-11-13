@@ -229,17 +229,24 @@ struct StudySession: Codable, Identifiable, Hashable {
     var id: String
     var startedAt: Int64
     var endedAt: Int64
-    var attempts: Int
+    var attempts: Int          // 번역 + 응용
     var score: Int?
     var articles: [String]
     var createdAt: Int64
+    var drills: Int?           // 그중 응용(써 보기·응용 탭) 수
+
+    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil) {
+        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills
+    }
 
     var minutes: Int { max(1, Int((Double(endedAt - startedAt) / 60000).rounded())) }
+    /// "18문장 (응용 6)" — 응용이 0이면 괄호 생략
+    var countLabel: String { "\(attempts)문장" + ((drills ?? 0) > 0 ? " (응용 \(drills!))" : "") }
 
-    /// 웹 fmtSession과 동일: "11/6 14:03–14:40 · 37분 · 12문장 · 85점"
+    /// 웹 fmtSession과 동일: "11/6 14:03–14:40 · 37분 · 18문장 (응용 6) · 85점"
     var line: String {
         let d = Date(ms: startedAt)
-        var s = "\(d.monthDay) \(Date(ms: startedAt).hm)–\(Date(ms: endedAt).hm) · \(minutes)분 · \(attempts)문장"
+        var s = "\(d.monthDay) \(Date(ms: startedAt).hm)–\(Date(ms: endedAt).hm) · \(minutes)분 · \(countLabel)"
         if let score { s += " · \(score)점" }
         return s
     }
@@ -273,6 +280,12 @@ struct LogQuiz: Codable, Identifiable, Hashable {
     var correct: Bool
     var createdAt: Int64
     var kind: QuizItem.Kind
+    var articleId: String?
+    var title: String?
+
+    init(id: String, key: String, source: String, correct: Bool, createdAt: Int64, kind: QuizItem.Kind, articleId: String? = nil, title: String? = nil) {
+        self.id = id; self.key = key; self.source = source; self.correct = correct; self.createdAt = createdAt; self.kind = kind; self.articleId = articleId; self.title = title
+    }
 }
 
 struct LogDrill: Codable, Identifiable, Hashable {
@@ -285,6 +298,12 @@ struct LogDrill: Codable, Identifiable, Hashable {
     var grade: Grade?
     var usedExpression: Bool?
     var answeredAt: Int64?
+    var articleId: String?
+    var title: String?
+
+    init(id: String, phrase: String, korean: String, kind: String? = nil, answer: String? = nil, grade: Grade? = nil, usedExpression: Bool? = nil, answeredAt: Int64? = nil, articleId: String? = nil, title: String? = nil) {
+        self.id = id; self.phrase = phrase; self.korean = korean; self.kind = kind; self.answer = answer; self.grade = grade; self.usedExpression = usedExpression; self.answeredAt = answeredAt; self.articleId = articleId; self.title = title
+    }
 }
 
 struct ActivityLog: Codable {
