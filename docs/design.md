@@ -69,9 +69,10 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET `/api/quiz` | — | `QuizItem[]` (순서는 클라가: 안 본 것→틀린 것→맞힌 것, 묶음 안 섞기) |
 | POST `/api/quiz/results` | `{key, sentence_id, source, correct: bool}` | `{ok}` |
 | GET `/api/sessions` | — | `Session[]` 최신순 |
-| POST `/api/sessions` | `{started_at}` | `Session` — started_at 이후 번역·응용 채점이 둘 다 없으면 400. `attempts` = 번역 + 응용 문장 수, `drills` = 그중 응용(써 보기·응용 탭) 수, `score` = 합친 평균, `ended_at` = 둘 중 늦은 것 |
+| POST `/api/sessions` | `{started_at}` | `Session & {review: {summary, keep, next}\|null, review_error?}` — 세션을 저장한 뒤 그 시간의 짧은 Claude 총평을 붙여 돌려준다(10~20초). 실패하면 review null + review_error, 세션은 저장됨. started_at 이후 번역·응용 채점이 둘 다 없으면 400. `attempts` = 번역 + 응용 문장 수, `drills` = 그중 응용(써 보기·응용 탭) 수, `score` = 합친 평균, `ended_at` = 둘 중 늦은 것 |
+| POST `/api/sessions/:id/review` | — | `{review}` 총평 다시 시도 (이미 있으면 그대로, 실패 502) |
 | DELETE `/api/sessions/:id` | — | `{ok}` |
-| GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions:[Session & {drills}], reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` | `quiz[]`와 `drills[]`에 `article_id, title`(기사를 모르면 null: 응용 탭 문제는 표현이 나온 기사, 읽다가 쓴 것은 그 문장의 기사) 추가 (2026-11-13)
+| GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions:[Session & {drills, review}], reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` | `quiz[]`와 `drills[]`에 `article_id, title`(기사를 모르면 null: 응용 탭 문제는 표현이 나온 기사, 읽다가 쓴 것은 그 문장의 기사) 추가 (2026-11-13)
 | GET `/api/export?since=<ms>` | — | `{exported_at, since, articles, sentences, attempts(feedback 파싱됨), phrases, reviews(review 파싱됨), quiz_results, sessions(articles 파싱됨)}` 오프라인 캐시용. since가 있으면 append-only 표만 증분, articles·sentences는 항상 전체. 삭제는 전체 내보내기로만 반영 |
 | GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다 |
 | POST `/api/sentences/:id/ask` | `{start_word, end_word, span}` (단어 인덱스는 공백 분리 기준 0부터) | `Highlight & {phrase: Phrase|null}` — Claude가 구절을 `{meaning, why, similar}`로 설명(하루 상한 포함). 구절은 표현장에도 기본으로 붙는다 |
