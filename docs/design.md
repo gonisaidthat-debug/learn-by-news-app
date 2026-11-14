@@ -86,7 +86,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/drills/batch` | `{count}` 1~30 | `{drills: Drill[], made}` 안 푼 문제를 count개까지 채워 전부(오프라인용 미리 받기) |
 | POST `/api/drills/free` | `{phrase, meaning?, phrase_id?, sentence_id?, answer}` | `Drill`(kind "free", feedback·reference 포함) — 한국어 원문 없이 표현을 써서 지은 내 문장을 채점(호출 1). 오프라인이면 큐(drill_free) |
 | GET / PUT / DELETE `/api/articles/:id/pass` | PUT `{done: string[]}` | GET → `{done, updated_at}|null`. **다시 쓰기 진행 상태는 서버가 진실**. 제출마다 PUT, 완료·중단 시 DELETE. UserDefaults는 캐시(오프라인 큐로 지연 전송 가능) |
-| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. **공부 세션 시작점도 서버에 하나** |
+| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. **공부 세션 시작점도 서버에 하나**. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다, 2026-11-13). PUT은 이미 기록된 세션의 `started_at` 이하 값을 400으로 거절 |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
