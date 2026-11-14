@@ -192,6 +192,7 @@ final class SyncManager: ObservableObject {
             } catch {
                 AppLog.shared.error("queue", "dropped \(op.kind): \(error.localizedDescription)")
                 if op.kind == "drill_answer", let b = try? JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload) { DrillStore.shared.dropPending(b.id) }
+                if op.kind == "session_start_put" { SessionModel.shared.serverRejectedStart(error.localizedDescription) }  // 400 거절: 재시도 금지, 로컬 시작점도 지운다
                 if op.kind == "attempt", let b = try? JSONDecoder.api.decode(AttemptOp.self, from: op.payload) {
                     NotificationCenter.default.post(name: .lbnAttemptGraded, object: nil, userInfo: ["attemptId": b.attemptId, "sentenceId": b.sentenceId, "error": error.localizedDescription])
                 }
@@ -391,7 +392,12 @@ final class SyncManager: ObservableObject {
     }
     // MARK: 공부 시작점
     func putSessionStart(_ t: Int64) async {
-        await sendOrQueue("session_start_put", SessionStartState(startedAt: t)) { try await API.shared.putSessionStart(t) }
+        if Connectivity.shared.isOnline {
+            do { try await API.shared.putSessionStart(t); return }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+            catch { SessionModel.shared.serverRejectedStart(error.localizedDescription); return }  // 400: 서버가 진실, 로컬도 지운다
+        }
+        Cache.shared.enqueue("session_start_put", SessionStartState(startedAt: t)); refreshCounts()
     }
     func deleteSessionStart() async {
         await sendOrQueue("session_start_delete", SessionStartState(startedAt: 0)) { try await API.shared.deleteSessionStart() }

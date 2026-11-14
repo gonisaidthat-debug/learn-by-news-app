@@ -66,7 +66,8 @@ struct MockState {
     var passes: [String: [String]] = [:]
     var trash: [String: [String: Any]] = [:]
     var links: [[String: Any]] = []   // {id, from_highlight, to_kind, to_id, created_at}
-    var sessionStart: Int64? = nil
+    // LBN_SESSION=1: 서버에도 시작점이 있는 상태(앱은 서버가 null이면 기기 캐시를 지우므로 둘이 맞아야 세션이 보인다)
+    var sessionStart: Int64? = ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" ? Date().ms - 600_000 : nil
     var highlights: [[String: Any]] = []
     var seq = 100
 
@@ -367,7 +368,11 @@ struct MockState {
         case "GET /api/session-start":
             return (200, sessionStart.map { ["started_at": $0] as [String: Any] } ?? NSNull())
         case "PUT /api/session-start":
-            sessionStart = (body["started_at"] as? NSNumber)?.int64Value; return (200, ["ok": true])
+            let t = (body["started_at"] as? NSNumber)?.int64Value ?? 0
+            if let last = sessions.compactMap({ ($0["started_at"] as? NSNumber)?.int64Value }).max(), t <= last {
+                return (400, ["error": "이미 기록된 세션보다 앞선 시작점입니다"])
+            }
+            sessionStart = t; return (200, ["ok": true])
         case "DELETE /api/session-start":
             sessionStart = nil; return (200, ["ok": true])
         case "POST /api/drills/next":

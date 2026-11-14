@@ -60,14 +60,21 @@ final class SessionModel: ObservableObject {
         do { sessions = try await API.shared.sessions() } catch { AppLog.shared.warn("session", "list failed: \(error.localizedDescription)") }
         await loadStart()
     }
-    /// 서버 시작점을 읽어 로컬과 맞춘다. 서버가 null인데 로컬에만 있으면 올려서 이관
+    /// 서버 시작점을 읽어 로컬과 맞춘다. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다 — 다른 기기에서 닫은 세션의 옛 시작점이 되살아나는 사고, 2026-11-13)
     func loadStart() async {
         guard Connectivity.shared.isOnline else { start = SessionStore.start; return }
         do {
             if let s = try await API.shared.sessionStart() { SessionStore.start = s.startedAt; start = s.startedAt }
-            else if let local = SessionStore.start { await SyncManager.shared.putSessionStart(local); start = local }
-            else { start = nil }
+            else {
+                if SessionStore.start != nil { AppLog.shared.info("session", "server start is null; dropping local cache") }
+                SessionStore.start = nil; start = nil
+            }
         } catch { start = SessionStore.start }
+    }
+    /// 서버가 PUT /api/session-start 를 거절(400)했을 때: 로컬 시작점을 지우고 이유를 보여준다
+    func serverRejectedStart(_ reason: String) {
+        SessionStore.start = nil; start = nil; msg = reason
+        AppLog.shared.warn("session", "start rejected", ["error": reason])
     }
     func close() async {
         guard let start, !busy else { return }
