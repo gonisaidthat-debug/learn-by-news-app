@@ -148,4 +148,5 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - 목표: 네트워크가 없어도 **핵심 루프(번역 제출·건너뛰기·다시 쓰기·멈추기)**가 된다. 번역은 로컬에 "채점 대기" attempt로 즉시 저장(대기 도장), 연결되면 큐를 순서대로 `POST /api/sentences/:id/attempts`(attempt_id 포함)로 보내 도장·첨삭·포스트잇으로 교체. 멈추기는 큐 제거(이미 보냈으면 DELETE /api/attempts/:id).
 - 큐 대상: 번역/건너뛰기, 다시 쓰기 진행(`PUT /api/articles/:id/pass`), 공부 시작점(`/api/session-start`), 책갈피, 포스트잇, 시험 결과. 가능하면 새 공책 만들기·합치기·제거·링크 수정도 큐(로컬 임시 id → 서버 id 교체).
 - 온라인 전용(안내만): 총평, 형광펜 묻기, 응용. 폴백 없음.
-- 한계: 서버의 created_at은 전송 시각이라 세션 기록의 시간 범위가 어긋날 수 있다. 설정 > 오프라인에 "대기 중 채점 n개" 표시. 서버가 진실, 충돌은 서버 우선.
+- 쓴 시각: 큐 재생 때 번역은 `written_at`, 응용 답은 `answered_at`(둘 다 ms)을 보내 서버가 그 시각을 created_at/answered_at으로 쓴다(2026-11-15). 큐는 넣은 순서(attempt들 → session_close)로 보내 오프라인에서 닫은 세션의 범위·기록 날짜가 맞는다. 설정 > 오프라인에 "대기 중 채점 n개" 표시. 서버가 진실, 충돌은 서버 우선.
+- 진입: 저장된 비밀번호가 있으면 Face ID 뒤 서버 확인을 기다리지 않고 바로 홈(캐시)으로 들어간다. `GET /api/auth`는 뒤에서 하고 401일 때만 로그인 화면으로(네트워크 오류는 무시). 책갈피 띠는 캐시의 `current_round`가 없으면 로컬(총평 수 + 다시 쓰기 진행)로 센다.

@@ -105,11 +105,12 @@ final class API {
     func review(_ id: String, score: Int?) async throws -> Review { try await send("POST", "/api/articles/\(id)/review", body: ReviewBody(score: score)) }
 
     // MARK: sentences
-    struct TranslationBody: Encodable { var translation: String; var attemptId: String }
-    struct SkipBody: Encodable { var skip = true; var attemptId: String }
-    /// attemptId는 클라이언트 UUID. 멈추기(DELETE /api/attempts/:id)에 쓴다
-    func attempt(_ sentenceId: String, translation: String, attemptId: String) async throws -> AttemptResult {
-        try await send("POST", "/api/sentences/\(sentenceId)/attempts", body: translation.isEmpty ? SkipBody(attemptId: attemptId) as any Encodable : TranslationBody(translation: translation, attemptId: attemptId))
+    struct TranslationBody: Encodable { var translation: String; var attemptId: String; var writtenAt: Int64? }
+    struct SkipBody: Encodable { var skip = true; var attemptId: String; var writtenAt: Int64? }
+    /// attemptId는 클라이언트 UUID. 멈추기(DELETE /api/attempts/:id)에 쓴다.
+    /// writtenAt: 오프라인에서 쓴 시각(ms). 큐 재생 때 보내면 서버가 created_at으로 쓴다(미래·30일 초과는 무시)
+    func attempt(_ sentenceId: String, translation: String, attemptId: String, writtenAt: Int64? = nil) async throws -> AttemptResult {
+        try await send("POST", "/api/sentences/\(sentenceId)/attempts", body: translation.isEmpty ? SkipBody(attemptId: attemptId, writtenAt: writtenAt) as any Encodable : TranslationBody(translation: translation, attemptId: attemptId, writtenAt: writtenAt))
     }
     struct Cancelled: Decodable { var ok: Bool; var removed: Bool? }
     /// 멈추기: 채점이 끝났으면 삭제, 아직이면 결과 도착 시 버린다
@@ -165,8 +166,9 @@ final class API {
     // MARK: 응용
     struct DrillNextBody: Encodable { var phraseId: String? }
     func nextDrill(phraseId: String? = nil) async throws -> Drill { try await send("POST", "/api/drills/next", body: DrillNextBody(phraseId: phraseId)) }
-    struct DrillAnswerBody: Encodable { var answer: String }
-    func answerDrill(_ id: String, answer: String) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer)) }
+    struct DrillAnswerBody: Encodable { var answer: String; var answeredAt: Int64? }
+    /// answeredAt: 오프라인에서 쓴 시각(ms). 큐 재생 때 보낸다
+    func answerDrill(_ id: String, answer: String, answeredAt: Int64? = nil) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer, answeredAt: answeredAt)) }
     func deleteDrill(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/drills/\(id)") }
     func drills(days: Int = 30) async throws -> [Drill] { try await send("GET", "/api/drills?days=\(days)") }
     struct DrillFreeBody: Codable { var phrase: String; var meaning: String?; var phraseId: String?; var sentenceId: String?; var answer: String }

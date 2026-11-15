@@ -84,7 +84,7 @@ final class SyncManager: ObservableObject {
         }
     }
 
-    /// 오프라인 큐를 순서대로 보낸다. 네트워크 오류면 멈추고 다음 기회에, 서버 오류(4xx/5xx)면 그 항목은 버린다
+    /// 오프라인 큐를 넣은 순서대로 보낸다(attempt들 → session_close 순이 지켜진다). 네트워크 오류면 멈추고 다음 기회에, 서버 오류(4xx/5xx)면 그 항목은 버린다
     func flushQueue() async {
         guard !flushing, Connectivity.shared.isOnline else { return }
         flushing = true
@@ -104,7 +104,7 @@ final class SyncManager: ObservableObject {
                 case "attempt":
                     let b = try JSONDecoder.api.decode(AttemptOp.self, from: op.payload)
                     let sid = real(b.sentenceId)
-                    let r = try await API.shared.attempt(sid, translation: b.skip ? "" : b.translation, attemptId: b.attemptId)
+                    let r = try await API.shared.attempt(sid, translation: b.skip ? "" : b.translation, attemptId: b.attemptId, writtenAt: b.createdAt)   // 쓴 시각이 created_at이 돼야 세션 범위·기록 날짜가 맞는다
                     for p in r.phrases { Cache.shared.upsertPhrase(p) }
                     sentAttempts = true
                     NotificationCenter.default.post(name: .lbnAttemptGraded, object: nil, userInfo: ["attemptId": b.attemptId, "sentenceId": b.sentenceId, "result": r])
@@ -153,7 +153,7 @@ final class SyncManager: ObservableObject {
                     NotificationCenter.default.post(name: .lbnDrillGraded, object: nil, userInfo: ["drill": d])
                 case "drill_answer":
                     let b = try JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload)
-                    let d = try await API.shared.answerDrill(b.id, answer: b.answer)
+                    let d = try await API.shared.answerDrill(b.id, answer: b.answer, answeredAt: b.answeredAtLocal)
                     DrillStore.shared.didGrade(d)
                     NotificationCenter.default.post(name: .lbnDrillGraded, object: nil, userInfo: ["drill": d])
                 case "quiz_result":

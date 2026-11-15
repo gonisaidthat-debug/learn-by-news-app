@@ -50,14 +50,15 @@ final class AuthModel: ObservableObject {
     static let isMac = false
     #endif
 
-    /// 저장된 비밀번호로 서버 확인 후 들어간다
+    /// 저장된 비밀번호가 있으면 바로 들어간다(캐시로 오프라인에서도 홈·공책이 열려야 한다).
+    /// 서버 확인(GET /api/auth)은 들어간 뒤 뒤에서: 401이면 비밀번호를 지우고 로그인 화면으로, 네트워크 오류면 그대로.
+    /// 예전엔 확인이 끝나야 들어갔는데, 연결은 있어도 인터넷이 안 되는 상태(와이파이만 붙음·전파 약함)에서는 요청이 120초까지 기다려 잠금 화면에 멈춰 있었다(2026-11-15)
     private func enter() async {
-        do { try await API.shared.checkAuth(); state = .loggedIn }
-        catch APIError.unauthorized { state = .loggedOut }
-        catch {
-            // 네트워크 실패면 비밀번호는 그대로 두고 들어간다 (화면에서 오류를 보여준다)
-            state = .loggedIn
-        }
+        state = .loggedIn
+        guard Connectivity.shared.isOnline else { AppLog.shared.info("auth", "entered offline (no server check)"); return }
+        do { try await API.shared.checkAuth() }
+        catch APIError.unauthorized { state = .loggedOut }   // send()가 Keychain을 지우고 lbnUnauthorized도 보낸다
+        catch { AppLog.shared.warn("auth", "server check failed, staying in: \(error.localizedDescription)") }
     }
 
     /// Face ID(안 되면 기기 암호)로 본인 확인
