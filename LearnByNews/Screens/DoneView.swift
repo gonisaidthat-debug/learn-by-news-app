@@ -54,9 +54,12 @@ final class DoneModel: ObservableObject {
             do { d = try await API.shared.article(id) }
             catch let e as APIError where e.isNetwork { if let c = Cache.shared.article(id) { d = c } else { throw e } }
             data = d
+            // 다시 쓰기 진행: 서버가 진실. 서버가 null이면 로컬도 지운다(이관 안 함). 못 닿으면 로컬 진행을 쓴다
             progress = RedoProgress.load(id)
-            if let server = try? await API.shared.pass(id) { progress = RedoProgress.from(serverDone: server.done, sentenceIds: d.sentences.map(\.id)); progress?.save(id) }
-            else if Connectivity.shared.isOnline, (try? await API.shared.pass(id)) == nil, progress == nil { RedoProgress.clear(id) }
+            do {
+                if let server = try await API.shared.pass(id) { progress = RedoProgress.from(serverDone: server.done, sentenceIds: d.sentences.map(\.id)); progress?.save(id) }
+                else { RedoProgress.clear(id); progress = nil }
+            } catch { AppLog.shared.warn("done", "pass unreachable, using local: \(error.localizedDescription)", ["article": id]) }
             bookmark = Cache.shared.bookmark()
             if let b = try? await API.shared.bookmark() { bookmark = b; Cache.shared.setBookmark(b) }
             estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil

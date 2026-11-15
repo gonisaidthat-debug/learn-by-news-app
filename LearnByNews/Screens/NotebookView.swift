@@ -167,17 +167,21 @@ final class NotebookModel: ObservableObject {
                 data = d; beginPass(prog)
                 return
             }
-            // 진행 상태: 서버가 진실. 서버가 null인데 로컬에만 있으면 한 번 올려 이관(오프라인이면 로컬 캐시 사용)
+            // 진행 상태: 서버가 진실. 서버가 null이면 로컬(RedoProgress)도 지운다 — 이관하지 않는다(다른 기기에서 끝낸 진행이 되살아나는 사고, 2026-11-15).
+            // 서버에 못 닿을 때만 로컬 진행을 쓰고, 그때도 올리지 않는다
             var prog: RedoProgress? = nil
             if !offline {
-                if let server = try? await API.shared.pass(id) {
-                    prog = RedoProgress.from(serverDone: server.done, sentenceIds: ids); prog?.save(id)
-                } else if let local = RedoProgress.load(id), Connectivity.shared.isOnline {
-                    await SyncManager.shared.putPass(id, done: local.done); prog = local
-                    AppLog.shared.info("notebook", "pass migrated to server", ["article": id])
-                } else if Connectivity.shared.isOnline {
-                    RedoProgress.clear(id)
-                } else { prog = RedoProgress.load(id) }
+                do {
+                    if let server = try await API.shared.pass(id) {
+                        prog = RedoProgress.from(serverDone: server.done, sentenceIds: ids); prog?.save(id)
+                    } else {
+                        if RedoProgress.load(id) != nil { AppLog.shared.info("notebook", "server pass is null; dropping local progress", ["article": id]) }
+                        RedoProgress.clear(id)
+                    }
+                } catch {
+                    AppLog.shared.warn("notebook", "pass unreachable, using local: \(error.localizedDescription)", ["article": id])
+                    prog = RedoProgress.load(id)
+                }
             } else { prog = RedoProgress.load(id) }
             if let prog {
                 let alive = prog.ids.filter(ids.contains)
