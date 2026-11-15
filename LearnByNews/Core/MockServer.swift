@@ -107,7 +107,7 @@ struct MockState {
         ]
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
-        sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 2, "score": 90, "drills": 0, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000,
+        sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 47, "score": 90, "drills": 10, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000,
                      "review": ["summary": "짧은 세션이었지만 두 문장 다 뜻을 정확히 잡았다.", "keep": "단위와 숫자를 빠뜨리지 않은 것", "next": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현 고르기"]]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)

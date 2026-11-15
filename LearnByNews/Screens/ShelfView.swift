@@ -201,7 +201,8 @@ struct ShelfView: View {
                 ForEach(session.sessions) { s in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 14) {
-                            Text(s.line).font(Theme.hand(22)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                            // fixedSize 금지: 줄이 화면보다 길면(37문장 (응용 10) · 79점) 홈 전체가 가로로 넘쳐 잘렸다(2026-11-15). 기사 제목을 먼저 줄이고 그래도 길면 말줄임
+                            Text(s.line).font(Theme.hand(22)).foregroundStyle(Theme.ink).lineLimit(1).layoutPriority(1)
                             MutedText(text: s.articles.joined(separator: ", ")).lineLimit(1)
                             Spacer(minLength: 0)
                             Button { sessionToDelete = s } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
