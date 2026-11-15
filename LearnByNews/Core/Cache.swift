@@ -236,6 +236,7 @@ final class Cache {
         exportedAt = x.exportedAt
         if full { lastFullAt = Date().ms; needsFull = false }
         AppLog.shared.info("cache", full ? "full applied" : "incremental applied", ["articles": "\(x.articles.count)", "attempts": "\(x.attempts.count)", "phrases": "\(x.phrases.count)"])
+        applyStoredServerPass()   // 문장 캐시가 생겼으니 서버 다시 쓰기 진행을 기기 캐시로
     }
 
     // MARK: 화면용 질의 (서버 핸들러와 같은 계산)
@@ -268,6 +269,9 @@ final class Cache {
         }
     }
 
+    /// 제목만(불러오는 동안 제목 표시용). article(_:)은 문장·시도까지 다 만들어 무겁다
+    func articleTitle(_ id: String) -> String? { all(CachedArticle.self).first { $0.id == id }?.title }
+
     func article(_ id: String) -> ArticleDetail? {
         guard let a = all(CachedArticle.self).first(where: { $0.id == id }) else { return nil }
         let bySentence = attemptsBySentence()
@@ -293,6 +297,37 @@ final class Cache {
         let s = all(CachedSentence.self).first { $0.id == b.sentenceId }
         let a = all(CachedArticle.self).first { $0.id == b.articleId }
         return Bookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, currentRound: b.currentRound ?? currentRound(of: b.articleId), createdAt: b.createdAt, articleTitle: a?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+    }
+    /// 공책 목록(GET /api/articles)의 pass_done으로 기기의 다시 쓰기 진행 캐시(RedoProgress)를 맞춘다.
+    /// 서버가 진실: 진행이 있으면 캐시된 문장 순서로 저장, null이면 지운다(아직 못 보낸 pass_put이 있는 공책은 그대로).
+    /// 서버 값은 따로 기억해 두고(`lbn_server_pass`) 문장 캐시가 아직 없으면 내보내기 적용 뒤에 다시 맞춘다 — 문장 없이 만든 진행은 "끝난 것"으로 보여 pass를 지우는 사고(2026-11-15).
+    /// 공책을 온라인에서 한 번도 안 열었던 기기가 오프라인에서 "완료·1회차"로 잘못 열리던 사고(2026-11-15)
+    func syncPassProgress(_ list: [ArticleSummary]) {
+        let real = list.filter { !SyncManager.isTemp($0.id) }
+        let snap = ServerPass(ids: real.map(\.id), done: Dictionary(uniqueKeysWithValues: real.compactMap { a in a.passDone.map { (a.id, $0) } }))
+        if let d = try? JSONEncoder().encode(snap) { UserDefaults.standard.set(d, forKey: Self.serverPassKey) }
+        applyServerPass(snap)
+    }
+    struct ServerPass: Codable { var ids: [String]; var done: [String: [String]] }
+    private static let serverPassKey = "lbn_server_pass"
+    private func applyStoredServerPass() {
+        guard let d = UserDefaults.standard.data(forKey: Self.serverPassKey), let s = try? JSONDecoder().decode(ServerPass.self, from: d) else { return }
+        applyServerPass(s)
+    }
+    private func applyServerPass(_ s: ServerPass) {
+        let queued = Set(pending(kind: "pass_put").compactMap { try? JSONDecoder().decode(SyncManager.PassOp.self, from: $0.payload) }.map(\.articleId))
+        let sents = Dictionary(grouping: all(CachedSentence.self), by: \.articleId)
+        for id in s.ids where !queued.contains(id) {
+            if let done = s.done[id] {
+                let ids = (sents[id] ?? []).sorted { $0.idx < $1.idx }.map(\.id)
+                guard !ids.isEmpty else { continue }   // 문장 캐시가 아직 없으면 만들지 않는다(내보내기 적용 뒤 다시 온다)
+                let p = RedoProgress(ids: ids, done: done)
+                if RedoProgress.load(id) != p { p.save(id) }
+            } else if RedoProgress.load(id) != nil {
+                AppLog.shared.info("cache", "server pass is null; dropping local progress", ["article": id])
+                RedoProgress.clear(id)
+            }
+        }
     }
     /// 공책의 지금 회차(서버 current_round와 같은 규칙): 총평 수 + 다시 쓰기 진행 중이면 1, 최소 1
     func currentRound(of articleId: String) -> Int {

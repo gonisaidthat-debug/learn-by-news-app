@@ -536,11 +536,18 @@ struct NotebookView: View {
             Theme.desk.ignoresSafeArea()
             if let d = m.data { content(d) }
             else if let e = m.err { ErrorText(message: e).padding() }
+            else {
+                // 서버 응답을 기다리는 동안 빈 화면이 아니라 "불러오는 중"을 보인다(연결은 있어도 느린 망에서 빈 화면으로 보이던 사고, 2026-11-15)
+                VStack(spacing: 12) {
+                    ProgressView().tint(Theme.pencil)
+                    Text("공책을 불러오는 중…").font(Theme.hand(20)).foregroundStyle(Theme.pencil)
+                }
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.desk, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .principal) { Text(m.data?.title ?? "").font(Theme.hand(22)).lineLimit(1) }
+            ToolbarItem(placement: .principal) { Text(m.data?.title ?? Cache.shared.articleTitle(articleId) ?? "").font(Theme.hand(22)).lineLimit(1) }
         }
         .background {
             // 하드웨어 키보드 Esc: 다시 쓰기 취소, 아니면 마지막 채점 문장의 참고 번역 접기/펼치기 (웹과 동일)

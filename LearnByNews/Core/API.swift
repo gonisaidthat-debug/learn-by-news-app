@@ -50,6 +50,8 @@ final class API {
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(Self.authHeader(), forHTTPHeaderField: "Authorization")
+        // 읽기(GET)는 DB 조회만이라 20초면 충분하다. 연결은 있어도 인터넷이 안 되는 상태에서 120초를 기다리면 화면이 빈 채로 멈춘다 → 빨리 네트워크 오류로 끝내 캐시로 넘어간다(2026-11-15)
+        if method == "GET" { req.timeoutInterval = 20 }
         if let body { req.httpBody = try JSONEncoder.api.encode(body) }
         let t0 = Date()
         let data: Data, http: HTTPURLResponse

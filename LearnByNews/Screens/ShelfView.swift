@@ -247,6 +247,7 @@ struct ShelfView: View {
             // 아직 서버에 못 보낸(임시 id) 공책은 캐시에서 덧붙인다
             if let temps = Cache.shared.articles()?.filter({ SyncManager.isTemp($0.id) }), !temps.isEmpty { live.insert(contentsOf: temps, at: 0) }
             list = live
+            Cache.shared.syncPassProgress(live)   // 오프라인에서 열 때 "n회차 진행 중"이 맞도록 기기 캐시를 서버와 맞춘다
         }
         catch let e as APIError where e.isNetwork && !list.isEmpty { offline = true; err = nil }
         catch { err = error.localizedDescription }
