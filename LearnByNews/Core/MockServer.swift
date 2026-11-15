@@ -482,6 +482,8 @@ struct MockState {
             guard let b = bookmark, let s = sentences.first(where: { $0["id"] as? String == b["sentence_id"] as? String }) else { return (200, NSNull()) }
             let a = articles.first { $0["id"] as? String == b["article_id"] as? String }
             var o = b; o["article_title"] = a?["title"] ?? ""; o["sentence_idx"] = s["idx"]!; o["sentence_text"] = s["text"]!
+            let aid = b["article_id"] as? String ?? ""
+            o["current_round"] = max(reviews.filter { $0["article_id"] as? String == aid }.count + (passes[aid] != nil ? 1 : 0), 1)
             return (200, o)
         case "PUT /api/bookmark":
             bookmark = ["article_id": body["article_id"] ?? "", "sentence_id": body["sentence_id"] ?? "", "round": body["round"] ?? NSNull(), "created_at": Date().ms]

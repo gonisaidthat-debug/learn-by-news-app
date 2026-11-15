@@ -51,9 +51,9 @@ final class NotebookModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self, self.open == sid, self.bookmark?.sentenceId != sid else { return }
             let s = self.data?.sentences.first { $0.id == sid }
-            self.bookmark = Bookmark(articleId: self.id, sentenceId: sid, round: self.roundShown, createdAt: Date().ms, articleTitle: self.data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            self.bookmark = Bookmark(articleId: self.id, sentenceId: sid, round: self.bookmarkRound, currentRound: self.currentRound, createdAt: Date().ms, articleTitle: self.data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
             Cache.shared.setBookmark(self.bookmark)
-            await SyncManager.shared.setBookmark(articleId: self.id, sentenceId: sid, round: self.roundShown)
+            await SyncManager.shared.setBookmark(articleId: self.id, sentenceId: sid, round: self.bookmarkRound)
         }
     }
     @Published var lastGraded: String?
@@ -209,7 +209,12 @@ final class NotebookModel: ObservableObject {
         do { bookmark = try await API.shared.bookmark(); Cache.shared.setBookmark(bookmark) } catch { /* 오프라인: 캐시 */ }
     }
 
-    /// 책갈피 꽂기/빼기 (서버에 하나). 회차 열람 중이면 round도
+    /// 지금 회차 = 총평 수 + 다시 쓰기 진행 중이면 1 (최소 1)
+    var currentRound: Int { max((data?.reviews.count ?? 0) + (passMode ? 1 : 0), 1) }
+    /// 꽂을 때 적는 회차(항상): 회차 열람 중 그 회차, 다시 쓰기 중 총평 수+1, 1회차 공부 중 1, 끝난 공책 열람은 총평 수
+    var bookmarkRound: Int { roundShown ?? currentRound }
+
+    /// 책갈피 꽂기/빼기 (서버에 하나). round는 항상 적는다
     func toggleBookmark(_ sid: String) async {
         if bookmark?.sentenceId == sid {
             bookmark = nil; Cache.shared.setBookmark(nil)
@@ -217,10 +222,10 @@ final class NotebookModel: ObservableObject {
             AppLog.shared.info("bookmark", "cleared")
         } else {
             let s = data?.sentences.first { $0.id == sid }
-            bookmark = Bookmark(articleId: id, sentenceId: sid, round: roundShown, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            bookmark = Bookmark(articleId: id, sentenceId: sid, round: bookmarkRound, currentRound: currentRound, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
             Cache.shared.setBookmark(bookmark)
-            await SyncManager.shared.setBookmark(articleId: id, sentenceId: sid, round: roundShown)
-            AppLog.shared.info("bookmark", "set", ["sentence": sid, "round": "\(roundShown ?? 0)"])
+            await SyncManager.shared.setBookmark(articleId: id, sentenceId: sid, round: bookmarkRound)
+            AppLog.shared.info("bookmark", "set", ["sentence": sid, "round": "\(bookmarkRound)"])
         }
     }
 

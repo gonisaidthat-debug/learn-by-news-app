@@ -397,18 +397,20 @@ struct SessionStartState: Codable, Hashable { var startedAt: Int64 }
 struct Bookmark: Codable, Hashable {
     var articleId: String
     var sentenceId: String
-    var round: Int?
+    var round: Int?           // 꽂을 때의 회차(항상 적는다, 2026-11-15). null은 옛 책갈피 → 지금 회차로 본다
+    var currentRound: Int?    // 그 공책의 지금 회차 = 총평 수 + 다시 쓰기 진행 중이면 1 (최소 1). GET /api/bookmark
     var createdAt: Int64?
     var articleTitle: String?
     var sentenceIdx: Int?
     var sentenceText: String?
 
-    /// "🔖 책갈피 · 기사 · n번째 문장 · (회차)"
-    var line: String {
-        var s = "🔖 책갈피 · \(articleTitle ?? "") · \((sentenceIdx ?? 0) + 1)번째 문장"
-        if let r = round { s += " · \(r)회차" }
-        return s
-    }
+    /// 띠에 보이는 회차. round가 없으면 지금 회차
+    var shownRound: Int { round ?? currentRound ?? 1 }
+    /// 지난 회차를 가리키는가 → 그 회차 열람으로 연다. 아니면 지금 공책
+    var isPastRound: Bool { if let r = round, let c = currentRound { return r < c }; return false }
+
+    /// "🔖 책갈피 · 기사 · n번째 문장 · n회차"
+    var line: String { "🔖 책갈피 · \(articleTitle ?? "") · \((sentenceIdx ?? 0) + 1)번째 문장 · \(shownRound)회차" }
 }
 
 // MARK: - 형광펜
@@ -622,5 +624,5 @@ struct ExportPayload: Decodable {
     var highlights: [Highlight]?
     var bookmark: BookmarkRow?
     var drills: [Drill]?          // 푼 것만, answered_at 기준 증분
-    struct BookmarkRow: Decodable { var articleId: String; var sentenceId: String; var round: Int?; var createdAt: Int64? }
+    struct BookmarkRow: Decodable { var articleId: String; var sentenceId: String; var round: Int?; var currentRound: Int?; var createdAt: Int64? }
 }

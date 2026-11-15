@@ -135,8 +135,9 @@ import SwiftData
     var articleId: String
     var sentenceId: String
     var round: Int?
+    var currentRound: Int?
     var createdAt: Int64
-    init(articleId: String, sentenceId: String, round: Int?, createdAt: Int64) { id = "main"; self.articleId = articleId; self.sentenceId = sentenceId; self.round = round; self.createdAt = createdAt }
+    init(articleId: String, sentenceId: String, round: Int?, currentRound: Int? = nil, createdAt: Int64) { id = "main"; self.articleId = articleId; self.sentenceId = sentenceId; self.round = round; self.currentRound = currentRound; self.createdAt = createdAt }
 }
 
 /// 오프라인 큐. 연결되면 순서대로 보낸다
@@ -219,7 +220,7 @@ final class Cache {
         for h in x.highlights ?? [] { ctx.insert(CachedHighlight(h)) }
         // 책갈피는 항상 전체(하나)
         deleteAll(CachedBookmark.self)
-        if let b = x.bookmark { ctx.insert(CachedBookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, createdAt: b.createdAt ?? 0)) }
+        if let b = x.bookmark { ctx.insert(CachedBookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, currentRound: b.currentRound, createdAt: b.createdAt ?? 0)) }
         for a in x.articles { ctx.insert(CachedArticle(id: a.id, title: a.title, source: a.source ?? "", createdAt: a.createdAt)) }
         for s in x.sentences { ctx.insert(CachedSentence(id: s.id, articleId: s.articleId, idx: s.idx, paragraph: s.paragraph ?? 0, text: s.text)) }
         for a in x.attempts {
@@ -291,11 +292,17 @@ final class Cache {
         guard let b = all(CachedBookmark.self).first else { return nil }
         let s = all(CachedSentence.self).first { $0.id == b.sentenceId }
         let a = all(CachedArticle.self).first { $0.id == b.articleId }
-        return Bookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, createdAt: b.createdAt, articleTitle: a?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+        return Bookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, currentRound: b.currentRound ?? currentRound(of: b.articleId), createdAt: b.createdAt, articleTitle: a?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+    }
+    /// 공책의 지금 회차(서버 current_round와 같은 규칙): 총평 수 + 다시 쓰기 진행 중이면 1, 최소 1
+    func currentRound(of articleId: String) -> Int {
+        let reviews = all(CachedReview.self).filter { $0.articleId == articleId }.count
+        let inPass = RedoProgress.load(articleId).map { !$0.remaining.isEmpty } ?? false
+        return max(reviews + (inPass ? 1 : 0), 1)
     }
     func setBookmark(_ b: Bookmark?) {
         deleteAll(CachedBookmark.self)
-        if let b { ctx.insert(CachedBookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, createdAt: b.createdAt ?? Date().ms)) }
+        if let b { ctx.insert(CachedBookmark(articleId: b.articleId, sentenceId: b.sentenceId, round: b.round, currentRound: b.currentRound, createdAt: b.createdAt ?? Date().ms)) }
         try? ctx.save()
     }
 

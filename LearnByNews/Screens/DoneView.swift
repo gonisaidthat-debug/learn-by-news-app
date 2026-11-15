@@ -19,15 +19,18 @@ final class DoneModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self, self.open == sid, self.bookmark?.sentenceId != sid else { return }
             let s = self.data?.sentences.first { $0.id == sid }
-            self.bookmark = Bookmark(articleId: self.id, sentenceId: sid, round: nil, createdAt: Date().ms, articleTitle: self.data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            self.bookmark = Bookmark(articleId: self.id, sentenceId: sid, round: self.bookmarkRound, currentRound: self.currentRound, createdAt: Date().ms, articleTitle: self.data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
             Cache.shared.setBookmark(self.bookmark)
-            await SyncManager.shared.setBookmark(articleId: self.id, sentenceId: sid, round: nil)
+            await SyncManager.shared.setBookmark(articleId: self.id, sentenceId: sid, round: self.bookmarkRound)
         }
     }
     @Published var reviewing = false
     @Published var reviewErr: String?
     @Published var showOld = false
     @Published var bookmark: Bookmark?
+    /// 마지막 장에서 꽂는 책갈피의 회차 = 총평 수(최소 1). 지금 회차는 다시 쓰기 진행 중이면 +1
+    var bookmarkRound: Int { max(data?.reviews.count ?? 0, 1) }
+    var currentRound: Int { max((data?.reviews.count ?? 0) + (progress.map { !$0.remaining.isEmpty } ?? false ? 1 : 0), 1) }
     @Published var progress: RedoProgress?     // 저장된 다시 쓰기 진행 상태
     @Published var estimated: Int?             // 저장이 없을 때 추정한 "오늘 다시 쓴 앞쪽 문장 수"
     private var autoTried = false
@@ -177,9 +180,9 @@ final class DoneModel: ObservableObject {
         if bookmark?.sentenceId == sid { bookmark = nil; Cache.shared.setBookmark(nil); await SyncManager.shared.clearBookmark() }
         else {
             let s = data?.sentences.first { $0.id == sid }
-            bookmark = Bookmark(articleId: id, sentenceId: sid, round: nil, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
+            bookmark = Bookmark(articleId: id, sentenceId: sid, round: bookmarkRound, currentRound: currentRound, createdAt: Date().ms, articleTitle: data?.title, sentenceIdx: s?.idx, sentenceText: s?.text)
             Cache.shared.setBookmark(bookmark)
-            await SyncManager.shared.setBookmark(articleId: id, sentenceId: sid, round: nil)
+            await SyncManager.shared.setBookmark(articleId: id, sentenceId: sid, round: bookmarkRound)
         }
     }
 }

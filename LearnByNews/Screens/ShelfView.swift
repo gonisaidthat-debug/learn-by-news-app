@@ -59,7 +59,13 @@ struct ShelfView: View {
     private func bookmarkBar(_ b: Bookmark) -> some View {
         HStack(spacing: 8) {
             Button {
-                router.shelfPath = [.notebook(id: b.articleId, focus: b.sentenceId, browse: true, round: b.round)]
+                // 지난 회차면 그 회차 열람으로, 아니면 지금 공책(1회차 공부·다시 쓰기 중이면 쓰는 화면, 끝났으면 전체 열람)
+                if b.isPastRound { router.shelfPath = [.notebook(id: b.articleId, focus: b.sentenceId, browse: true, round: b.round)] }
+                else {
+                    let a = list.first { $0.id == b.articleId }
+                    let writing = a.map { !$0.isDone || $0.passDone != nil } ?? false || (RedoProgress.load(b.articleId).map { !$0.remaining.isEmpty } ?? false)
+                    router.shelfPath = [.notebook(id: b.articleId, focus: b.sentenceId, browse: !writing)]
+                }
             } label: {
                 Text(b.line + " →\u{FE0E}").font(Theme.hand(21)).foregroundStyle(Theme.ink).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
