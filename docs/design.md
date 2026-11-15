@@ -58,7 +58,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | PATCH `/api/articles/:id` | `{source?} \| {title?}` | `{ok}` |
 | DELETE `/api/articles/:id` | — | `{ok}` 기록·표현·총평까지 삭제 |
 | POST `/api/articles/:id/review` | `{score: int\|null}` (클라 계산값 보관용) | `Review` — Claude 호출, 수 초 걸림 |
-| POST `/api/sentences/:id/attempts` | `{translation}` 또는 `{skip:true}`, 선택 `attempt_id`(클라이언트 UUID, 멈추기용) | `Feedback & {translation, created_at}` `& {phrases: Phrase[]}` — **첨삭 표현은 서버가 기본으로 표현장에 저장**하고(같은 문장·같은 표현은 한 번만) 새로 저장된 것을 `phrases`로 돌려준다. 클라이언트는 이를 공책의 phrases에 합쳐 포스트잇을 "붙은" 상태로 그린다. 떼는 건 `DELETE /api/phrases/:id`(goni 결정 2026-11-10) — translation이면 Claude 호출(약 5~10초), skip은 즉시 |
+| POST `/api/sentences/:id/attempts` | `{translation}` 또는 `{skip:true}`, 선택 `attempt_id`(클라이언트 UUID, 멈추기용) | `Feedback & {translation, created_at}` `& {phrases: Phrase[]}` — **첨삭 표현은 서버가 기본으로 표현장에 저장**하고(같은 문장·같은 표현은 한 번만) 새로 저장된 것을 `phrases`로 돌려준다. 클라이언트는 이를 공책의 phrases에 합쳐 포스트잇을 "붙은" 상태로 그린다. 떼는 건 `DELETE /api/phrases/:id`(goni 결정 2026-11-10) — translation이면 Claude 호출(약 5~10초), skip은 즉시. **`written_at`(ms, 선택, 2026-11-15)**: 오프라인에서 쓴 시각. 서버가 created_at으로 쓴다(미래·30일 초과는 무시). 큐 재생 때 꼭 보낸다 |
 | DELETE `/api/attempts/:id` | — | `{ok, removed}` **멈추기**: 채점이 끝났으면 그 시도 삭제, 아직이면 묘비를 남겨 결과 도착 시 버림(그 요청은 409 `{cancelled:true}`) |
 | POST `/api/sentences/:id/merge` | `{dir:"prev"\|"next"}` | `{ok, kept, text}` 붙는 쪽 문장 줄만 삭제. 그 문장의 attempts·phrases·highlights(start/end_word += 앞 문장 단어 수)·quiz_results·drills·bookmark는 `kept`로 옮겨짐. 채점된 문장끼리도 됨 → 합친 뒤 공책을 다시 받고 `kept`에 attempt가 있으면 다시 쓰기로 연다 |
 | DELETE `/api/sentences/:id` | — | `{ok, trash_id}` — 문장·채점·표현·형광펜을 `trash`에 담고 지운다 |
@@ -74,13 +74,13 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | DELETE `/api/sessions/:id` | — | `{ok}` |
 | GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions:[Session & {drills, review}], reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` | `quiz[]`와 `drills[]`에 `article_id, title`(기사를 모르면 null: 응용 탭 문제는 표현이 나온 기사, 읽다가 쓴 것은 그 문장의 기사) 추가 (2026-11-13)
 | GET `/api/export?since=<ms>` | — | `{exported_at, since, articles, sentences, attempts(feedback 파싱됨), phrases, reviews(review 파싱됨), quiz_results, sessions(articles 파싱됨)}` 오프라인 캐시용. since가 있으면 append-only 표만 증분, articles·sentences는 항상 전체. 삭제는 전체 내보내기로만 반영 |
-| GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다 |
+| GET / PUT / DELETE `/api/bookmark` | PUT `{article_id, sentence_id, round?}` | GET → `{article_id, sentence_id, round, created_at, article_title, sentence_idx, sentence_text}` 또는 `null`. 책갈피는 **하나**(서버), 웹·앱이 같은 것을 본다. **round는 항상 적는다**(2026-11-15): 1회차 공부 중 1, 다시 쓰기 중 총평 수+1, 회차 열람 중 그 회차, 마지막 장 총평 수. GET에 `current_round`(그 공책의 지금 회차 = 총평 수 + 다시 쓰기 진행 중 1, 최소 1). 띠에 "n회차" 항상 표시, `round < current_round`면 그 회차 열람으로, 아니면 지금 공책으로. null인 옛 책갈피는 지금 회차 |
 | POST `/api/sentences/:id/ask` | `{start_word, end_word, span}` (단어 인덱스는 공백 분리 기준 0부터) | `Highlight & {phrase: Phrase|null}` — Claude가 구절을 `{meaning, why, similar}`로 설명(하루 상한 포함). 구절은 표현장에도 기본으로 붙는다 |
 | DELETE `/api/highlights/:id` | — | `{ok}` |
 | POST `/api/sentences/:id/memo` | `{start_word, end_word, span, note, links?: {to_kind, to_id}[]}` | `Highlight & {phrase, links, backlinks: []}` — Claude 없이 내 메모만 붙인다(answer 빈 값, note에 메모). 표현장에 메모를 뜻으로 붙는다. `links`는 메모와 함께 엮을 대상(최대 20, 틀린 건 건너뜀). 오프라인 큐 가능 |
 | PATCH `/api/highlights/:id` | `{note}` | `{ok, note}` 기존 형광펜에 내 메모 넣기·고치기(빈 문자열이면 지움). 오프라인 큐 가능 |
 | POST `/api/drills/next` | `{phrase_id?}` | `Drill`(reference 없음). 안 푼 최근 문제가 있으면 그걸 다시 준다. 없으면 표현장에서 골라 Claude가 한국어 문장을 만든다(호출 1) |
-| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}` |
+| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}`. **`answered_at`(ms, 선택, 2026-11-15)**: 오프라인에서 쓴 시각, 큐 재생 때 보낸다 |
 | DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
 | GET `/api/drills?days=30` | — | 푼 문제 목록 최신순 |
 | POST `/api/drills/batch` | `{count}` 1~30 | `{drills: Drill[], made}` 안 푼 문제를 count개까지 채워 전부(오프라인용 미리 받기) |
