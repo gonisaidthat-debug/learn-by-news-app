@@ -160,7 +160,7 @@ final class API {
     func putPass(_ articleId: String, done: [String]) async throws { let _: OK = try await send("PUT", "/api/articles/\(articleId)/pass", body: PassBody(done: done)) }
     func deletePass(_ articleId: String) async throws { let _: OK = try await send("DELETE", "/api/articles/\(articleId)/pass") }
     func sessionStart() async throws -> SessionStartState? { let r: SessionStartState? = try await send("GET", "/api/session-start"); return r }
-    /// 응답은 `{started_at}` (2026-11-15부터. 예전 `{ok}`로 읽다가 디코드 실패를 거절로 오인해 시작점을 지운 사고)
+    /// 응답은 `{started_at}` (서버는 처음부터 이 형식. 앱·모의 서버가 `{ok}`로 잘못 맞춰져 있어 디코드 실패가 났고, c012d1c부터 그 실패를 거절로 오인해 시작점을 지웠다, 2026-11-15 수정)
     func putSessionStart(_ startedAt: Int64) async throws { let _: SessionStartState = try await send("PUT", "/api/session-start", body: SessionStartState(startedAt: startedAt)) }
     func deleteSessionStart() async throws { let _: OK = try await send("DELETE", "/api/session-start") }
 
