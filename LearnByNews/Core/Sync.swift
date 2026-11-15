@@ -45,6 +45,11 @@ final class SyncManager: ObservableObject {
     @Published private(set) var pendingCount = Cache.shared.pendingCount
     @Published private(set) var pendingAttempts = Cache.shared.pending(kind: "attempt").count
     private var flushing = false
+    /// 진행 중인 큐 전송이 끝날 때까지 기다린 뒤, 남은 것도 보낸다(세션 닫기 전에 채점 대기분을 먼저 보내려고)
+    func flushAndWait() async {
+        while flushing { try? await Task.sleep(nanoseconds: 300_000_000) }
+        await flushQueue()
+    }
 
     /// 오프라인에서 만든 임시 id → 서버 id (공책·문장). 전송 도중 끊겨도 이어지도록 UserDefaults에
     private var idMap: [String: String] {
@@ -192,7 +197,7 @@ final class SyncManager: ObservableObject {
             } catch {
                 AppLog.shared.error("queue", "dropped \(op.kind): \(error.localizedDescription)")
                 if op.kind == "drill_answer", let b = try? JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload) { DrillStore.shared.dropPending(b.id) }
-                if op.kind == "session_start_put" { SessionModel.shared.serverRejectedStart(error.localizedDescription) }  // 400 거절: 재시도 금지, 로컬 시작점도 지운다
+                if op.kind == "session_start_put", case APIError.server = error { SessionModel.shared.serverRejectedStart(error.localizedDescription) }  // 400 거절: 재시도 금지, 로컬 시작점도 지운다 (다른 오류는 로컬 유지)
                 if op.kind == "attempt", let b = try? JSONDecoder.api.decode(AttemptOp.self, from: op.payload) {
                     NotificationCenter.default.post(name: .lbnAttemptGraded, object: nil, userInfo: ["attemptId": b.attemptId, "sentenceId": b.sentenceId, "error": error.localizedDescription])
                 }
@@ -395,7 +400,12 @@ final class SyncManager: ObservableObject {
         if Connectivity.shared.isOnline {
             do { try await API.shared.putSessionStart(t); return }
             catch let e as APIError where e.isNetwork { /* 큐로 */ }
-            catch { SessionModel.shared.serverRejectedStart(error.localizedDescription); return }  // 400: 서버가 진실, 로컬도 지운다
+            catch {
+                // 400(서버 거절)일 때만 로컬 시작점을 지운다. 디코드 오류 등은 서버에 들어갔을 수 있으니 로컬은 둔다
+                if case APIError.server = error { SessionModel.shared.serverRejectedStart(error.localizedDescription) }
+                else { AppLog.shared.warn("sync", "session_start_put failed, keeping local: \(error.localizedDescription)") }
+                return
+            }
         }
         Cache.shared.enqueue("session_start_put", SessionStartState(startedAt: t)); refreshCounts()
     }

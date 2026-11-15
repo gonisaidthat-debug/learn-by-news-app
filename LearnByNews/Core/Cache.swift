@@ -544,14 +544,17 @@ final class Cache {
     func closeSessionLocally(startedAt: Int64) -> StudySession? {
         let atts = all(CachedAttempt.self).filter { $0.createdAt >= startedAt }
         let drs = all(CachedDrill.self).filter { $0.answeredAt >= startedAt }
-        guard !atts.isEmpty || !drs.isEmpty else { return nil }
+        // 채점 대기(큐)도 센다: 채점이 안 끝나도 세션은 닫을 수 있다(goni 2026-11-15). 점수는 채점된 것만, 연결되면 서버가 다시 계산
+        let pendAtt = pending(kind: "attempt").compactMap { try? JSONDecoder.api.decode(SyncManager.AttemptOp.self, from: $0.payload) }.filter { $0.createdAt >= startedAt }
+        let pendDr = pending(kind: "drill_answer").compactMap { try? JSONDecoder.api.decode(SyncManager.DrillAnswerOp.self, from: $0.payload) }.filter { $0.answeredAtLocal >= startedAt }
+        guard !atts.isEmpty || !drs.isEmpty || !pendAtt.isEmpty || !pendDr.isEmpty else { return nil }
         let grades = atts.compactMap { Grade(rawValue: $0.grade) }.filter { $0 != .skip } + drs.compactMap { Grade(rawValue: $0.grade) }
         let pts = grades.compactMap { Grade.points[$0] }
         let score = pts.isEmpty ? nil : Int((Double(pts.reduce(0, +)) / Double(pts.count)).rounded())
         let arts = Dictionary(uniqueKeysWithValues: all(CachedArticle.self).map { ($0.id, $0.title) })
-        let titles = Array(Set(atts.map(\.articleId))).compactMap { arts[$0] }
-        let ended = max(atts.map(\.createdAt).max() ?? 0, drs.map(\.answeredAt).max() ?? 0)
-        let s = StudySession(id: "local-" + UUID().uuidString.lowercased(), startedAt: startedAt, endedAt: ended, attempts: atts.count + drs.count, score: score, articles: titles, createdAt: Date().ms, drills: drs.count)
+        let titles = Array(Set(atts.map(\.articleId) + pendAtt.map(\.articleId))).compactMap { arts[$0] }
+        let ended = [atts.map(\.createdAt).max(), drs.map(\.answeredAt).max(), pendAtt.map(\.createdAt).max(), pendDr.map(\.answeredAtLocal).max()].compactMap { $0 }.max() ?? startedAt
+        let s = StudySession(id: "local-" + UUID().uuidString.lowercased(), startedAt: startedAt, endedAt: ended, attempts: atts.count + drs.count + pendAtt.count + pendDr.count, score: score, articles: titles, createdAt: Date().ms, drills: drs.count + pendDr.count)
         ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills)); try? ctx.save()
         return s
     }

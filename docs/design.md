@@ -86,7 +86,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/drills/batch` | `{count}` 1~30 | `{drills: Drill[], made}` 안 푼 문제를 count개까지 채워 전부(오프라인용 미리 받기) |
 | POST `/api/drills/free` | `{phrase, meaning?, phrase_id?, sentence_id?, answer}` | `Drill`(kind "free", feedback·reference 포함) — 한국어 원문 없이 표현을 써서 지은 내 문장을 채점(호출 1). 오프라인이면 큐(drill_free) |
 | GET / PUT / DELETE `/api/articles/:id/pass` | PUT `{done: string[]}` | GET → `{done, updated_at}|null`. **다시 쓰기 진행 상태는 서버가 진실**. 제출마다 PUT, 완료·중단 시 DELETE. UserDefaults는 캐시(오프라인 큐로 지연 전송 가능). 서버가 null이면 기기 저장(RedoProgress)도 지운다, 이관하지 않는다 (2026-11-15) |
-| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. **공부 세션 시작점도 서버에 하나**. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다, 2026-11-13). PUT은 이미 기록된 세션의 `started_at` 이하 값을 400으로 거절 |
+| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. PUT → `{started_at}` (앱은 이 형식으로 읽는다. 400만 "거절"로 보고 로컬 시작점을 지운다, 2026-11-15). **공부 세션 시작점도 서버에 하나**. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다, 2026-11-13). PUT은 이미 기록된 세션의 `started_at` 이하 값을 400으로 거절 |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
@@ -149,4 +149,5 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - 큐 대상: 번역/건너뛰기, 다시 쓰기 진행(`PUT /api/articles/:id/pass`), 공부 시작점(`/api/session-start`), 책갈피, 포스트잇, 시험 결과. 가능하면 새 공책 만들기·합치기·제거·링크 수정도 큐(로컬 임시 id → 서버 id 교체).
 - 온라인 전용(안내만): 총평, 형광펜 묻기, 응용. 폴백 없음.
 - 쓴 시각: 큐 재생 때 번역은 `written_at`, 응용 답은 `answered_at`(둘 다 ms)을 보내 서버가 그 시각을 created_at/answered_at으로 쓴다(2026-11-15). 큐는 넣은 순서(attempt들 → session_close)로 보내 오프라인에서 닫은 세션의 범위·기록 날짜가 맞는다. 설정 > 오프라인에 "대기 중 채점 n개" 표시. 서버가 진실, 충돌은 서버 우선.
+- 닫기: 채점 대기(큐)가 있어도 "오늘 여기까지"를 누를 수 있다(goni 2026-11-15). 오프라인이면 캐시 + 대기분을 세어 임시 세션(점수는 채점된 것만), 연결되면 큐 순서(attempt들 → session_close)대로 서버가 다시 계산·총평. 온라인인데 대기가 남아 있으면 먼저 보내고 닫는다. 지금 채점 중(요청 진행 중)인 것만 잠깐 막는다.
 - 진입: 저장된 비밀번호가 있으면 Face ID 뒤 서버 확인을 기다리지 않고 바로 홈(캐시)으로 들어간다. `GET /api/auth`는 뒤에서 하고 401일 때만 로그인 화면으로(네트워크 오류는 무시). 책갈피 띠는 캐시의 `current_round`가 없으면 로컬(총평 수 + 다시 쓰기 진행)로 센다.

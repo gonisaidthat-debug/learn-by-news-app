@@ -372,7 +372,7 @@ struct MockState {
             if let last = sessions.compactMap({ ($0["started_at"] as? NSNumber)?.int64Value }).max(), t <= last {
                 return (400, ["error": "이미 기록된 세션보다 앞선 시작점입니다"])
             }
-            sessionStart = t; return (200, ["ok": true])
+            sessionStart = t; return (200, ["started_at": t])
         case "DELETE /api/session-start":
             sessionStart = nil; return (200, ["ok": true])
         case "POST /api/drills/next":

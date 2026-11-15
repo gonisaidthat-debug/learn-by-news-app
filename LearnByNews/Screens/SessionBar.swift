@@ -81,16 +81,23 @@ final class SessionModel: ObservableObject {
         busy = true; msg = nil
         do {
             let s: StudySession
-            if Connectivity.shared.isOnline {
+            var queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+            if Connectivity.shared.isOnline, queued > 0 {
+                // 온라인인데 채점 대기가 남아 있으면(막 연결됨) 먼저 보내고 닫아야 세션에 들어간다
+                msg = "채점 대기 \(queued)개를 먼저 보낸다…"
+                await SyncManager.shared.flushAndWait()
+                queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+            }
+            if Connectivity.shared.isOnline, queued == 0 {
                 s = try await API.shared.closeSession(startedAt: start)
             } else {
-                // 오프라인: 캐시로 번역+응용을 세어 임시 세션, 연결되면 서버에 기록
-                guard let local = Cache.shared.closeSessionLocally(startedAt: start) else { msg = "시작 이후 채점한 문장이 없습니다"; busy = false; return }
+                // 오프라인(또는 아직 못 보낸 채점 대기가 있음): 캐시+대기분을 세어 임시 세션, 연결되면 서버에 기록(총평 포함)
+                guard let local = Cache.shared.closeSessionLocally(startedAt: start) else { msg = "시작 이후 쓴 문장이 없습니다"; busy = false; return }
                 Cache.shared.enqueue("session_close", SessionStartState(startedAt: start)); s = local
             }
             SessionStore.start = nil; self.start = nil
             await SyncManager.shared.deleteSessionStart()
-            msg = "기록했다 · \(s.line)"
+            msg = "기록했다 · \(s.line)" + (s.id.hasPrefix("local-") && queued > 0 ? " · 채점 대기 \(queued)개" : "")
             closed = s
             sessions.insert(s, at: 0)
             AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
@@ -123,7 +130,7 @@ struct SessionBar: View {
                         Tiny(title: model.busy ? "총평 쓰는 중… ✎\u{FE0E}" : "오늘 여기까지 ✂\u{FE0E}", color: Theme.red) { Task { await model.close() } }
                             .disabled(model.busy || waiting > 0)
                             .opacity(model.busy || waiting > 0 ? 0.45 : 1)
-                        if waiting > 0 { MutedText(text: "채점이 끝나면 누를 수 있다") }
+                        if waiting > 0 { MutedText(text: "채점이 끝나면 누를 수 있다") }   // 지금 채점 중(온라인)인 것만. 채점 대기(큐)는 막지 않는다
                         Tiny(title: "버리기") { confirmDiscard = true }
                     } else if !hideStart {
                         Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red) { model.begin() }

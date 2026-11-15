@@ -652,7 +652,7 @@ struct NotebookView: View {
                             inputBlock(cur)
                         }
                         foot(d, waiting: waiting)
-                        SessionBar(model: session, waiting: waiting, hideStart: true)
+                        SessionBar(model: session, waiting: m.inflight.values.filter { !$0.pending }.count, hideStart: true)   // 채점 대기(큐)는 닫기를 막지 않는다
                             .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
                     }
                 }
