@@ -352,6 +352,34 @@ final class NotebookModel: ObservableObject {
         catch { err = error.localizedDescription }
     }
 
+    /// "잘못 눌렀다 ✗"(goni 2026-11-16): 지금 번역(가장 최근 시도)을 무효로 표시(PUT /api/attempts/:id/void) → 공책 다시 읽기 → 그 문장을 바로 다시 쓴다.
+    /// 유효 시도가 하나도 안 남으면 평소 흐름(앞에서부터 안 쓴 첫 문장)이 그 문장부터 이어 쓴다. 다시 쓰기 진행 중이면 done에서 빼고 PUT pass
+    func voidAttempt(_ s: Sentence) async {
+        guard let aid = s.attempt?.id else { err = "아직 서버에 없는 시도라 표시할 수 없다 (연결되면 다시)"; return }
+        err = nil
+        do { try await SyncManager.shared.voidAttempt(aid, void: true) } catch { err = error.localizedDescription; return }
+        AppLog.shared.info("notebook", "void attempt", ["sentence": s.id, "attempt": aid])
+        await reload()
+        if let pass {
+            passSubmitted.remove(s.id)
+            let done = pass.filter(passSubmitted.contains)
+            RedoProgress(ids: pass, done: done).save(id)
+            Task { await SyncManager.shared.putPass(id, done: done) }
+            redo = s.id
+        } else {
+            redo = data?.sentences.first { $0.id == s.id }?.attempt != nil ? s.id : nil
+        }
+        open = nil; input = ""; requestScroll(s.id); focusRequest += 1
+    }
+    /// 무효 시도 되살리기 (void:false). 서버가 다시 집계하고 공책을 다시 읽는다
+    func restoreAttempt(_ a: Attempt) async {
+        guard let aid = a.id else { return }
+        err = nil
+        do { try await SyncManager.shared.voidAttempt(aid, void: false) } catch { err = error.localizedDescription; return }
+        AppLog.shared.info("notebook", "restore attempt", ["attempt": aid])
+        await reload()
+    }
+
     /// 다시 쓰기 진행 중에 합친 뒤(goni 2026-11-16): 없어진 문장은 진행 목록에서 빼고, 합쳐진(kept) 문장은 이번 회차에 다시 쓴다(done에서 제거, 바로 입력란). PUT /api/articles/:id/pass
     private func passAfterMerge(kept: String) {
         guard pass != nil, let d = data else { return }
@@ -584,6 +612,9 @@ struct NotebookView: View {
             #if DEBUG
             // 화면 확인용: LBN_AUTOREMOVE=<문장 id> 이면 그 문장을 빼서 되살리기 줄을 보여준다
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOREMOVE"], m.data?.sentences.contains(where: { $0.id == sid }) == true { _ = await m.remove(sid) }
+            // 화면 확인용: LBN_AUTOOPEN=<문장 id> 이면 그 항목을 펼친다. LBN_AUTOVOID=<문장 id> 이면 그 문장의 지금 번역을 "잘못 눌렀다"로 표시한 뒤 입력을 접고 항목을 펼친다
+            if let sid = ProcessInfo.processInfo.environment["LBN_AUTOOPEN"] { m.open = sid; m.requestScroll(sid) }
+            if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
             if let dir = ProcessInfo.processInfo.environment["LBN_AUTOMERGE"], let cur = m.current { await m.merge(cur.id, dir: dir) }
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
@@ -768,6 +799,8 @@ struct NotebookView: View {
                 onTogglePhrase: { e in Task { await m.togglePhrase(x.id, e) } },
                 onRemove: m.browse ? nil : { toRemove = x },
                 onRedo: m.browse ? nil : { m.startRedo(x); focused = true },
+                onVoid: m.browse || x.attempt?.id == nil ? nil : { Task { await m.voidAttempt(x) } },
+                onRestore: m.browse ? nil : { a in Task { await m.restoreAttempt(a) } },
                 onMergePrev: mergeTarget(x, d: d, dir: "prev"),
                 onMergeNext: mergeTarget(x, d: d, dir: "next"),
                 highlight: focusId == x.id,

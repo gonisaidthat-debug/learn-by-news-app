@@ -32,6 +32,7 @@ func markSource(_ text: String, _ source: String) -> AttributedString {
 /// 이전 시도 한 줄: 작은 도장 + 연필로 줄 그은 글씨 + 시각. 누르면 그때의 첨삭이 펼쳐진다
 struct HistoryLine: View {
     var attempt: Attempt
+    var onRestore: (() -> Void)? = nil   // void("잘못 누름")인 시도의 되살리기
     @State private var open = false
 
     private var when: String {
@@ -47,9 +48,17 @@ struct HistoryLine: View {
                     Text(attempt.translation.isEmpty ? "건너뜀" : attempt.translation)
                         .strikethrough(true, color: Theme.pencil)
                         .pencil()
+                    if attempt.isVoid {
+                        // "잘못 눌렀다"로 무효 처리된 시도: 흐리게 + 빨간 테두리 표시 + 되살리기
+                        Text("잘못 누름").font(Theme.hand(15)).foregroundStyle(Theme.red)
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.red, lineWidth: 1))
+                        if let onRestore { Tiny(title: "되살리기", size: 17, action: onRestore) }
+                    }
                     Spacer(minLength: 6)
                     Text(when).font(Theme.hand(15)).foregroundStyle(Theme.pencil).opacity(0.8).fixedSize()
                 }
+                .opacity(attempt.isVoid ? 0.55 : 1)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -85,6 +94,10 @@ struct EntryView: View {
     var onTogglePhrase: (Expression) -> Void
     var onRemove: (() -> Void)?
     var onRedo: (() -> Void)?
+    /// "잘못 눌렀다 ✗": 지금 번역(가장 최근 시도)을 무효로 표시하고 그 문장을 바로 다시 쓴다 (goni 2026-11-16). 다시 쓰기와 달리 집계에서도 빠진다
+    var onVoid: (() -> Void)?
+    /// 무효 시도 되살리기
+    var onRestore: ((Attempt) -> Void)?
     /// 채점된 문장끼리 합치기 (같은 문단의 앞/뒤 문장이 있을 때만). 두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다
     var onMergePrev: (() -> Void)?
     var onMergeNext: (() -> Void)?
@@ -129,8 +142,9 @@ struct EntryView: View {
                 HStack(spacing: 10) {
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
                     if let onRedo { Tiny(title: "써 보기 ↻\u{FE0E}", action: onRedo) }
+                    if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid) }
                 }
-                ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h) }
+                ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
             } else {
                 if a.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) }
                 else { Text(markWrong(a.translation, fb.issues)).koLine() }
@@ -187,10 +201,11 @@ struct EntryView: View {
         } else {
             Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
         }
-        ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h) }
-        if onRedo != nil || onMergePrev != nil || onMergeNext != nil {
+        ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
+        if onRedo != nil || onVoid != nil || onMergePrev != nil || onMergeNext != nil {
             HStack(spacing: 16) {
                 if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo) }
+                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
                 if let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
                 if let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
             }

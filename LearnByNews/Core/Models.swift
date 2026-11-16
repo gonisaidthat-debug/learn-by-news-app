@@ -45,10 +45,26 @@ struct Feedback: Codable, Hashable {
 }
 
 struct Attempt: Codable, Hashable {
+    var id: String?            // 서버 시도 id (2026-11-16, 잘못 눌렀다/되살리기에 쓴다). 캐시의 local- id는 서버에 없다
     var translation: String
     var grade: Grade
     var feedback: Feedback
     var createdAt: Int64
+    var isVoid: Bool = false   // "잘못 눌렀다": 집계에서 빠지고 이전 시도에만 흐리게 남는다
+
+    enum CodingKeys: String, CodingKey { case id, translation, grade, feedback, createdAt, isVoid = "void" }
+    init(id: String? = nil, translation: String, grade: Grade, feedback: Feedback, createdAt: Int64, isVoid: Bool = false) {
+        self.id = id; self.translation = translation; self.grade = grade; self.feedback = feedback; self.createdAt = createdAt; self.isVoid = isVoid
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
+        translation = try c.decode(String.self, forKey: .translation)
+        grade = try c.decode(Grade.self, forKey: .grade)
+        feedback = try c.decode(Feedback.self, forKey: .feedback)
+        createdAt = try c.decode(Int64.self, forKey: .createdAt)
+        isVoid = (try? c.decodeIfPresent(Bool.self, forKey: .isVoid)) ?? false
+    }
 }
 
 struct Sentence: Codable, Identifiable, Hashable {
@@ -174,6 +190,7 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
 }
 
 struct AttemptResult: Codable {
+    var id: String?            // 서버 시도 id (잘못 눌렀다에 쓴다)
     var grade: Grade
     var issues: [Issue]
     var reference: String
@@ -184,6 +201,7 @@ struct AttemptResult: Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
         grade = try c.decode(Grade.self, forKey: .grade)
         issues = try c.decodeIfPresent([Issue].self, forKey: .issues) ?? []
         reference = try c.decodeIfPresent(String.self, forKey: .reference) ?? ""
@@ -196,7 +214,7 @@ struct AttemptResult: Codable {
     var asAttempt: Attempt {
         // Feedback은 커스텀 디코더만 있어서 JSON을 거쳐 만든다
         let fb = try! JSONDecoder.api.decode(Feedback.self, from: try! JSONEncoder.api.encode(FeedbackBody(grade: grade, issues: issues, reference: reference, expressions: expressions)))
-        return Attempt(translation: translation, grade: grade, feedback: fb, createdAt: createdAt)
+        return Attempt(id: id, translation: translation, grade: grade, feedback: fb, createdAt: createdAt)
     }
 }
 
@@ -292,6 +310,8 @@ struct LogAttempt: Codable, Identifiable, Hashable {
     var idx: Int
     var text: String
     var title: String
+    var void: Int?             // 1이면 "잘못 눌렀다" — 기록에서 통째로 뺀다 (2026-11-16)
+    var isVoid: Bool { void == 1 }
 }
 
 struct LogReview: Codable, Identifiable, Hashable {
@@ -596,7 +616,7 @@ struct Drill: Codable, Identifiable, Hashable {
 struct ExportPayload: Decodable {
     struct Article: Decodable { var id: String; var title: String; var source: String?; var createdAt: Int64 }
     struct Sentence: Decodable { var id: String; var articleId: String; var idx: Int; var paragraph: Int?; var text: String }
-    struct Attempt: Decodable { var id: String; var sentenceId: String; var articleId: String; var translation: String; var grade: Grade; var feedback: Feedback; var createdAt: Int64 }
+    struct Attempt: Decodable { var id: String; var sentenceId: String; var articleId: String; var translation: String; var grade: Grade; var feedback: Feedback; var createdAt: Int64; var void: Int? }
     struct ReviewBody: Decodable { var summary: String?; var patterns: [ReviewPattern]?; var praise: String? }
     struct Review: Decodable { var id: String; var articleId: String; var score: Int?; var review: ReviewBody; var createdAt: Int64 }
     struct QuizResult: Decodable {

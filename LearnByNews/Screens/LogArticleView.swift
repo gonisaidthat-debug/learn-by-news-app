@@ -3,7 +3,8 @@ import SwiftUI
 // 기록 탭 "기사" 보기: 날짜가 아니라 문장들이 회차를 거듭하며 어떻게 변해 가는지 (goni 2026-11-16, 웹 Log.tsx runs()/rounds()와 같은 규칙)
 
 /// 한 문장의 흐름. 회차 = n번째 총평 시각 기준(공책의 회차 열람과 같은 기준): 1회차는 첫 총평까지, 마지막 총평 뒤는 진행 중인 회차.
-/// stages = 회차마다 그 회차의 마지막 번역 하나(도장 사슬), attempts = 그 문장의 모든 시도(펼치면 보인다). 건너뛴 시도는 빼고 센다
+/// stages = 회차마다 그 회차의 **첫** 번역 하나(도장 사슬·분포; 같은 회차 안의 다시 쓰기는 첨삭 직후라 실력 변화로 안 친다, goni 2026-11-16), attempts = 그 문장의 모든 시도(펼치면 보인다).
+/// 건너뛴 시도와 "잘못 눌렀다"(void) 시도는 빼고 센다
 struct SentenceRun: Identifiable {
     enum Dir { case up, down, same, once }
     struct Stage { var round: Int; var attempt: LogAttempt }
@@ -18,7 +19,7 @@ struct SentenceRun: Identifiable {
     var last: LogAttempt? { attempts.last }
 }
 
-/// 회차별 등급 분포: 각 문장의 그 회차 마지막 번역으로 센다
+/// 회차별 등급 분포: 각 문장의 그 회차 첫 번역으로 센다
 struct RoundStat: Identifiable {
     var n: Int
     var live: Bool          // 마지막 총평 뒤 = 진행 중
@@ -33,11 +34,11 @@ enum LogRuns {
         let bounds = reviews.map(\.createdAt).sorted()
         func roundOf(_ t: Int64) -> Int { 1 + bounds.filter { $0 < t }.count }
         var map: [String: SentenceRun] = [:]
-        for a in attempts.sorted(by: { $0.createdAt < $1.createdAt }) where Grade.points[a.grade] != nil {
+        for a in attempts.sorted(by: { $0.createdAt < $1.createdAt }) where Grade.points[a.grade] != nil && !a.isVoid {
             var r = map[a.sentenceId] ?? SentenceRun(sentenceId: a.sentenceId, idx: a.idx, text: a.text)
             r.attempts.append(a)
             let rn = roundOf(a.createdAt)
-            if let i = r.stages.indices.last, r.stages[i].round == rn { r.stages[i].attempt = a } else { r.stages.append(.init(round: rn, attempt: a)) }
+            if r.stages.last?.round != rn { r.stages.append(.init(round: rn, attempt: a)) }   // 회차의 첫 시도만
             map[a.sentenceId] = r
         }
         return map.values.map { r0 in
@@ -110,7 +111,7 @@ struct LogArticleSection: View {
                     let up = multi.filter { $0.dir == .up }.count, down = multi.filter { $0.dir == .down }.count, same = multi.filter { $0.dir == .same }.count
                     (Text("회차를 거듭 쓴 \(multi.count)문장 중 ") + Text("↑").foregroundColor(LogRuns.color(.up)) + Text(" 올라갔다 \(up) · ") + Text("↓").foregroundColor(LogRuns.color(.down)) + Text(" 내려갔다 \(down) · ") + Text("=").foregroundColor(LogRuns.color(.same)) + Text(" 그대로 \(same)"))
                         .font(Theme.hand(19)).foregroundStyle(Theme.pencil).fixedSize(horizontal: false, vertical: true)
-                    Text("줄을 누르면 시도마다 쓴 번역이 보인다").font(Theme.hand(17)).foregroundStyle(Theme.placeholder).frame(height: Theme.lh)
+                    Text("회차마다 처음 쓴 것으로 센다 · 줄을 누르면 시도마다 쓴 번역이 보인다").font(Theme.hand(17)).foregroundStyle(Theme.placeholder).lineLimit(1).frame(height: Theme.lh)
                 }
             }
         }

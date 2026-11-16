@@ -50,7 +50,7 @@ private func fb(_ grade: String, issues: [[String: String]] = [], ref: String, e
     ["grade": grade, "issues": issues, "reference": ref, "expressions": expr]
 }
 private func attempt(_ tr: String, _ f: [String: Any], at: Int64) -> [String: Any] {
-    ["translation": tr, "grade": f["grade"]!, "feedback": f, "created_at": at]
+    ["id": "at-\(at)", "translation": tr, "grade": f["grade"]!, "feedback": f, "created_at": at, "void": false]
 }
 
 struct MockState {
@@ -146,7 +146,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -221,7 +221,7 @@ struct MockState {
                 let p: [String: Any] = ["id": nextId("p"), "phrase": e["phrase"]!, "meaning": e["meaning"]!, "sentence_id": id, "article_id": sentences[i]["article_id"]!, "created_at": at, "sentence_text": sentences[i]["text"]!, "article_title": a?["title"] ?? ""]
                 phrases.append(p); saved.append(p)
             }
-            var out = f; out["translation"] = tr; out["created_at"] = at; out["phrases"] = saved
+            var out = f; out["id"] = "at-\(at)"; out["translation"] = tr; out["created_at"] = at; out["phrases"] = saved
             return (200, out)
         case "POST /api/sentences/:id/merge":
             guard let i = sentences.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
@@ -249,6 +249,20 @@ struct MockState {
             return (200, ["ok": true, "kept": keep["id"]!, "text": text])
         case "DELETE /api/attempts/:id":
             return (200, ["ok": true, "removed": true])
+        case "PUT /api/attempts/:id/void":
+            // 서버와 같은 계산: 그 문장의 시도 전체에서 표시를 바꾸고, 지금 번역 = 마지막 유효 시도, 나머지는 history
+            let on = (body["void"] as? Bool) ?? true
+            guard let si = sentences.firstIndex(where: { s in
+                ((s["history"] as? [[String: Any]]) ?? []).contains { $0["id"] as? String == id } || (s["attempt"] as? [String: Any])?["id"] as? String == id
+            }) else { return (404, ["error": "시도를 찾을 수 없습니다"]) }
+            var list = ((sentences[si]["history"] as? [[String: Any]]) ?? []) + [sentences[si]["attempt"] as? [String: Any]].compactMap { $0 }
+            list.sort { ($0["created_at"] as! Int64) < ($1["created_at"] as! Int64) }
+            if on, list.last?["id"] as? String != id { return (400, ["error": "가장 최근 시도만 잘못 눌렀다고 표시할 수 있습니다"]) }
+            for i in list.indices where list[i]["id"] as? String == id { list[i]["void"] = on }
+            let cur = list.last { !(($0["void"] as? Bool) ?? false) }
+            sentences[si]["attempt"] = cur ?? NSNull()
+            sentences[si]["history"] = list.filter { $0["id"] as? String != cur?["id"] as? String }
+            return (200, ["ok": true, "id": id, "void": on])
         case "DELETE /api/sentences/:id":
             guard let s = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
             let t = nextId("t"); trash[t] = s
@@ -336,7 +350,7 @@ struct MockState {
                 let a = articles.first { $0["id"] as? String == s["article_id"] as? String }
                 let all = ((s["history"] as? [[String: Any]]) ?? []) + [s["attempt"] as? [String: Any]].compactMap { $0 }
                 for at in all {
-                    attempts.append(["id": "\(s["id"]!)-\(at["created_at"]!)", "sentence_id": s["id"]!, "article_id": s["article_id"]!, "translation": at["translation"]!, "grade": at["grade"]!, "created_at": at["created_at"]!, "idx": s["idx"]!, "text": s["text"]!, "title": a?["title"] ?? ""])
+                    attempts.append(["id": at["id"] ?? "\(s["id"]!)-\(at["created_at"]!)", "sentence_id": s["id"]!, "article_id": s["article_id"]!, "translation": at["translation"]!, "grade": at["grade"]!, "created_at": at["created_at"]!, "void": ((at["void"] as? Bool) ?? false) ? 1 : 0, "idx": s["idx"]!, "text": s["text"]!, "title": a?["title"] ?? ""])
                 }
             }
             attempts.sort { ($0["created_at"] as! Int64) < ($1["created_at"] as! Int64) }

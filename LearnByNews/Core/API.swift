@@ -156,6 +156,10 @@ final class API {
     // MARK: log
     func activityLog(days: Int) async throws -> ActivityLog { try await send("GET", "/api/log?days=\(days)") }
 
+    /// "잘못 눌렀다"(void:true, 그 문장의 가장 최근 시도만, 아니면 400) / 되살리기(void:false). 응답 {ok, id, void}
+    struct VoidBody: Encodable { var void: Bool }
+    func voidAttempt(_ attemptId: String, void: Bool) async throws { let _: OK = try await send("PUT", "/api/attempts/\(attemptId)/void", body: VoidBody(void: void)) }
+
     // MARK: 기기 상태 → 서버 (다시 쓰기 진행, 공부 시작점). 서버가 진실, 로컬은 캐시
     func pass(_ articleId: String) async throws -> PassState? { let r: PassState? = try await send("GET", "/api/articles/\(articleId)/pass"); return r }
     struct PassBody: Codable { var done: [String] }

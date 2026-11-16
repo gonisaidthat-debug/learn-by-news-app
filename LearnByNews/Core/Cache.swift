@@ -28,8 +28,9 @@ import SwiftData
     var grade: String
     var feedback: Data          // Feedback JSON
     var createdAt: Int64
-    init(id: String, sentenceId: String, articleId: String, translation: String, grade: String, feedback: Data, createdAt: Int64) {
-        self.id = id; self.sentenceId = sentenceId; self.articleId = articleId; self.translation = translation; self.grade = grade; self.feedback = feedback; self.createdAt = createdAt
+    var isVoid: Bool = false    // "잘못 눌렀다": 목록·상세 지금 번역·세션·시험지·기록에서 뺀다 (2026-11-16)
+    init(id: String, sentenceId: String, articleId: String, translation: String, grade: String, feedback: Data, createdAt: Int64, isVoid: Bool = false) {
+        self.id = id; self.sentenceId = sentenceId; self.articleId = articleId; self.translation = translation; self.grade = grade; self.feedback = feedback; self.createdAt = createdAt; self.isVoid = isVoid
     }
 }
 
@@ -224,7 +225,7 @@ final class Cache {
         for a in x.articles { ctx.insert(CachedArticle(id: a.id, title: a.title, source: a.source ?? "", createdAt: a.createdAt)) }
         for s in x.sentences { ctx.insert(CachedSentence(id: s.id, articleId: s.articleId, idx: s.idx, paragraph: s.paragraph ?? 0, text: s.text)) }
         for a in x.attempts {
-            ctx.insert(CachedAttempt(id: a.id, sentenceId: a.sentenceId, articleId: a.articleId, translation: a.translation, grade: a.grade.rawValue, feedback: (try? JSONEncoder.api.encode(a.feedback)) ?? Data(), createdAt: a.createdAt))
+            ctx.insert(CachedAttempt(id: a.id, sentenceId: a.sentenceId, articleId: a.articleId, translation: a.translation, grade: a.grade.rawValue, feedback: (try? JSONEncoder.api.encode(a.feedback)) ?? Data(), createdAt: a.createdAt, isVoid: a.void == 1))
         }
         for p in x.phrases { ctx.insert(CachedPhrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt)) }
         for r in x.reviews {
@@ -246,7 +247,11 @@ final class Cache {
     }
     private func toAttempt(_ a: CachedAttempt) -> Attempt {
         let fb = (try? JSONDecoder.api.decode(Feedback.self, from: a.feedback)) ?? Feedback(grade: Grade(rawValue: a.grade) ?? .skip, issues: [], reference: "", expressions: [])
-        return Attempt(translation: a.translation, grade: Grade(rawValue: a.grade) ?? .skip, feedback: fb, createdAt: a.createdAt)
+        return Attempt(id: a.id.hasPrefix("local-") ? nil : a.id, translation: a.translation, grade: Grade(rawValue: a.grade) ?? .skip, feedback: fb, createdAt: a.createdAt, isVoid: a.isVoid)
+    }
+    /// "잘못 눌렀다"/되살리기를 캐시에 반영 (오프라인 큐와 함께)
+    func setAttemptVoid(_ id: String, _ v: Bool) {
+        if let a = all(CachedAttempt.self).first(where: { $0.id == id }) { a.isVoid = v; try? ctx.save() }
     }
     private func toReview(_ r: CachedReview) -> Review {
         Review(id: r.id, score: r.score, createdAt: r.createdAt, summary: r.summary, patterns: (try? JSONDecoder.api.decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise)
@@ -259,7 +264,7 @@ final class Cache {
         let arts = all(CachedArticle.self)
         guard !arts.isEmpty else { return nil }
         let sents = Dictionary(grouping: all(CachedSentence.self), by: \.articleId)
-        let latest = attemptsBySentence().compactMapValues(\.last)
+        let latest = attemptsBySentence().compactMapValues { $0.last { !$0.isVoid } }   // 지금 번역 = 마지막 유효 시도
         let reviewCount = Dictionary(grouping: all(CachedReview.self), by: \.articleId).mapValues(\.count)
         return arts.sorted { $0.createdAt > $1.createdAt }.map { a in
             let ss = sents[a.id] ?? []
@@ -276,8 +281,10 @@ final class Cache {
         guard let a = all(CachedArticle.self).first(where: { $0.id == id }) else { return nil }
         let bySentence = attemptsBySentence()
         let sentences = all(CachedSentence.self).filter { $0.articleId == id }.sorted { $0.idx < $1.idx }.map { s -> Sentence in
-            let hist = (bySentence[s.id] ?? []).map(toAttempt)
-            return Sentence(id: s.id, idx: s.idx, paragraph: s.paragraph, text: s.text, attempt: hist.last, history: Array(hist.dropLast()))
+            // 지금 번역 = 마지막 유효 시도. 무효("잘못 눌렀다")는 이전 시도에만 남는다 (서버와 같은 계산)
+            let list = (bySentence[s.id] ?? []).map(toAttempt)
+            let cur = list.last { !$0.isVoid }
+            return Sentence(id: s.id, idx: s.idx, paragraph: s.paragraph, text: s.text, attempt: cur, history: list.filter { $0 != cur })
         }
         let phrases = all(CachedPhrase.self).filter { $0.articleId == id }.sorted { $0.createdAt < $1.createdAt }.map { p in
             Phrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, sentenceText: sentences.first { $0.id == p.sentenceId }?.text, articleTitle: a.title)
@@ -364,7 +371,7 @@ final class Cache {
         var items: [String: QuizItem] = [:]
         var order: [String] = []
         func put(_ it: QuizItem) { if items[it.key] == nil { order.append(it.key) }; items[it.key] = it }
-        for a in all(CachedAttempt.self).sorted(by: { $0.createdAt < $1.createdAt }) where a.grade != "skip" {
+        for a in all(CachedAttempt.self).sorted(by: { $0.createdAt < $1.createdAt }) where a.grade != "skip" && !a.isVoid {
             guard let s = sents[a.sentenceId], let fb = try? JSONDecoder.api.decode(Feedback.self, from: a.feedback) else { continue }
             for i in fb.issues where !i.source.isEmpty {
                 let key = "\(a.sentenceId)|\(i.source)"; let l = last[key]
@@ -443,7 +450,7 @@ final class Cache {
         let since = Date().ms - Int64(days) * 86_400_000
         let sents = Dictionary(uniqueKeysWithValues: all(CachedSentence.self).map { ($0.id, $0) })
         let arts = Dictionary(uniqueKeysWithValues: all(CachedArticle.self).map { ($0.id, $0) })
-        let attempts = all(CachedAttempt.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.compactMap { a -> LogAttempt? in
+        let attempts = all(CachedAttempt.self).filter { $0.createdAt >= since && !$0.isVoid }.sorted { $0.createdAt < $1.createdAt }.compactMap { a -> LogAttempt? in
             guard let s = sents[a.sentenceId], let ar = arts[a.articleId] else { return nil }
             return LogAttempt(id: a.id, sentenceId: a.sentenceId, articleId: a.articleId, translation: a.translation, grade: Grade(rawValue: a.grade) ?? .skip, createdAt: a.createdAt, idx: s.idx, text: s.text, title: ar.title)
         }
@@ -545,7 +552,7 @@ final class Cache {
         for x in all(CachedSentence.self) where x.articleId == articleId && x.idx >= s.idx { x.idx += 1 }
         ctx.insert(CachedSentence(id: s.id, articleId: articleId, idx: s.idx, paragraph: s.paragraph, text: s.text))
         for a in s.history + [s.attempt].compactMap({ $0 }) {
-            ctx.insert(CachedAttempt(id: "local-" + UUID().uuidString, sentenceId: s.id, articleId: articleId, translation: a.translation, grade: a.grade.rawValue, feedback: (try? JSONEncoder.api.encode(a.feedback)) ?? Data(), createdAt: a.createdAt))
+            ctx.insert(CachedAttempt(id: a.id ?? "local-" + UUID().uuidString, sentenceId: s.id, articleId: articleId, translation: a.translation, grade: a.grade.rawValue, feedback: (try? JSONEncoder.api.encode(a.feedback)) ?? Data(), createdAt: a.createdAt, isVoid: a.isVoid))
         }
         try? ctx.save()
     }
@@ -577,7 +584,7 @@ final class Cache {
 
     /// 오프라인에서 "오늘 여기까지": 시작 이후 번역+응용을 세어 임시 세션을 만든다 (서버와 같은 규칙). 둘 다 없으면 nil
     func closeSessionLocally(startedAt: Int64) -> StudySession? {
-        let atts = all(CachedAttempt.self).filter { $0.createdAt >= startedAt }
+        let atts = all(CachedAttempt.self).filter { $0.createdAt >= startedAt && !$0.isVoid }
         let drs = all(CachedDrill.self).filter { $0.answeredAt >= startedAt }
         // 채점 대기(큐)도 센다: 채점이 안 끝나도 세션은 닫을 수 있다(goni 2026-11-15). 점수는 채점된 것만, 연결되면 서버가 다시 계산
         let pendAtt = pending(kind: "attempt").compactMap { try? JSONDecoder.api.decode(SyncManager.AttemptOp.self, from: $0.payload) }.filter { $0.createdAt >= startedAt }

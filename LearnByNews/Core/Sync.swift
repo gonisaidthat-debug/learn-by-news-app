@@ -116,6 +116,9 @@ final class SyncManager: ObservableObject {
                 case "attempt_cancel":
                     let b = try JSONDecoder.api.decode(AttemptOp.self, from: op.payload)
                     _ = try await API.shared.cancelAttempt(b.attemptId)
+                case "attempt_void":
+                    let b = try JSONDecoder.api.decode(VoidOp.self, from: op.payload)
+                    try await API.shared.voidAttempt(b.attemptId, void: b.void)
                 case "sentence_merge":
                     let b = try JSONDecoder.api.decode(SentenceOp.self, from: op.payload)
                     _ = try await API.shared.merge(real(b.sentenceId), dir: b.dir ?? "prev")
@@ -210,6 +213,7 @@ final class SyncManager: ObservableObject {
 
     struct PhraseSaveOp: Codable { var tempId: String; var phrase: String; var meaning: String; var sentenceId: String; var articleId: String }
     struct PassOp: Codable { var articleId: String; var done: [String]? }
+    struct VoidOp: Codable { var attemptId: String; var void: Bool }
     struct ArticleCreateOp: Codable {
         struct S: Codable { var paragraph: Int; var text: String }
         var tempId: String; var title: String; var source: String; var sentences: [S]
@@ -386,6 +390,17 @@ final class SyncManager: ObservableObject {
             catch { AppLog.shared.warn("sync", "\(kind) failed: \(error.localizedDescription)"); return }
         }
         Cache.shared.enqueue(kind, payload); refreshCounts()
+    }
+
+    /// "잘못 눌렀다"(void) / 되살리기. 캐시에 먼저 반영하고 온라인이면 바로, 아니면 큐 attempt_void. 서버가 거절(400: 가장 최근 시도만)하면 캐시를 되돌리고 던진다
+    func voidAttempt(_ attemptId: String, void: Bool) async throws {
+        Cache.shared.setAttemptVoid(attemptId, void)
+        if Connectivity.shared.isOnline {
+            do { try await API.shared.voidAttempt(attemptId, void: void); return }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+            catch { Cache.shared.setAttemptVoid(attemptId, !void); throw error }
+        }
+        Cache.shared.enqueue("attempt_void", VoidOp(attemptId: attemptId, void: void)); refreshCounts()
     }
 
     // MARK: 다시 쓰기 진행 (서버가 진실, RedoProgress는 캐시)
