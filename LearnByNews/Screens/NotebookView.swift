@@ -138,7 +138,8 @@ final class NotebookModel: ObservableObject {
     }
     var allDone: Bool { data?.sentences.allSatisfy { $0.attempt != nil } ?? false }
 
-    func load(onDone: @escaping () -> Void) async {
+    /// onDone(newReview): 열자마자 전부 채점돼 있으면 마지막 장으로(다시 쓰기 회차를 끝낸 채 다시 열었으면 새 총평까지)
+    func load(onDone: @escaping (Bool) -> Void) async {
         // 열람은 캐시를 먼저 그린다
         if browse, data == nil, let c = Cache.shared.article(id) {
             if let round, let r = Self.asOfRound(c, round) { data = r; roundShown = round } else { data = c }
@@ -188,7 +189,7 @@ final class NotebookModel: ObservableObject {
                 let p = RedoProgress(ids: alive, done: prog.done.filter(alive.contains))
                 if p.remaining.isEmpty {
                     RedoProgress.clear(id); await SyncManager.shared.deletePass(id)
-                    data = d; finishingPass = true; passSubmitted = Set(p.done); return
+                    data = d; finishingPass = true; passSubmitted = Set(p.done); onDone(true); return
                 }
                 AppLog.shared.info("notebook", "resume pass", ["article": id, "done": "\(p.done.count)", "count": "\(p.ids.count)"])
                 data = d; beginPass(p)
@@ -198,7 +199,7 @@ final class NotebookModel: ObservableObject {
             if let r = Self.pendingRedo.removeValue(forKey: id), d.sentences.contains(where: { $0.id == r }) {
                 data = d; redo = r; input = ""; requestScroll(r); focusRequest += 1; return
             }
-            if inflight.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(); return }
+            if inflight.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }) { data = d; onDone(false); return }
             data = d; requestScroll("bottom")
         } catch { err = error.localizedDescription }
     }
@@ -576,7 +577,7 @@ struct NotebookView: View {
             .opacity(0).frame(width: 0, height: 0)
         }
         .task {
-            await m.load { router.shelfPath = [.done(id: articleId)] }
+            await m.load { newReview in router.shelfPath = [.done(id: articleId, newReview: newReview)] }
             await m.loadBookmark()
             await session.load()
             if !m.browse { focused = true }
@@ -635,11 +636,13 @@ struct NotebookView: View {
         if let b = best, b.pos != readingIndex { readingIndex = b.pos }
     }
 
-    /// 모든 문장이 채점됐고 진행 중·오류 상태가 없으면 마지막 장으로.
-    /// 처음부터 다시 쓰기를 마친 뒤라면 새 총평을 요청하게 한다 (채점이 전부 끝난 뒤라야 총평에 반영된다)
+    /// 모든 문장이 채점됐고 진행 중·오류 상태가 없으면 마지막 문장의 첨삭을 펼쳐 보여 주고 공책에 머문다.
+    /// 마지막 장은 발의 "마지막 장 →"(다시 쓰기 회차를 끝냈으면 "마지막 장 · 새 총평 받기 →")으로 직접 넘어간다.
+    /// 예전엔 바로 넘겨서 마지막 문장 채점을 못 보고 지나갔다(goni 2026-11-16). 열자마자 전부 채점돼 있는 경우는 load()의 onDone이 그대로 넘긴다
     private func checkFinish() {
-        guard !m.browse, m.redo == nil, m.inflight.isEmpty, m.allDone else { return }
-        router.shelfPath = [.done(id: articleId, newReview: m.finishingPass)]
+        guard !m.browse, m.redo == nil, m.inflight.isEmpty, m.allDone, let last = m.data?.sentences.last else { return }
+        if m.open == nil { m.open = last.id }
+        m.requestScroll(last.id)
     }
 
     private func content(_ d: ArticleDetail) -> some View {
@@ -845,8 +848,12 @@ struct NotebookView: View {
                         if let next, next.attempt == nil || m.pass != nil, next.paragraph == cur.paragraph { Tiny(title: "↓\u{FE0E} 뒤와 합치기") { Task { await m.merge(cur.id, dir: "next") } } }
                     }
                     if waiting > 0 { MutedText(text: m.inflight.values.contains { $0.pending } ? "채점 대기 \(waiting)개 · 연결되면 보낸다" : "채점 \(waiting)개 기다리는 중…") }
+                } else if waiting > 0 {
+                    MutedText(text: m.inflight.values.contains { $0.pending } ? "채점 대기 \(waiting)개 · 연결되면 보낸다" : "채점 \(waiting)개 기다리는 중…")
                 } else {
-                    MutedText(text: waiting > 0 ? (m.inflight.values.contains { $0.pending } ? "채점 대기 \(waiting)개 · 연결되면 보낸다" : "채점 \(waiting)개 기다리는 중…") : "끝")
+                    // 다 썼다: 마지막 장은 직접 넘어간다(다시 쓰기 회차를 끝냈으면 거기서 새 총평을 받는다)
+                    MutedText(text: "다 썼다")
+                    Tiny(title: m.finishingPass ? "마지막 장 · 새 총평 받기 →\u{FE0E}" : "마지막 장 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.done(id: articleId, newReview: m.finishingPass)] }
                 }
             }
         }
