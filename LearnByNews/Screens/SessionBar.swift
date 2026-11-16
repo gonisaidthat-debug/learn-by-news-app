@@ -110,6 +110,60 @@ final class SessionModel: ObservableObject {
     }
 }
 
+/// 모든 화면 아래(탭 바 위)에 늘 보이는 공부 상태 (웹 SessionDot, d63c702). 시작점은 SessionModel.shared 하나를 모두 구독.
+/// 공부 중: 숨 쉬는 빨간 점 + "22:03부터 · 1시간 12분"(30초마다 갱신, 오늘 시작이 아니면 "11/12 10:51부터 …"를 빨갛게) → 누르면 기사 목록.
+/// 아니면: 빈 빨간 점 + "공부 시작 ▶" → 어느 탭에서든 바로 시작(세션을 닫은 뒤 응용만 하면 어느 세션에도 안 들어가는데 알 길이 없었다).
+/// 끝내기 ✂는 총평이 붙어서 기존 세션 줄(목록·공책)에 그대로. 여기엔 두지 않는다.
+struct StudyDot: View {
+    @ObservedObject private var model = SessionModel.shared
+    @EnvironmentObject var router: Router
+    @State private var dim = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            if let start = model.start {
+                let d = Date(ms: start)
+                Button { router.tab = .shelf; router.shelfPath = [] } label: {
+                    HStack(spacing: 7) {
+                        Circle().fill(Theme.red).frame(width: 8, height: 8)
+                            .opacity(dim ? 0.45 : 1).scaleEffect(dim ? 0.8 : 1)
+                            .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: dim)
+                        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                            Text((d.isToday ? "" : d.monthDay + " ") + d.hm + "부터 · " + Self.elapsed(from: d, to: ctx.date))
+                                .font(Theme.hand(17)).foregroundStyle(d.isToday ? Theme.ink : Theme.red)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("공부 중 · 기사 목록으로")
+                .onAppear { dim = true }
+                .onDisappear { dim = false }
+            } else {
+                HStack(spacing: 7) {
+                    Circle().strokeBorder(Theme.red, lineWidth: 1.5).frame(width: 8, height: 8)
+                    Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red, size: 17) { model.begin() }
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 3)
+        .frame(maxWidth: .infinity, minHeight: 24)
+        .background(Theme.desk)
+    }
+
+    /// 웹과 같은 형식: 60분 미만 "12분", 그 이상 "1시간 12분"
+    static func elapsed(from: Date, to: Date) -> String {
+        let m = max(0, Int((to.timeIntervalSince(from) / 60).rounded()))
+        return m < 60 ? "\(m)분" : "\(m / 60)시간 \(m % 60)분"
+    }
+}
+
+extension View {
+    /// 탭의 뿌리에 붙여 그 탭의 모든 화면(밀어 넣은 공책·마지막 장 포함) 아래에 공부 상태를 둔다
+    func studyDot() -> some View { safeAreaInset(edge: .bottom, spacing: 0) { StudyDot() } }
+}
+
 /// 공부 세션 줄: "공부 시작 ▶\u{FE0E}" →\u{FE0E} "HH:MM부터 · 오늘 여기까지 ✂\u{FE0E} · 버리기"
 struct SessionBar: View {
     @ObservedObject var model: SessionModel

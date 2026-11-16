@@ -205,13 +205,14 @@ struct MainTabs: View {
     @EnvironmentObject var router: Router
     var body: some View {
         TabView(selection: $router.tab) {
-            ShelfView().tabItem { Label("기사", systemImage: "book.closed") }.tag(Router.Tab.shelf)
-            PhrasesView().tabItem { Label("표현장", systemImage: "note.text") }.tag(Router.Tab.phrases)
-            QuizView().tabItem { Label("시험지", systemImage: "questionmark.square") }.tag(Router.Tab.quiz)
-            DrillsView().tabItem { Label("응용", systemImage: "pencil.and.outline") }.tag(Router.Tab.drills)
-            ActivityLogView().tabItem { Label("기록", systemImage: "calendar") }.tag(Router.Tab.log)
+            ShelfView().studyDot().tabItem { Label("기사", systemImage: "book.closed") }.tag(Router.Tab.shelf)
+            PhrasesView().studyDot().tabItem { Label("표현장", systemImage: "note.text") }.tag(Router.Tab.phrases)
+            QuizView().studyDot().tabItem { Label("시험지", systemImage: "questionmark.square") }.tag(Router.Tab.quiz)
+            DrillsView().studyDot().tabItem { Label("응용", systemImage: "pencil.and.outline") }.tag(Router.Tab.drills)
+            ActivityLogView().studyDot().tabItem { Label("기록", systemImage: "calendar") }.tag(Router.Tab.log)
         }
         .tint(Theme.red)
         .sheet(isPresented: $router.showSettings) { SettingsView() }
+        .task { await SessionModel.shared.loadStart() }   // 공부 상태(StudyDot)는 모든 탭에 보이므로 서버 시작점을 여기서 한 번 맞춘다 (기사 탭 load에만 맡기면 다른 탭으로 열었을 때 옛 캐시가 보인다)
     }
 }
