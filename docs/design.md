@@ -118,6 +118,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 ### 시뮬레이터 확인용 환경변수 (DEBUG 빌드만)
 - `SIMCTL_CHILD_LBN_MOCK=1`: 서버 대신 메모리 모의 서버(`MockServer`). 비밀번호 없이 화면을 볼 수 있다.
 - `SIMCTL_CHILD_LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | restart:a2 | restart:a2:1(앞 1문장 뒤부터) | phrases | quiz | log | settings`: 시작 화면.
+- `SIMCTL_CHILD_LBN_AUTOMERGE=prev|next`: 공책을 열자마자 현재 문장을 그 방향으로 합친다(다시 쓰기 중 합치기 확인용).
 - `SIMCTL_CHILD_LBN_SESSION=1`: 공부 세션이 시작된 상태로 시작(모의 서버와 기기 캐시 둘 다 시작점을 가짐. 서버가 null이면 앱이 캐시를 지운다).
 - `SIMCTL_CHILD_LBN_AUTOSUBMIT=1`: 공책을 열자마자 현재 문장에 번역을 넣고 제출(채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다).
 - 모의 모드에서는 Face ID 잠금을 끈다.
@@ -150,6 +151,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - 온라인 전용(안내만): 총평, 형광펜 묻기, 응용. 폴백 없음.
 - 쓴 시각: 큐 재생 때 번역은 `written_at`, 응용 답은 `answered_at`(둘 다 ms)을 보내 서버가 그 시각을 created_at/answered_at으로 쓴다(2026-11-15). 큐는 넣은 순서(attempt들 → session_close)로 보내 오프라인에서 닫은 세션의 범위·기록 날짜가 맞는다. 설정 > 오프라인에 "대기 중 채점 n개" 표시. 서버가 진실, 충돌은 서버 우선.
 - 닫기: 채점 대기(큐)가 있어도 "오늘 여기까지"를 누를 수 있다(goni 2026-11-15). 오프라인이면 캐시 + 대기분을 세어 임시 세션(점수는 채점된 것만), 연결되면 큐 순서(attempt들 → session_close)대로 서버가 다시 계산·총평. 온라인인데 대기가 남아 있으면 먼저 보내고 닫는다. 지금 채점 중(요청 진행 중)인 것만 잠깐 막는다.
+- **다시 쓰기 진행 중에도 문장 합치기**(goni 2026-11-16, 웹 f25f7d6과 같은 규칙): 회차 열람에서만 숨긴다. 펼친 채점 문장의 "↑ 앞과 / ↓ 뒤와 합치기"와 현재 문장 입력란의 "↑ 앞에 붙이기 / ↓ 뒤와 합치기" 모두. 합친 뒤 공책을 다시 읽고 없어진 문장은 진행 목록(pass ids)에서 빼고, 합쳐진(kept) 문장은 done에서 빼 이번 회차에 다시 쓴다(바로 입력란, 그 문장으로 스크롤). `PUT /api/articles/:id/pass`로 새 done 저장. 그 문장을 제출하면 그 뒤에서 아직 안 쓴 첫 문장으로 간다(이미 쓴 문장은 건너뜀). 서버 변경 없음.
 - 다시 쓰기 진행 캐시(2026-11-15): 공책 목록 `GET /api/articles`의 `pass_done`을 받을 때마다 기기 RedoProgress를 서버와 맞춘다(진행 있으면 캐시 문장 순서로 저장, null이면 지움, 못 보낸 pass_put이 있으면 그대로). 서버 값은 UserDefaults `lbn_server_pass`에 두고 내보내기 적용 뒤에도 다시 맞춘다(문장 캐시가 없을 땐 만들지 않음). 그래서 온라인에서 공책을 연 적 없는 기기도 오프라인에서 "n회차 진행 중"으로 열린다(전엔 "완료·1회차 마지막 장"으로 열리던 사고).
 - 공책 열기: 서버 응답 전에는 빈 화면이 아니라 캐시 제목 + "공책을 불러오는 중…". 읽기(GET) 요청은 20초 타임아웃(채점·총평 등 쓰기는 120초) — 연결은 있어도 인터넷이 안 되면 빨리 네트워크 오류로 끝내 캐시(오프라인)로 넘어간다.
 - 진입: 저장된 비밀번호가 있으면 Face ID 뒤 서버 확인을 기다리지 않고 바로 홈(캐시)으로 들어간다. `GET /api/auth`는 뒤에서 하고 401일 때만 로그인 화면으로(네트워크 오류는 무시). 책갈피 띠는 캐시의 `current_round`가 없으면 로컬(총평 수 + 다시 쓰기 진행)로 센다.

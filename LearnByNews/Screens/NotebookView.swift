@@ -308,9 +308,9 @@ final class NotebookModel: ObservableObject {
             // 처음부터 다시: 다음 문장으로 이어서, 끝나면 새 총평을 받으러 마지막 장으로
             passSubmitted.insert(cur.id)
             let i = pass.firstIndex(of: cur.id) ?? -1
-            if i >= 0, i + 1 < pass.count {
-                let next = pass[i + 1]
-                let done = pass.filter(passSubmitted.contains)
+            let done = pass.filter(passSubmitted.contains)
+            // 그 뒤에서 아직 안 쓴 첫 문장으로(합치기로 되돌아가 썼으면 이미 쓴 문장은 건너뛴다, 2026-11-16)
+            if i >= 0, let next = pass[(i + 1)...].first(where: { !passSubmitted.contains($0) }) {
                 RedoProgress(ids: pass, done: done).save(id)
                 Task { await SyncManager.shared.putPass(id, done: done) }
                 redo = next; requestScroll(next); focusRequest += 1
@@ -343,8 +343,24 @@ final class NotebookModel: ObservableObject {
     }
 
     func merge(_ sid: String, dir: String) async {
-        do { try await SyncManager.shared.mergeSentence(sid, dir: dir); AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid]); await reload(); input = "" }
+        do {
+            let kept = try await SyncManager.shared.mergeSentence(sid, dir: dir); AppLog.shared.info("notebook", "merge \(dir)", ["sentence": sid, "kept": kept ?? ""])
+            await reload(); input = ""
+            if let kept { passAfterMerge(kept: kept) }
+        }
         catch { err = error.localizedDescription }
+    }
+
+    /// 다시 쓰기 진행 중에 합친 뒤(goni 2026-11-16): 없어진 문장은 진행 목록에서 빼고, 합쳐진(kept) 문장은 이번 회차에 다시 쓴다(done에서 제거, 바로 입력란). PUT /api/articles/:id/pass
+    private func passAfterMerge(kept: String) {
+        guard pass != nil, let d = data else { return }
+        let ids = d.sentences.map(\.id)
+        let done = ids.filter { passSubmitted.contains($0) && $0 != kept }
+        pass = ids; passSubmitted = Set(done)
+        RedoProgress(ids: ids, done: done).save(id)
+        Task { await SyncManager.shared.putPass(id, done: done) }
+        AppLog.shared.info("notebook", "pass after merge", ["article": id, "kept": kept, "done": "\(done.count)", "count": "\(ids.count)"])
+        redo = kept; open = nil; input = ""; requestScroll(kept); focusRequest += 1
     }
 
     /// 열람 화면에서 합친 뒤 공책(쓰기)으로 넘어올 때 바로 다시 쓰기 모드로 열 문장
@@ -356,6 +372,7 @@ final class NotebookModel: ObservableObject {
             let kept = try await SyncManager.shared.mergeSentence(sid, dir: dir)
             AppLog.shared.info("notebook", "merge graded \(dir)", ["sentence": sid, "kept": kept ?? ""])
             await reload()
+            if let kept, pass != nil { passAfterMerge(kept: kept); return kept }
             if let kept, data?.sentences.first(where: { $0.id == kept })?.attempt != nil {
                 if browse { Self.pendingRedo[id] = kept; return kept }
                 redo = kept; open = nil; input = ""; requestScroll(kept); focusRequest += 1
@@ -566,6 +583,8 @@ struct NotebookView: View {
             #if DEBUG
             // 화면 확인용: LBN_AUTOREMOVE=<문장 id> 이면 그 문장을 빼서 되살리기 줄을 보여준다
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOREMOVE"], m.data?.sentences.contains(where: { $0.id == sid }) == true { _ = await m.remove(sid) }
+            // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
+            if let dir = ProcessInfo.processInfo.environment["LBN_AUTOMERGE"], let cur = m.current { await m.merge(cur.id, dir: dir) }
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
             if ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1", session.inSession, m.current != nil {
                 m.input = "분석가들은 노동 시장이 더 약해지면 12월 15일까지 인하를 예상한다."; m.submit(skip: false)
@@ -578,9 +597,9 @@ struct NotebookView: View {
         .onChange(of: m.focusRequest) { _, _ in focused = true }
     }
 
-    /// 채점된 문장 합치기 버튼을 보일지: 같은 문단의 앞/뒤 문장이 있고, 회차 열람·처음부터 다시 쓰기 중이 아닐 때
+    /// 채점된 문장 합치기 버튼을 보일지: 같은 문단의 앞/뒤 문장이 있고, 회차 열람이 아닐 때(다시 쓰기 진행 중에도 보인다, goni 2026-11-16)
     private func mergeTarget(_ x: Sentence, d: ArticleDetail, dir: String) -> (() -> Void)? {
-        guard m.roundShown == nil, !m.passMode, let i = d.sentences.firstIndex(where: { $0.id == x.id }) else { return nil }
+        guard m.roundShown == nil, let i = d.sentences.firstIndex(where: { $0.id == x.id }) else { return nil }
         let j = dir == "prev" ? i - 1 : i + 1
         guard d.sentences.indices.contains(j), d.sentences[j].paragraph == x.paragraph else { return nil }
         return {
@@ -816,12 +835,14 @@ struct NotebookView: View {
                     if m.redo != nil {
                         Tiny(title: m.pass != nil ? "다시 쓰기 그만" : "취소") { m.cancelRedo() }
                         if m.pass != nil { Tiny(title: "이전 회차 열람") { router.shelfPath.append(.notebook(id: articleId, browse: true)) } }
-                    } else {
+                    }
+                    // 합치기: 1회차는 아직 안 쓴 다음 문장과만, 다시 쓰기 진행 중에는 같은 문단의 앞/뒤와(합친 문장은 이번 회차에 다시 쓴다, goni 2026-11-16)
+                    if m.redo == nil || m.pass != nil {
                         let ci = d.sentences.firstIndex { $0.id == cur.id } ?? -1
                         let prev = ci > 0 ? d.sentences[ci - 1] : nil
                         let next = ci >= 0 && ci + 1 < d.sentences.count ? d.sentences[ci + 1] : nil
                         if let prev, prev.paragraph == cur.paragraph { Tiny(title: "↑\u{FE0E} 앞에 붙이기") { Task { await m.merge(cur.id, dir: "prev") } } }
-                        if let next, next.attempt == nil, next.paragraph == cur.paragraph { Tiny(title: "↓\u{FE0E} 뒤와 합치기") { Task { await m.merge(cur.id, dir: "next") } } }
+                        if let next, next.attempt == nil || m.pass != nil, next.paragraph == cur.paragraph { Tiny(title: "↓\u{FE0E} 뒤와 합치기") { Task { await m.merge(cur.id, dir: "next") } } }
                     }
                     if waiting > 0 { MutedText(text: m.inflight.values.contains { $0.pending } ? "채점 대기 \(waiting)개 · 연결되면 보낸다" : "채점 \(waiting)개 기다리는 중…") }
                 } else {
