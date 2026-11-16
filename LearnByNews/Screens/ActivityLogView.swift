@@ -107,6 +107,9 @@ struct ActivityLogView: View {
     @State private var collapsed: Set<String> = []     // 기사 보기에서 접은 기사
     @State private var expanded: Set<String> = []      // 기사 보기에서 펼친 기사 (기본: 최근 2개)
 
+    /// 기사 보기는 문장의 처음 시도부터 봐야 하므로 기간과 상관없이 1년치를 받는다
+    private var span: Int { byArticle ? 365 : days }
+
     var body: some View {
         let groups = log.map { buildDays(attempts: $0.attempts, sessions: $0.sessions, reviews: $0.reviews, quiz: $0.quiz, drills: $0.drills ?? []) } ?? []
         let articles = log.map(articleGroups) ?? []
@@ -124,10 +127,14 @@ struct ActivityLogView: View {
                                         .overlay(alignment: .bottom) { if byArticle { Rectangle().fill(Theme.red).frame(height: 2) } }
                                 }
                             }
-                            HStack(spacing: 10) {
-                                ForEach([7, 30, 60, 365], id: \.self) { d in
-                                    Tiny(title: d == 365 ? "1년" : "\(d)일", color: days == d ? Theme.ink : Theme.pencil, size: 19) { days = d }
-                                        .overlay(alignment: .bottom) { if days == d { Rectangle().fill(Theme.red).frame(height: 2) } }
+                            if byArticle {
+                                Text("최근 1년 · 문장 순서대로, 같은 문장을 쓴 차례대로").font(Theme.hand(17)).foregroundStyle(Theme.pencil)
+                            } else {
+                                HStack(spacing: 10) {
+                                    ForEach([7, 30, 60, 365], id: \.self) { d in
+                                        Tiny(title: d == 365 ? "1년" : "\(d)일", color: days == d ? Theme.ink : Theme.pencil, size: 19) { days = d }
+                                            .overlay(alignment: .bottom) { if days == d { Rectangle().fill(Theme.red).frame(height: 2) } }
+                                    }
                                 }
                             }
                         }
@@ -146,7 +153,10 @@ struct ActivityLogView: View {
                                 if articles.isEmpty { Entry { sectionTitle("아직 기록이 없다") } }
                                 ForEach(Array(articles.enumerated()), id: \.element.id) { gi, a in
                                     if gi > 0 { BlankLine() }
-                                    articleSection(a, isOpen: isOpen(a.id, index: gi))
+                                    // 기사 보기: 날짜가 아니라 문장이 어떻게 바뀌어 가는지 (goni 2026-11-16). 날짜별 묶음·기사별 추이 그래프는 날짜 보기에만
+                                    LogArticleSection(group: a, isOpen: isOpen(a.id, index: gi), onToggle: {
+                                        if isOpen(a.id, index: gi) { collapsed.insert(a.id); expanded.remove(a.id) } else { collapsed.remove(a.id); expanded.insert(a.id) }
+                                    }, open: $open)
                                 }
                             } else {
                                 if groups.isEmpty { Entry { sectionTitle("아직 기록이 없다") } }
@@ -157,7 +167,7 @@ struct ActivityLogView: View {
                                 }
                             }
                         }
-                        MutedText(text: "최근 \(days)일").frame(height: Theme.lh).padding(.top, Theme.lh).padding(.leading, Theme.paperLeft)
+                        MutedText(text: byArticle ? "최근 1년 · 문장 순서대로, 같은 문장을 쓴 차례대로" : "최근 \(days)일").frame(height: Theme.lh).padding(.top, Theme.lh).padding(.leading, Theme.paperLeft)
                     }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
@@ -165,7 +175,7 @@ struct ActivityLogView: View {
             }
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .task(id: days) { await load() }
+            .task(id: span) { await load() }
             .refreshable { await load() }
         }
     }
@@ -176,7 +186,7 @@ struct ActivityLogView: View {
     private func summaryLine(_ log: ActivityLog) -> String {
         let drs = log.drills ?? []
         let pts = log.attempts.filter { $0.grade != .skip }.compactMap { Grade.points[$0.grade] } + drs.compactMap { $0.grade.flatMap { Grade.points[$0] } }
-        var s = "최근 \(days)일 · \(log.attempts.count + drs.count)문장" + (drs.isEmpty ? "" : " (응용 \(drs.count))")
+        var s = (span == 365 ? "최근 1년" : "최근 \(span)일") + " · \(log.attempts.count + drs.count)문장" + (drs.isEmpty ? "" : " (응용 \(drs.count))")
         if !pts.isEmpty { s += " · 평균 \(Int((Double(pts.reduce(0, +)) / Double(pts.count)).rounded()))점" }
         return s
     }
@@ -194,30 +204,6 @@ struct ActivityLogView: View {
     private func isOpen(_ id: String, index: Int) -> Bool {
         if collapsed.contains(id) { return false }
         return index < 2 || expanded.contains(id)
-    }
-
-    @ViewBuilder
-    private func articleSection(_ a: ArticleGroup, isOpen: Bool) -> some View {
-        Entry {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Tiny(title: a.title, color: Theme.ink, size: 22) { router.open(.notebook(id: a.id, browse: true)) }.lineLimit(2)
-                Spacer(minLength: 0)
-                Tiny(title: isOpen ? "접기" : "펼치기", size: 17) {
-                    if isOpen { collapsed.insert(a.id); expanded.remove(a.id) } else { collapsed.remove(a.id); expanded.insert(a.id) }
-                }
-            }
-            .frame(minHeight: Theme.lh)
-            Text(a.summary).pencil(size: 19)
-            if isOpen {
-                TrendChart(days: Trend.days(attempts: a.attempts, drills: a.drills), compact: true).padding(.vertical, 4)
-            }
-        }
-        if isOpen {
-            ForEach(a.days) { g in
-                Entry { sectionTitle(Date(ms: g.at).dayLabel) }
-                ForEach(g.blocks) { b in block(b, showSession: false) }
-            }
-        }
     }
 
     private func sectionTitle(_ t: String) -> some View {
@@ -306,8 +292,8 @@ struct ActivityLogView: View {
     }
 
     private func load() async {
-        if let c = Cache.shared.activityLog(days: days) { log = c }
-        do { log = try await API.shared.activityLog(days: days); err = nil }
+        if let c = Cache.shared.activityLog(days: span) { log = c }
+        do { log = try await API.shared.activityLog(days: span); err = nil }
         catch let e as APIError where e.isNetwork { if log == nil { err = e.localizedDescription } }
         catch { err = error.localizedDescription }
     }
