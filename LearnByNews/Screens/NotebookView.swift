@@ -614,6 +614,10 @@ struct NotebookView: View {
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOREMOVE"], m.data?.sentences.contains(where: { $0.id == sid }) == true { _ = await m.remove(sid) }
             // 화면 확인용: LBN_AUTOOPEN=<문장 id> 이면 그 항목을 펼친다. LBN_AUTOVOID=<문장 id> 이면 그 문장의 지금 번역을 "잘못 눌렀다"로 표시한 뒤 입력을 접고 항목을 펼친다
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOOPEN"] { m.open = sid; m.requestScroll(sid) }
+            // 화면 확인용: LBN_AUTOPIN=<문장 id> 이면 그 문장의 첫 지적 표현을 표현장에 붙인다("붙여 둠 ✓"·"써 보기" 확인용)
+            if let sid = ProcessInfo.processInfo.environment["LBN_AUTOPIN"], let i = m.data?.sentences.first(where: { $0.id == sid })?.attempt?.feedback.issues.first {
+                await m.togglePhrase(sid, Expression(phrase: i.source.trimmingCharacters(in: .whitespacesAndNewlines), meaning: i.meaning))
+            }
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
             if let dir = ProcessInfo.processInfo.environment["LBN_AUTOMERGE"], let cur = m.current { await m.merge(cur.id, dir: dir) }
@@ -831,6 +835,8 @@ struct NotebookView: View {
         let redo = m.redo != nil
         return Entry(stamp: redo ? AnyView(Stamp(kind: .redo)) : nil) {
             Text(s.text).font(Theme.print(16)).foregroundStyle(redo ? Theme.pencil : Theme.ink).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
+                .padding(.trailing, 28)
+                .overlay(alignment: .topTrailing) { CopyButton(text: s.text, label: "⎘\u{FE0E}", size: 18).frame(height: Theme.lh) }   // 지금 쓰는 문장의 원문 복사
             if !session.inSession {
                 Button { session.begin(); focused = true } label: {
                     Text("공부 시작 ▶\u{FE0E} 을 누르면 여기에 쓸 수 있다").redpen()

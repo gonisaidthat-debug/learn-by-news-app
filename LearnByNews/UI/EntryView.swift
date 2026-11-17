@@ -143,6 +143,7 @@ struct EntryView: View {
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
                     if let onRedo { Tiny(title: "써 보기 ↻\u{FE0E}", action: onRedo) }
                     if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid) }
+                    CopyButton(text: s.text)
                 }
                 ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
             } else {
@@ -190,8 +191,24 @@ struct EntryView: View {
     @ViewBuilder
     private func marks(_ fb: Feedback) -> some View {
         ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
+            // 빨간 펜으로 지적된 표현도 표현장에 붙여 응용에서 연습할 수 있다 (goni 2026-11-17 "빨간색으로 알려준 표현도 공부하고 싶은데"). 포스트잇과 같은 경로(POST/DELETE phrases)
+            let src = i.source.trimmingCharacters(in: .whitespacesAndNewlines)
+            let saved = !src.isEmpty && savedPhrases.contains { $0.phrase == src }
+            let e = Expression(phrase: src, meaning: i.meaning)
             (Text(i.source).underline(true, color: Theme.red) + Text(" →\u{FE0E} \(i.meaning)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A)))
                 .redpen()
+            if !src.isEmpty {
+                // 버튼은 지적 글 아래 오른쪽에 (글 옆에 두면 글이 좁아져 줄이 늘어난다)
+                HStack(spacing: 14) {
+                    Spacer(minLength: 0)
+                    Tiny(title: saved ? "붙여 둠 ✓\u{FE0E}" : "표현장에 ＋", color: saved ? Theme.grade(.A) : Theme.pencil, size: 17) { onTogglePhrase(e) }
+                        .help(saved ? "표현장에 붙여 둠. 누르면 뗀다" : "이 표현을 표현장에 붙인다 → 응용에서 연습할 수 있다")
+                    if saved, onFree != nil {
+                        TryButton(title: tryExpr == e ? "접기" : "써 보기 ✎\u{FE0E}", count: tryExpr == e ? 0 : (drillCounts[src] ?? 0)) { tryExpr = tryExpr == e ? nil : e }
+                    }
+                }
+                .frame(height: Theme.lh)
+            }
         }
         if showRef {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -202,9 +219,10 @@ struct EntryView: View {
             Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
         }
         ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
-        if onRedo != nil || onVoid != nil || onMergePrev != nil || onMergeNext != nil {
+        do {
             HStack(spacing: 16) {
                 if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo) }
+                CopyButton(text: s.text)
                 if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
                 if let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
                 if let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
@@ -339,6 +357,23 @@ struct RelatedChips: View {
             }
         }
         .task { items = await load(span, nil, excludeSentence, exclude); loaded = true }
+    }
+}
+
+/// 영어 원문 복사 (goni 2026-11-17, 사전·다른 앱에 붙여 넣으려고). 누르면 1.5초 "복사됨 ✓"
+struct CopyButton: View {
+    var text: String
+    var label = "원문 복사 ⎘\u{FE0E}"
+    var size: CGFloat = 20
+    @State private var done = false
+    var body: some View {
+        Tiny(title: done ? "복사됨 ✓\u{FE0E}" : label, color: done ? Theme.grade(.A) : Theme.pencil, size: size) {
+            UIPasteboard.general.string = text
+            done = true
+            Task { try? await Task.sleep(for: .seconds(1.5)); done = false }
+        }
+        .help("영어 원문을 클립보드에 복사한다")
+        .accessibilityLabel("원문 복사")
     }
 }
 
