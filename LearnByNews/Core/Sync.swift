@@ -43,7 +43,7 @@ final class SyncManager: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var lastSyncAt: Int64? = Cache.shared.exportedAt
     @Published private(set) var pendingCount = Cache.shared.pendingCount
-    @Published private(set) var pendingAttempts = Cache.shared.pending(kind: "attempt").count
+    @Published private(set) var pendingAttempts = Cache.shared.pendingUnclaimed(kind: "attempt").count
     private var flushing = false
     /// 진행 중인 큐 전송이 끝날 때까지 기다린 뒤, 남은 것도 보낸다(세션 닫기 전에 채점 대기분을 먼저 보내려고)
     func flushAndWait() async {
@@ -71,7 +71,7 @@ final class SyncManager: ObservableObject {
         await sync(full: full)
     }
 
-    private func refreshCounts() { pendingCount = Cache.shared.pendingCount; pendingAttempts = Cache.shared.pending(kind: "attempt").count }
+    private func refreshCounts() { pendingCount = Cache.shared.pendingCount; pendingAttempts = Cache.shared.pendingUnclaimed(kind: "attempt").count }
 
     /// full: 전체 받아 교체. 아니면 ?since=exported_at 증분
     func sync(full: Bool) async {
@@ -95,7 +95,7 @@ final class SyncManager: ObservableObject {
         flushing = true
         var sentAttempts = false
         defer { flushing = false; refreshCounts() }
-        for op in Cache.shared.pending() {
+        for op in Cache.shared.pending() where !op.isClaimed {   // 직접 보내는 중인 항목은 건너뛴다(겹쳐 보내지 않는다)
             do {
                 switch op.kind {
                 case "article_create":
@@ -270,22 +270,36 @@ final class SyncManager: ObservableObject {
 
     /// 자유 작문: 온라인이면 바로 채점, 아니면 큐(drill_free) → nil("연결되면 채점"). 큐 항목에 drillId가 들어 있어 재전송이 중복 저장되지 않는다
     func freeDrill(_ b: API.DrillFreeBody) async throws -> Drill? {
-        if Connectivity.shared.isOnline {
-            do { return try await API.shared.freeDrill(b) }
-            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        guard Connectivity.shared.isOnline else { Cache.shared.enqueue("drill_free", b); refreshCounts(); return nil }
+        // 보내기 전에 큐(디스크)에 먼저 (goni 2026-11-18): 앱이 정지 중 죽어도 다음 실행 때 보내진다. 같은 drill_id라 서버에 있으면 duplicate로 받는다
+        let opId = Cache.shared.enqueue("drill_free", b, claimed: true).id; refreshCounts()
+        do { let d = try await API.shared.freeDrill(b); finishDirect(opId: opId); return d }
+        catch let e as APIError where e.isNetwork {
+            if Task.isCancelled { finishDirect(opId: opId); throw CancellationError() }   // 멈추기로 끊긴 요청은 큐에 남기지 않는다
+            releaseDirect(opId: opId); return nil   // 끊김: 큐가 보낸다 → "연결되면 채점"
         }
-        if Task.isCancelled { throw CancellationError() }   // 멈추기로 끊긴 요청은 큐에 넣지 않는다
-        Cache.shared.enqueue("drill_free", b); refreshCounts()
-        return nil
+        catch { finishDirect(opId: opId); throw error }   // 서버 거절: 큐에서 빼고 오류
+    }
+    /// 출제형 응용 답(응용 탭·써 보기 상자 공용): 오프라인이면 큐 drill_answer → nil("연결되면 채점"). 온라인이면 큐에 먼저 넣고 바로 보낸다
+    func answerDrill(_ d: Drill, answer: String) async throws -> Drill? {
+        guard Connectivity.shared.isOnline else { DrillStore.shared.answerOffline(d, answer: answer); refreshCounts(); return nil }
+        let opId = Cache.shared.enqueue("drill_answer", DrillAnswerOp(id: d.id, answer: answer, answeredAtLocal: Date().ms, phrase: d.phrase, korean: d.korean), claimed: true).id; refreshCounts()
+        do { let r = try await API.shared.answerDrill(d.id, answer: answer); finishDirect(opId: opId); return r }
+        catch let e as APIError where e.isNetwork {
+            if Task.isCancelled { finishDirect(opId: opId); throw CancellationError() }
+            releaseDirect(opId: opId); DrillStore.shared.markPending(d.id, answer: answer); return nil
+        }
+        catch { finishDirect(opId: opId); throw error }
     }
     struct DrillCancelOp: Codable { var id: String }
     /// 응용 채점 멈추기: 큐에 있으면(자유 작문 drill_free·출제형 drill_answer) 빼고 끝. 이미 보냈으면 서버에 DELETE grading(오프라인이면 그것도 큐)
     func stopDrillGrading(id: String) async {
+        var sent = false
         for op in Cache.shared.pending(kind: "drill_free") {
-            if let b = try? JSONDecoder.api.decode(API.DrillFreeBody.self, from: op.payload), b.drillId == id { Cache.shared.remove(op); refreshCounts(); return }
+            if let b = try? JSONDecoder.api.decode(API.DrillFreeBody.self, from: op.payload), b.drillId == id { sent = op.isClaimed; Cache.shared.remove(op); refreshCounts(); if !sent { return } }
         }
         for op in Cache.shared.pending(kind: "drill_answer") {
-            if let b = try? JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload), b.id == id { Cache.shared.remove(op); DrillStore.shared.dropPending(id); refreshCounts(); return }
+            if let b = try? JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload), b.id == id { sent = op.isClaimed; Cache.shared.remove(op); DrillStore.shared.dropPending(id); refreshCounts(); if !sent { return } }
         }
         await sendOrQueue("drill_grading_cancel", DrillCancelOp(id: id)) {
             _ = try await API.shared.cancelDrillGrading(id)
@@ -315,10 +329,15 @@ final class SyncManager: ObservableObject {
     // MARK: 핵심 루프의 오프라인 겸용 동작
 
     /// 번역 제출을 큐에 (오프라인이거나 전송이 네트워크 오류로 실패했을 때). 화면은 "채점 대기" 도장으로
-    func queueAttempt(attemptId: String, sentenceId: String, articleId: String, translation: String) {
-        Cache.shared.enqueue("attempt", AttemptOp(attemptId: attemptId, sentenceId: sentenceId, articleId: articleId, translation: translation, skip: translation.isEmpty, createdAt: Date().ms))
+    /// claimed: 제출 즉시 큐에 넣고 바로 보내는 경우(응답이 오면 Cache.removePending, 끊기면 releasePending). 돌려주는 값은 큐 항목 id
+    @discardableResult
+    func queueAttempt(attemptId: String, sentenceId: String, articleId: String, translation: String, claimed: Bool = false) -> String {
+        let op = Cache.shared.enqueue("attempt", AttemptOp(attemptId: attemptId, sentenceId: sentenceId, articleId: articleId, translation: translation, skip: translation.isEmpty, createdAt: Date().ms), claimed: claimed)
         refreshCounts()
+        return op.id
     }
+    func finishDirect(opId: String) { Cache.shared.removePending(id: opId); refreshCounts() }
+    func releaseDirect(opId: String) { Cache.shared.releasePending(id: opId); refreshCounts() }
     /// 이 공책에서 아직 못 보낸 채점들
     func pendingAttempts(for articleId: String) -> [AttemptOp] {
         Cache.shared.pending(kind: "attempt").compactMap { try? JSONDecoder.api.decode(AttemptOp.self, from: $0.payload) }.filter { $0.articleId == articleId }
@@ -326,7 +345,12 @@ final class SyncManager: ObservableObject {
     /// 멈추기: 큐에 있으면 빼고 끝. 이미 보냈으면 서버에 취소(오프라인이면 그것도 큐)
     func stopAttempt(attemptId: String, sentenceId: String, articleId: String) async {
         for op in Cache.shared.pending(kind: "attempt") {
-            if let b = try? JSONDecoder.api.decode(AttemptOp.self, from: op.payload), b.attemptId == attemptId { Cache.shared.remove(op); refreshCounts(); return }
+            if let b = try? JSONDecoder.api.decode(AttemptOp.self, from: op.payload), b.attemptId == attemptId {
+                let sent = op.isClaimed   // 직접 보내는 중이었으면 서버에도 취소를 보내야 한다
+                Cache.shared.remove(op); refreshCounts()
+                if !sent { return }
+                break
+            }
         }
         await sendOrQueue("attempt_cancel", AttemptOp(attemptId: attemptId, sentenceId: sentenceId, articleId: articleId, translation: "", skip: false, createdAt: Date().ms)) {
             _ = try await API.shared.cancelAttempt(attemptId)

@@ -148,7 +148,12 @@ import SwiftData
     var kind: String            // quiz_result | phrase_save | phrase_delete
     var payload: Data           // kind별 JSON
     var createdAt: Int64
+    /// 제출 즉시 큐에 넣고 바로 보내는 구조(goni 2026-11-18): 직접 보내는 중이면 그 시각. 큐 전송은 이걸 건너뛰고, 응답이 오면 항목을 지운다.
+    /// 네트워크 오류면 nil로 풀어 큐가 다시 보낸다. 앱이 정지 중 죽어도 디스크에 남아 다음 실행 때 보내진다(프로세스가 새로 뜨면 claim은 전부 푼다)
+    var claimedAt: Int64? = nil
     init(kind: String, payload: Data) { self.id = UUID().uuidString; self.kind = kind; self.payload = payload; self.createdAt = Date().ms }
+    /// 직접 보내는 중(150초 안): 큐 전송이 건너뛴다. 요청 타임아웃(120초)보다 길어 겹쳐 보내지 않는다
+    var isClaimed: Bool { claimedAt.map { Date().ms - $0 < 150_000 } ?? false }
 }
 
 // MARK: - 캐시 질의·저장
@@ -176,6 +181,9 @@ final class Cache {
             UserDefaults.standard.removeObject(forKey: Self.exportedAtKey)
         }
         ctx.autosaveEnabled = false
+        // 새 프로세스: 지난 실행에서 "보내는 중"이던 큐 항목은 요청이 함께 죽었으니 전부 풀어 큐가 다시 보내게 한다
+        for op in all(PendingOp.self) where op.claimedAt != nil { op.claimedAt = nil }
+        try? ctx.save()
     }
 
     /// 마지막 동기화(exported_at). 없으면 한 번도 안 받은 것
@@ -608,15 +616,27 @@ final class Cache {
 
     // MARK: 오프라인 큐
 
-    func enqueue(_ kind: String, _ payload: some Encodable) {
-        ctx.insert(PendingOp(kind: kind, payload: (try? JSONEncoder.api.encode(payload)) ?? Data()))
+    /// claimed: 바로 보낼 참이라 큐 전송은 건너뛴다(응답이 오면 removePending, 끊기면 releasePending)
+    @discardableResult
+    func enqueue(_ kind: String, _ payload: some Encodable, claimed: Bool = false) -> PendingOp {
+        let op = PendingOp(kind: kind, payload: (try? JSONEncoder.api.encode(payload)) ?? Data())
+        if claimed { op.claimedAt = Date().ms }
+        ctx.insert(op)
         try? ctx.save()
-        AppLog.shared.info("queue", "enqueued \(kind)")
+        AppLog.shared.info("queue", "enqueued \(kind)" + (claimed ? " (sending)" : ""))
+        return op
     }
     func pending() -> [PendingOp] { all(PendingOp.self).sorted { $0.createdAt < $1.createdAt } }
     func remove(_ op: PendingOp) { ctx.delete(op); try? ctx.save() }
-    var pendingCount: Int { (try? ctx.fetchCount(FetchDescriptor<PendingOp>())) ?? 0 }
+    /// 직접 보낸 요청의 응답이 왔다(또는 서버가 거절했다) → 큐에서 뺀다. 이미 없으면 그냥 지나간다
+    func removePending(id: String) { if let op = all(PendingOp.self).first(where: { $0.id == id }) { ctx.delete(op); try? ctx.save(); AppLog.shared.info("queue", "done \(op.kind) (direct)") } }
+    /// 직접 보내다 끊겼다 → 큐가 보내도록 푼다
+    func releasePending(id: String) { if let op = all(PendingOp.self).first(where: { $0.id == id }) { op.claimedAt = nil; try? ctx.save(); AppLog.shared.info("queue", "released \(op.kind) → queue") } }
+    func pendingOp(id: String) -> PendingOp? { all(PendingOp.self).first { $0.id == id } }
+    /// 화면의 "채점 대기 N개": 직접 보내는 중인 건 세지 않는다
+    var pendingCount: Int { pending().filter { !$0.isClaimed }.count }
     func pending(kind: String) -> [PendingOp] { pending().filter { $0.kind == kind } }
+    func pendingUnclaimed(kind: String) -> [PendingOp] { pending(kind: kind).filter { !$0.isClaimed } }
     /// 임시 세션(오프라인 닫기)을 서버 세션으로 교체
     func replaceLocalSession(startedAt: Int64, with s: StudySession) {
         for x in all(CachedSession.self) where x.id.hasPrefix("local-") && x.startedAt == startedAt { ctx.delete(x) }

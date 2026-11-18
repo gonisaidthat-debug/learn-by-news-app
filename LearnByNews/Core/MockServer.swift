@@ -30,7 +30,7 @@ final class MockServer: URLProtocol {
             s.close(); return out
         }), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { body = j }
         let env = ProcessInfo.processInfo.environment
-        let slow = env["LBN_AUTOSUBMIT"] == "1" ? 8.0 : 1.5
+        let slow = env["LBN_AUTOSUBMIT"] != nil ? 8.0 : 1.5
         let slowDrill = (env["LBN_AUTOANSWER"] != nil || env["LBN_AUTOTRY"] != nil) ? 8.0 : 1.5   // 응용 채점(멈추기 확인용)
         let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in

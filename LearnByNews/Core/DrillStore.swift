@@ -57,6 +57,8 @@ final class DrillStore: ObservableObject {
         pool.removeAll { $0.id == d.id }; savePool()
         graded.append(d); saveGraded()
     }
+    /// 직접 보내다 끊겨 큐에 남은 답: 오프라인 출제에서 이 문제를 건너뛰도록 표시만
+    func markPending(_ id: String, answer: String) { pendingAnswers[id] = answer }
     func dropPending(_ id: String) { pendingAnswers[id] = nil; pool.removeAll { $0.id == id }; savePool() }
     func clearGraded() { graded = []; saveGraded() }
     func remove(_ id: String) { pool.removeAll { $0.id == id }; savePool() }

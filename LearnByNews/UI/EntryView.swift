@@ -122,7 +122,7 @@ struct EntryView: View {
     /// 포스트잇에서 바로 "써 보기": 자유 작문 채점(nil이면 큐에 들어감), 문제 내줘(표현장에 없으면 nil), 문제 답 채점
     var onFree: ((Expression, String, String) async throws -> Drill?)?   // (표현, 내 문장, drill_id)
     var onDrillFor: ((Expression) async throws -> Drill?)?
-    var onAnswerDrill: ((String, String) async throws -> Drill)?
+    var onAnswerDrill: ((Drill, String) async throws -> Drill?)?   // nil = 큐에 들어감(연결되면 채점)
     var drillCounts: [String: Int] = [:]
     var onDrillGraded: ((String) -> Void)?      // 상자에서 채점이 끝났다 → 그 표현 횟수 +1
     @State private var tryExpr: Expression?
@@ -461,7 +461,7 @@ struct TryBox: View {
     var expr: Expression
     var onFree: (Expression, String, String) async throws -> Drill?   // (표현, 내 문장, drill_id) — drill_id는 멈추기·재전송 중복 방지용 클라이언트 UUID
     var onDrillFor: ((Expression) async throws -> Drill?)?
-    var onAnswerDrill: ((String, String) async throws -> Drill)?
+    var onAnswerDrill: ((Drill, String) async throws -> Drill?)?   // nil = 큐에 들어감(연결되면 채점)
     var onClose: () -> Void
     var onGraded: (() -> Void)? = nil
     @State private var answer = ""
@@ -593,14 +593,13 @@ struct TryBox: View {
         gradingId = id
         let t = Task {
             do {
-                if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); guard gradingId == id else { return }; result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
-                else if let r = try await onFree(expr, a, id) { guard gradingId == id else { return }; result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
-                else { guard gradingId == id else { return }; queued = true }
+                let r: Drill? = if let p = prompt, let onAnswerDrill { try await onAnswerDrill(p, a) } else { try await onFree(expr, a, id) }
+                guard gradingId == id else { return }
+                if let r { result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
+                else { queued = true }   // 오프라인이거나 끊김: 큐에 남아 연결되면 채점
             } catch {
                 guard gradingId == id else { return }   // 멈춘 요청의 오류(취소·409 cancelled)는 보여주지 않는다
-                // 출제형 답이 네트워크 오류(백그라운드로 끊김 등)면 오류 대신 큐 drill_answer → "연결되면 채점" (2026-11-18)
-                if let e = error as? APIError, e.isNetwork, let p = prompt { DrillStore.shared.answerOffline(p, answer: a); queued = true }
-                else { msg = error.localizedDescription }
+                msg = error.localizedDescription
             }
         }
         gradingTask = t

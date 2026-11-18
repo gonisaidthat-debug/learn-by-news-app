@@ -79,16 +79,16 @@ final class DrillsModel: ObservableObject {
         let token = UUID(); gradingToken = token
         let t = Task {
             do {
-                let r = try await API.shared.answerDrill(d.id, answer: a)
+                // 큐에 먼저 넣고 보낸다(SyncManager.answerDrill). nil이면 보내는 중 끊겨 큐에 남은 것
+                guard let r = try await SyncManager.shared.answerDrill(d, answer: a) else {
+                    guard !stopped.contains(d.id), !Task.isCancelled else { return }
+                    answerOffline(d, a, enqueue: false); return
+                }
                 guard !stopped.contains(d.id) else { return }
                 current = r; setDone.append(r)
                 recent.insert(r, at: 0); if recent.count > 20 { recent.removeLast(recent.count - 20) }
                 store.remove(d.id)
                 AppLog.shared.info("drills", "answered", ["id": d.id, "grade": r.grade?.rawValue ?? ""])
-            } catch let e as APIError where e.isNetwork {
-                // 보내는 중 끊김: 큐로. 멈추기로 끊은 요청은 아니다
-                guard !stopped.contains(d.id), !Task.isCancelled else { return }
-                answerOffline(d, a)
             } catch {
                 guard !stopped.contains(d.id) else { return }
                 err = error.localizedDescription
@@ -107,8 +107,8 @@ final class DrillsModel: ObservableObject {
         AppLog.shared.info("drills", "stop", ["id": d.id])
         Task { await SyncManager.shared.stopDrillGrading(id: d.id) }
     }
-    private func answerOffline(_ d: Drill, _ a: String) {
-        store.answerOffline(d, answer: a)
+    private func answerOffline(_ d: Drill, _ a: String, enqueue: Bool = true) {
+        if enqueue { store.answerOffline(d, answer: a) }
         var p = d; p.answer = a
         current = p; pendingCurrent = true; setDone.append(p)
         AppLog.shared.info("drills", "answered offline (queued)", ["id": d.id])

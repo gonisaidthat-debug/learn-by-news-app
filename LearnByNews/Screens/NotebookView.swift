@@ -6,6 +6,7 @@ struct Inflight: Hashable {
     var wasRedo: Bool          // 다시 쓰기 중이던 문장이면 멈출 때 그 자리로 돌아간다
     var error: String?
     var pending = false        // 오프라인: 큐에 있고 연결되면 채점된다 (대기 도장)
+    var opId: String? = nil    // 큐 항목 id (제출 즉시 큐에 넣는다, 2026-11-18)
 }
 
 @MainActor
@@ -265,20 +266,35 @@ final class NotebookModel: ObservableObject {
         if !Connectivity.shared.isOnline || SyncManager.isTemp(sid) {
             queue(sid, translation, attemptId: attemptId, redoing: redoing); return
         }
-        inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing)
+        // 보내기 전에 큐(디스크)에 먼저 넣는다 (goni 2026-11-18): 앱이 정지 중 iOS에 죽어도 쓴 번역이 남아 다음 실행 때 보내지고, 서버에 이미 있으면 duplicate로 붙는다.
+        // 응답이 오면 큐 항목을 지우고, 끊기면 풀어 큐가 보낸다. 큐 전송은 "보내는 중" 항목을 건너뛰어 겹쳐 보내지 않는다
+        let opId = SyncManager.shared.queueAttempt(attemptId: attemptId, sentenceId: sid, articleId: id, translation: translation, claimed: true)
+        inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, opId: opId)
         tasks[sid] = Task {
             defer { tasks[sid] = nil }
-            do { let r = try await API.shared.attempt(sid, translation: translation, attemptId: attemptId); if !stopped.contains(attemptId) { applyResult(sid, r) } }
+            do {
+                let r = try await API.shared.attempt(sid, translation: translation, attemptId: attemptId)
+                SyncManager.shared.finishDirect(opId: opId)
+                if !stopped.contains(attemptId) {
+                    applyResult(sid, r)
+                    NotificationCenter.default.post(name: .lbnAttemptGraded, object: nil, userInfo: ["attemptId": attemptId, "sentenceId": sid, "result": r])   // 같은 공책을 다시 연 모델도 받는다
+                }
+            }
             catch let e as APIError where e.isNetwork {
-                // 보내는 중 끊김: 큐로 돌린다 (같은 attempt_id라 서버에 중복되지 않는다)
+                // 보내는 중 끊김: 큐에 남겨 연결되면 보낸다 (같은 attempt_id라 서버에 중복되지 않는다). 멈추기는 큐 항목을 이미 뺐다
                 if stopped.contains(attemptId) { return }
-                queue(sid, translation, attemptId: attemptId, redoing: redoing)
+                SyncManager.shared.releaseDirect(opId: opId)
+                inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, pending: true, opId: opId)
             }
             catch {
                 // 멈춘 요청의 오류(취소, 409 cancelled)는 보여주지 않는다
                 if stopped.contains(attemptId) { return }
                 // 멈추기가 아닌데 취소됐다(시스템이 끊음) → "채점 중"으로 남기지 말고 큐로 (2026-11-18)
-                if error is CancellationError || (error as? URLError)?.code == .cancelled { queue(sid, translation, attemptId: attemptId, redoing: redoing); return }
+                if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                    SyncManager.shared.releaseDirect(opId: opId)
+                    inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, pending: true, opId: opId); return
+                }
+                SyncManager.shared.finishDirect(opId: opId)   // 서버 거절: 큐에서 빼고 오류 표시
                 inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, error: error.localizedDescription)
             }
         }
@@ -288,7 +304,9 @@ final class NotebookModel: ObservableObject {
     func recoverInflight() {
         var n = 0
         for (sid, f) in inflight where !f.pending && f.error == nil && tasks[sid] == nil && !stopped.contains(f.attemptId) {
-            queue(sid, f.translation, attemptId: f.attemptId, redoing: f.wasRedo); n += 1
+            if let o = f.opId { SyncManager.shared.releaseDirect(opId: o); var g = f; g.pending = true; inflight[sid] = g }   // 큐에 이미 있다 → 풀어서 보내게
+            else { queue(sid, f.translation, attemptId: f.attemptId, redoing: f.wasRedo) }
+            n += 1
         }
         if n > 0 {
             AppLog.shared.warn("notebook", "inflight without task after foreground → queued", ["count": "\(n)"])
@@ -296,8 +314,8 @@ final class NotebookModel: ObservableObject {
         }
     }
     private func queue(_ sid: String, _ translation: String, attemptId: String, redoing: Bool) {
-        SyncManager.shared.queueAttempt(attemptId: attemptId, sentenceId: sid, articleId: id, translation: translation)
-        inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, pending: true)
+        let opId = SyncManager.shared.queueAttempt(attemptId: attemptId, sentenceId: sid, articleId: id, translation: translation)
+        inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, pending: true, opId: opId)
     }
 
     /// 멈추기: 요청 취소 → 서버에 DELETE → 그 문장을 다시 입력란으로, 쓰던 번역은 그대로
@@ -567,9 +585,9 @@ final class NotebookModel: ObservableObject {
         guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
         return try await API.shared.nextDrill(phraseId: pid)
     }
-    func answerDrill(_ id: String, _ answer: String) async throws -> Drill {
-        guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
-        return try await API.shared.answerDrill(id, answer: answer)
+    /// 출제형 답: 큐에 먼저 넣고 보낸다. 오프라인이거나 끊기면 nil("연결되면 채점")
+    func answerDrill(_ d: Drill, _ answer: String) async throws -> Drill? {
+        try await SyncManager.shared.answerDrill(d, answer: answer)
     }
     /// 써 보기 횟수 +1 (상자에서 채점이 끝났거나, 오프라인 큐의 결과가 돌아왔을 때)
     func bumpDrillCount(_ phrase: String) { data?.drillCounts[phrase, default: 0] += 1 }
@@ -666,8 +684,9 @@ struct NotebookView: View {
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
             if let dir = ProcessInfo.processInfo.environment["LBN_AUTOMERGE"], let cur = m.current { await m.merge(cur.id, dir: dir) }
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
-            if ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1", session.inSession, m.current != nil {
+            if let v = ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"], session.inSession, let cur = m.current {
                 m.input = "분석가들은 노동 시장이 더 약해지면 12월 15일까지 인하를 예상한다."; m.submit(skip: false)
+                if v == "stop" { Task { try? await Task.sleep(for: .seconds(2)); m.stop(cur.id) } }   // 2초 뒤 멈추기까지
                 // LBN_AUTOCLOSE=1: 그 채점이 끝나면 "오늘 여기까지"까지 누른다 (✂ 줄 아래 총평 한 번만 보이는지 확인용)
                 if ProcessInfo.processInfo.environment["LBN_AUTOCLOSE"] == "1" {
                     for _ in 0..<60 where !m.inflight.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
@@ -882,7 +901,7 @@ struct NotebookView: View {
                 onOpenSentence: { aid, sid in openSentence(aid, sid) },
                 onFree: { e, a, did in try await m.freeDrill(x.id, e, answer: a, drillId: did) },
                 onDrillFor: { e in try await m.drillFor(x.id, e) },
-                onAnswerDrill: { id, a in try await m.answerDrill(id, a) },
+                onAnswerDrill: { d, a in try await m.answerDrill(d, a) },
                 drillCounts: d.drillCounts,
                 onDrillGraded: { ph in m.bumpDrillCount(ph) }
             )

@@ -189,9 +189,9 @@ final class DoneModel: ObservableObject {
         guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
         return try await API.shared.nextDrill(phraseId: pid)
     }
-    func answerDrill(_ id: String, _ answer: String) async throws -> Drill {
-        guard Connectivity.shared.isOnline else { throw APIError.server(onlineOnlyMessage) }
-        return try await API.shared.answerDrill(id, answer: answer)
+    /// 출제형 답: 큐에 먼저 넣고 보낸다. 오프라인이거나 끊기면 nil("연결되면 채점")
+    func answerDrill(_ d: Drill, _ answer: String) async throws -> Drill? {
+        try await SyncManager.shared.answerDrill(d, answer: answer)
     }
     /// 써 보기 횟수 +1 (상자에서 채점이 끝났거나, 오프라인 큐의 결과가 돌아왔을 때)
     func bumpDrillCount(_ phrase: String) { data?.drillCounts[phrase, default: 0] += 1 }
@@ -353,7 +353,7 @@ struct DoneView: View {
                                 onOpenSentence: { aid, sid in openSentence(aid, sid) },
                                 onFree: { e, a, did in try await m.freeDrill(s.id, e, answer: a, drillId: did) },
                                 onDrillFor: { e in try await m.drillFor(s.id, e) },
-                                onAnswerDrill: { id, a in try await m.answerDrill(id, a) },
+                                onAnswerDrill: { d, a in try await m.answerDrill(d, a) },
                                 drillCounts: d.drillCounts,
                                 onDrillGraded: { ph in m.bumpDrillCount(ph) }
                             )

@@ -79,27 +79,36 @@ final class SessionModel: ObservableObject {
     func close() async {
         guard let start, !busy else { return }
         busy = true; msg = nil
-        var queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+        // 직접 보내는 중인 채점은 세지 않는다(그건 곧 응답이 온다). 큐에서 기다리는 것만
+        var queued = Cache.shared.pendingUnclaimed(kind: "attempt").count + Cache.shared.pendingUnclaimed(kind: "drill_answer").count
         if Connectivity.shared.isOnline, queued > 0 {
             // 온라인인데 채점 대기가 남아 있으면(막 연결됨) 먼저 보내고 닫아야 세션에 들어간다
             msg = "채점 대기 \(queued)개를 먼저 보낸다…"
             await SyncManager.shared.flushAndWait()
-            queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+            queued = Cache.shared.pendingUnclaimed(kind: "attempt").count + Cache.shared.pendingUnclaimed(kind: "drill_answer").count
         }
         var s: StudySession?
+        var opId: String?
         if Connectivity.shared.isOnline, queued == 0 {
-            do { s = try await API.shared.closeSession(startedAt: start) }
+            // 보내기 전에 큐(디스크)에 먼저 (goni 2026-11-18): 총평 10~20초 사이 앱이 죽어도 다음 실행 때 다시 보낸다(서버는 같은 started_at에 멱등)
+            opId = Cache.shared.enqueue("session_close", SessionStartState(startedAt: start), claimed: true).id
+            do { s = try await API.shared.closeSession(startedAt: start); Cache.shared.removePending(id: opId!) }
             catch let e as APIError where e.isNetwork {
                 // 응답만 잃었을 수 있다(2026-11-17 13:12 iPhone: POST /api/sessions "The network connection was lost."인데 서버엔 기록됨 → 시작점이 남아 "11시간 48분").
-                // 서버가 같은 started_at에 멱등(저장된 세션을 duplicate로 돌려줌)이므로 오프라인과 같이 큐에 넣어 연결되면 다시 보낸다
-                AppLog.shared.warn("session", "close network failure, queueing: \(e.localizedDescription)")
+                // 큐 항목을 풀어 연결되면 다시 보낸다(서버가 저장된 세션을 duplicate로 돌려준다)
+                AppLog.shared.warn("session", "close network failure, left in queue: \(e.localizedDescription)")
+                Cache.shared.releasePending(id: opId!)
             }
-            catch { msg = error.localizedDescription; busy = false; return }
+            catch { Cache.shared.removePending(id: opId!); msg = error.localizedDescription; busy = false; return }
         }
         if s == nil {
             // 오프라인(또는 아직 못 보낸 채점 대기가 있음, 또는 방금 연결이 끊김): 캐시+대기분을 세어 임시 세션, 연결되면 서버에 기록(총평 포함)
-            guard let local = Cache.shared.closeSessionLocally(startedAt: start) else { msg = "시작 이후 쓴 문장이 없습니다"; busy = false; return }
-            Cache.shared.enqueue("session_close", SessionStartState(startedAt: start)); s = local
+            guard let local = Cache.shared.closeSessionLocally(startedAt: start) else {
+                if let opId { Cache.shared.removePending(id: opId) }
+                msg = "시작 이후 쓴 문장이 없습니다"; busy = false; return
+            }
+            if opId == nil { Cache.shared.enqueue("session_close", SessionStartState(startedAt: start)) }
+            s = local
         }
         guard let s else { busy = false; return }
         SessionStore.start = nil; self.start = nil
