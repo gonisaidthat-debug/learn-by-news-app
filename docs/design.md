@@ -70,7 +70,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | GET `/api/quiz` | — | `QuizItem[]` (순서는 클라가: 안 본 것→틀린 것→맞힌 것, 묶음 안 섞기) |
 | POST `/api/quiz/results` | `{key, sentence_id, source, correct: bool}` | `{ok}` |
 | GET `/api/sessions` | — | `Session[]` 최신순 |
-| POST `/api/sessions` | `{started_at}` | `Session & {review: {summary, keep, next}\|null, review_error?}` — 세션을 저장한 뒤 그 시간의 짧은 Claude 총평을 붙여 돌려준다(10~20초). 실패하면 review null + review_error, 세션은 저장됨. started_at 이후 번역·응용 채점이 둘 다 없으면 400. `attempts` = 번역 + 응용 문장 수, `drills` = 그중 응용(써 보기·응용 탭) 수, `score` = 합친 평균, `ended_at` = 둘 중 늦은 것 |
+| POST `/api/sessions` | `{started_at}` | `Session & {review: {summary, keep, next}\|null, review_error?}` — 세션을 저장한 뒤 그 시간의 짧은 Claude 총평을 붙여 돌려준다(10~20초). 실패하면 review null + review_error, 세션은 저장됨. started_at 이후 번역·응용 채점이 둘 다 없으면 400. **세션을 저장하면서 서버 시작점(값 ≤ started_at)도 함께 지운다**(2026-11-17) — 앱의 DELETE session-start는 그대로 보내도 되고 빠져도 된다. `attempts` = 번역 + 응용 문장 수, `drills` = 그중 응용(써 보기·응용 탭) 수, `score` = 합친 평균, `ended_at` = 둘 중 늦은 것 |
 | POST `/api/sessions/:id/review` | — | `{review}` 총평 다시 시도 (이미 있으면 그대로, 실패 502) |
 | DELETE `/api/sessions/:id` | — | `{ok}` |
 | GET `/api/log?days=60` | — | `{since, attempts:[{id, sentence_id, article_id, translation, grade, created_at, idx, text, title}], sessions:[Session & {drills, review}], reviews:[{id, article_id, title, score, created_at, summary}], quiz:[{id, key, source, correct, created_at, kind}]}` | `quiz[]`와 `drills[]`에 `article_id, title`(기사를 모르면 null: 응용 탭 문제는 표현이 나온 기사, 읽다가 쓴 것은 그 문장의 기사) 추가 (2026-11-13)
@@ -87,7 +87,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/drills/batch` | `{count}` 1~30 | `{drills: Drill[], made}` 안 푼 문제를 count개까지 채워 전부(오프라인용 미리 받기) |
 | POST `/api/drills/free` | `{phrase, meaning?, phrase_id?, sentence_id?, answer}` | `Drill`(kind "free", feedback·reference 포함) — 한국어 원문 없이 표현을 써서 지은 내 문장을 채점(호출 1). 오프라인이면 큐(drill_free) |
 | GET / PUT / DELETE `/api/articles/:id/pass` | PUT `{done: string[]}` | GET → `{done, updated_at}|null`. **다시 쓰기 진행 상태는 서버가 진실**. 제출마다 PUT, 완료·중단 시 DELETE. UserDefaults는 캐시(오프라인 큐로 지연 전송 가능). 서버가 null이면 기기 저장(RedoProgress)도 지운다, 이관하지 않는다 (2026-11-15) |
-| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`. PUT → `{started_at}` (앱은 이 형식으로 읽는다. 400만 "거절"로 보고 로컬 시작점을 지운다, 2026-11-15). **공부 세션 시작점도 서버에 하나**. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다, 2026-11-13). PUT은 이미 기록된 세션의 `started_at` 이하 값을 400으로 거절 |
+| GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`(이미 기록된 세션의 `started_at` 이하면 서버가 지우고 null, 2026-11-17). PUT → `{started_at}` (앱은 이 형식으로 읽는다. 400만 "거절"로 보고 로컬 시작점을 지운다, 2026-11-15). **공부 세션 시작점도 서버에 하나**. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다, 2026-11-13). PUT은 이미 기록된 세션의 `started_at` 이하 값을 400으로 거절 |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
 | GET `/api/logs?days=7&level=&limit=500` | — | 로그 목록 최신순 |
 | DELETE `/api/logs?before=<ms>` | — | `{ok, deleted}` |
