@@ -23,6 +23,9 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     @Published var gap: Double = UserDefaults.standard.object(forKey: "lbn_tape_gap") as? Double ?? 1.5 { didSet { UserDefaults.standard.set(gap, forKey: "lbn_tape_gap") } }          // 사이 0.6~3초
     @Published var repeats: Int = UserDefaults.standard.object(forKey: "lbn_tape_repeats") as? Int ?? 2 { didSet { UserDefaults.standard.set(repeats, forKey: "lbn_tape_repeats") } }   // 표현 반복 1~3
     @Published var sentence: Bool = UserDefaults.standard.object(forKey: "lbn_tape_sentence") as? Bool ?? false { didSet { UserDefaults.standard.set(sentence, forKey: "lbn_tape_sentence") } }
+    /// 번호 범위(붙인 순서 seq, goni 2026-11-18): nil이면 전부. 범위 안은 번호 순이 기본, 섞음이면 그 안에서
+    @Published var range: ClosedRange<Int>? = RangePick.load("lbn_tape_range") { didSet { RangePick.save(range, "lbn_tape_range") } }
+    var maxSeq: Int { all.compactMap(\.seq).max() ?? 0 }
 
     private let synth = AVSpeechSynthesizer()
     private var all: [Phrase] = []
@@ -48,11 +51,14 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     }
     func rebuild() {
         let pool = all.filter { bucket == .all || ($0.isMastered == (bucket == .mastered)) }
-        items = order == .shuffle ? pool.shuffled() : pool   // GET /api/phrases는 최신순
+            .filter { p in range.map { r in p.seq.map(r.contains) ?? false } ?? true }
+        let base = range != nil ? pool.sorted { ($0.seq ?? 0) < ($1.seq ?? 0) } : pool   // 범위 안은 번호 순, 아니면 GET /api/phrases의 최신순
+        items = order == .shuffle ? base.shuffled() : base
         index = 0; step = 0
     }
     func set(bucket b: Bucket) { stop(); bucket = b; rebuild() }
     func set(order o: Order) { stop(); order = o; rebuild() }
+    func set(range r: ClosedRange<Int>?) { stop(); range = r; rebuild() }
 
     // MARK: 재생
     func play() {
@@ -139,7 +145,7 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     private func updateNowPlaying() {
         guard let p = current else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-            MPMediaItemPropertyTitle: p.phrase,
+            MPMediaItemPropertyTitle: (p.seq.map { "#\($0) · " } ?? "") + p.phrase,
             MPMediaItemPropertyArtist: p.meaning,
             MPMediaItemPropertyAlbumTitle: "표현장 테이프 · \(index + 1)/\(items.count)",
             MPNowPlayingInfoPropertyPlaybackRate: playing ? 1.0 : 0.0,

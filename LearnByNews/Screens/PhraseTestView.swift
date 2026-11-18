@@ -18,6 +18,9 @@ final class PhraseTestModel: ObservableObject {
     @Published var mode: Mode = Mode(rawValue: UserDefaults.standard.string(forKey: "lbn_phrase_test_mode") ?? "") ?? .write {
         didSet { UserDefaults.standard.set(mode.rawValue, forKey: "lbn_phrase_test_mode") }
     }
+    /// 번호 범위(붙인 순서 seq). nil이면 전부. 묶음 필터와 겹쳐 적용 (goni 2026-11-18)
+    @Published var range: ClosedRange<Int>? = RangePick.load("lbn_phrase_test_range") { didSet { RangePick.save(range, "lbn_phrase_test_range") } }
+    var maxSeq: Int { (all ?? []).compactMap(\.seq).max() ?? 0 }
     @Published var revokedPrev: String?   // 바로 앞 카드에서 몰랐다고 해 습득 완료가 취소된 표현 → 다음 카드 위 한 줄
     @Published var items: [PhraseTestItem] = []
     @Published var i = 0
@@ -56,6 +59,7 @@ final class PhraseTestModel: ObservableObject {
     private func rebuild() {
         func rank(_ it: PhraseTestItem) -> Int { lastCorrect(it) == nil ? 0 : (lastCorrect(it)! ? 2 : 1) }
         let pool = (all ?? []).filter { self.bucket == .all || ($0.isMastered == (self.bucket == .mastered)) }
+            .filter { it in range.map { r in it.seq.map(r.contains) ?? false } ?? true }
         items = pool.shuffled().sorted { a, b in
             let (ra, rb) = (rank(a), rank(b))
             return ra != rb ? ra < rb : (lastAt(a) ?? 0) < (lastAt(b) ?? 0)
@@ -172,6 +176,7 @@ struct PhraseTestView: View {
                                     .overlay(alignment: .bottom) { if m.bucket == b { Rectangle().fill(Theme.red).frame(height: 2) } }
                             }
                         }
+                        RangePick(range: $m.range, max: m.maxSeq).onChange(of: m.range) { _, _ in m.restart(); focused = true }
                         HStack(spacing: 10) {
                             ForEach(PhraseTestModel.Mode.allCases, id: \.self) { md in
                                 let label = md == .write ? "표현 쓰기" : md == .meaning ? "뜻 쓰기" : "고급 ✎\u{FE0E}"
@@ -195,6 +200,7 @@ struct PhraseTestView: View {
             #if DEBUG
             // 화면 확인용: LBN_TESTBUCKET·LBN_TESTMODE로 묶음·방식, LBN_TESTANSWER=right|wrong|wrongmark 이면 첫 카드에 답을 넣고 확인한다
             if let b = ProcessInfo.processInfo.environment["LBN_TESTBUCKET"].flatMap(PhraseTestModel.Bucket.init(rawValue:)) { m.restart(b) }
+            if let r = ProcessInfo.processInfo.environment["LBN_RANGE"] { let p = r.split(separator: "-").compactMap { Int($0) }; if p.count == 2 { m.range = p[0]...p[1]; m.restart() } }
             if let md = ProcessInfo.processInfo.environment["LBN_TESTMODE"].flatMap(PhraseTestModel.Mode.init(rawValue:)) { m.restart(md) }
             if let v = ProcessInfo.processInfo.environment["LBN_TESTANSWER"], let it = m.current {
                 switch m.mode {
@@ -226,7 +232,7 @@ struct PhraseTestView: View {
         } else if m.items.isEmpty {
             Entry {
                 Text("시험 볼 표현이 없다").font(Theme.print(16)).italic().foregroundStyle(Theme.pencil).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
-                Text(m.bucket == .mastered ? "습득 완료 도장이 찍힌 표현이 없다." : "표현장에 붙은 표현이 문제가 된다.").pencil()
+                Text(m.range != nil ? "이 번호 범위에 시험 볼 표현이 없다." : m.bucket == .mastered ? "습득 완료 도장이 찍힌 표현이 없다." : "표현장에 붙은 표현이 문제가 된다.").pencil()
             }
         } else if m.done {
             Entry {
@@ -243,6 +249,7 @@ struct PhraseTestView: View {
         } else if let it = m.current {
             Entry(stamp: AnyView(m.drill?.feedback.map { AnyView(Stamp(kind: .grade($0.grade))) } ?? AnyView(Stamp(kind: .pin)))) {
                 if let rp = m.revokedPrev { Text("⟲\u{FE0E} 앞 표현(\(rp))의 습득 완료를 취소했다").font(Theme.hand(18)).foregroundStyle(Theme.red) }
+                if let n = it.seq { Text("#\(n)").font(Theme.hand(15)).foregroundStyle(Theme.pencil).frame(maxWidth: .infinity, alignment: .trailing).frame(height: 14) }   // 붙인 순서 번호 (오른쪽 위)
                 // 문제
                 switch m.mode {
                 case .write:

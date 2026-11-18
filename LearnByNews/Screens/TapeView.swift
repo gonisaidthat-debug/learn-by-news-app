@@ -24,6 +24,7 @@ struct TapeView: View {
                             }
                         }
                     }
+                    RangePick(range: Binding(get: { t.range }, set: { t.set(range: $0) }), max: t.maxSeq).padding(.horizontal, 4).padding(.bottom, 8)
                     controls.padding(.bottom, 10)
                     settings.padding(.bottom, 14)
                     if let e = t.err { ErrorText(message: e).padding(.bottom, 8) }
@@ -39,6 +40,7 @@ struct TapeView: View {
         .task {
             if t.items.isEmpty { await t.load() }
             #if DEBUG
+            if let r = ProcessInfo.processInfo.environment["LBN_RANGE"] { let p = r.split(separator: "-").compactMap { Int($0) }; if p.count == 2 { t.set(range: p[0]...p[1]) } }
             if ProcessInfo.processInfo.environment["LBN_TAPEPLAY"] == "1" { t.play() }   // 화면 확인용
             #endif
         }
@@ -55,9 +57,12 @@ struct TapeView: View {
             Button { t.next() } label: { Text("⏭\u{FE0E}").font(.system(size: 22)).foregroundStyle(Theme.ink) }.buttonStyle(.plain).disabled(t.items.isEmpty)
             VStack(alignment: .leading, spacing: 0) {
                 if let p = t.current {
-                    Text(p.phrase).font(Theme.hand(22)).fontWeight(.bold).foregroundStyle(t.playing ? Theme.red : Theme.ink).lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(p.phrase).font(Theme.hand(22)).fontWeight(.bold).foregroundStyle(t.playing ? Theme.red : Theme.ink).lineLimit(1)
+                        if let n = p.seq { Text("#\(n)").font(Theme.hand(15)).foregroundStyle(Theme.pencil) }
+                    }
                     Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(1)
-                } else { MutedText(text: "읽을 표현이 없다") }
+                } else { MutedText(text: t.range != nil ? "이 번호 범위에 들을 표현이 없다" : "읽을 표현이 없다") }
             }
             Spacer(minLength: 0)
         }
@@ -94,6 +99,7 @@ struct TapeView: View {
                 Button { t.jump(to: i) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(now ? (t.playing ? "▶\u{FE0E}" : "▸") : " ").font(.system(size: 13)).foregroundStyle(Theme.red).frame(width: 14)
+                        if let n = p.seq { Text("#\(n)").font(Theme.hand(14)).foregroundStyle(Theme.pencil).frame(width: 34, alignment: .trailing) }
                         Text(p.phrase).font(Theme.hand(20)).fontWeight(now ? .bold : .regular).foregroundStyle(now ? Theme.red : Theme.ink).lineLimit(1).fixedSize()
                         Text(p.meaning).font(Theme.hand(18)).foregroundStyle(now ? Theme.red : Theme.pencil).lineLimit(1)
                         Spacer(minLength: 0)

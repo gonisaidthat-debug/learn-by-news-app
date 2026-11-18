@@ -101,6 +101,7 @@ struct PhrasesView: View {
             .background(back ? Theme.stickyBack : Theme.stickyColors[i % 3])
             .opacity(done ? 0.62 : 1)
             .overlay(alignment: .top) { Pin().offset(y: -6) }
+            .overlay(alignment: .topLeading) { if let n = p.seq { Text("#\(n)").font(Theme.hand(14)).foregroundStyle(Theme.pencil).padding(EdgeInsets(top: 5, leading: 8, bottom: 0, trailing: 0)) } }   // 붙인 순서 번호
             .overlay(alignment: .topTrailing) {
                 Button { Task { await remove(p) } } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(8) }
                     .buttonStyle(.plain)

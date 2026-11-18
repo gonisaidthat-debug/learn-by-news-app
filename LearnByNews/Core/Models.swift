@@ -103,10 +103,11 @@ struct Phrase: Codable, Identifiable, Hashable {
     var links: [HighlightLink]?  // 이 표현에서 엮은 것 (from_kind "phrase", 2026-11-18)
     var masteredAt: Int64?      // 습득 완료 도장 (null = 아직). 기본 숨김, 응용 출제·시험지에서 빠진다 (2026-11-18)
     var masteryLog: [MasteryLogEntry]?   // 찍기/떼기/자동 취소 기록(최신순, GET /api/phrases)
+    var seq: Int?               // 붙인 순서 번호(1부터, 2026-11-18). 범위 재생·시험에 쓴다. 지워도 뒤 번호는 안 당겨진다
     var isMastered: Bool { masteredAt != nil }
 
-    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil) {
-        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt
+    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil, seq: Int? = nil) {
+        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt; self.seq = seq
     }
 }
 
@@ -268,6 +269,7 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var key: String
     var phrase: String
     var meaning: String
+    var seq: Int?               // 붙인 순서 번호 (범위 시험용)
     var masteredAt: Int64?      // 묶음(아직/습득 완료/전체)은 클라가 거른다 (2026-11-18)
     var sentenceId: String?
     var articleId: String?
