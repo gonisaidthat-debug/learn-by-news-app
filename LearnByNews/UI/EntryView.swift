@@ -596,7 +596,12 @@ struct TryBox: View {
                 if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); guard gradingId == id else { return }; result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
                 else if let r = try await onFree(expr, a, id) { guard gradingId == id else { return }; result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
                 else { guard gradingId == id else { return }; queued = true }
-            } catch { if gradingId == id { msg = error.localizedDescription } }   // 멈춘 요청의 오류(취소·409 cancelled)는 보여주지 않는다
+            } catch {
+                guard gradingId == id else { return }   // 멈춘 요청의 오류(취소·409 cancelled)는 보여주지 않는다
+                // 출제형 답이 네트워크 오류(백그라운드로 끊김 등)면 오류 대신 큐 drill_answer → "연결되면 채점" (2026-11-18)
+                if let e = error as? APIError, e.isNetwork, let p = prompt { DrillStore.shared.answerOffline(p, answer: a); queued = true }
+                else { msg = error.localizedDescription }
+            }
         }
         gradingTask = t
         await t.value

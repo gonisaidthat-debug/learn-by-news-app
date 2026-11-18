@@ -1,9 +1,24 @@
 import Foundation
+import UIKit
+
+/// 채점·총평 요청 중 홈으로 나가거나 화면이 꺼져도 iOS가 바로 앱을 정지시키지 않게 시간을 청한다(약 30초, goni 2026-11-18 "채점 중에 백그라운드로 가면 실패").
+/// 요청이 끝나면 돌려준다. 시간이 다 되면 iOS가 만료 핸들러로 알려 주고, 그때 끊긴 요청은 네트워크 오류 → 큐 경로로 간다
+@MainActor
+final class BackgroundGuard {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+    init(_ name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in self?.end() }
+    }
+    func end() { if id != .invalid { UIApplication.shared.endBackgroundTask(id); id = .invalid } }
+}
 
 enum APIError: LocalizedError {
     case unauthorized
     case server(String)
     case network(String)
+    /// 서버는 2xx를 줬는데 앱이 응답을 해석 못 함(앱 쪽 계약 불일치). 서버 거절(.server)과 다르게 다뤄야 한다 —
+    /// 11/15 PUT session-start `{started_at}`를 `{ok}`로 기대해 실패했고, 그걸 거절로 보고 시작점을 지웠다(2026-11-18 분리)
+    case decode(String)
 
     /// 네트워크(오프라인) 때문인가. 서버가 돌려준 오류(4xx/5xx)는 아니다
     var isNetwork: Bool { if case .network = self { return true }; return false }
@@ -13,6 +28,7 @@ enum APIError: LocalizedError {
         case .unauthorized: return "비밀번호가 필요합니다"
         case .server(let m): return m
         case .network(let m): return m
+        case .decode(let m): return m
         }
     }
 }
@@ -55,6 +71,9 @@ final class API {
         if let body { req.httpBody = try JSONEncoder.api.encode(body) }
         let t0 = Date()
         let data: Data, http: HTTPURLResponse
+        // 쓰기 요청(채점·총평·큐 전송)은 백그라운드 보호. 읽기(GET)는 짧고 다시 읽으면 되니 제외
+        let bg: BackgroundGuard? = method == "GET" ? nil : await MainActor.run { BackgroundGuard("\(method) \(path)") }
+        defer { if let bg { Task { @MainActor in bg.end() } } }
         do {
             let (d, r) = try await session.data(for: req)
             data = d; http = r as! HTTPURLResponse
@@ -80,8 +99,9 @@ final class API {
         AppLog.shared.debug("api", "\(method) \(path) \(http.statusCode)", ["ms": "\(ms)"])
         do { return try JSONDecoder.api.decode(T.self, from: data) }
         catch {
-            AppLog.shared.error("api", "\(method) \(path) 응답 해석 실패", ["error": "\(error)"])
-            throw APIError.server("응답을 읽을 수 없습니다: \(error.localizedDescription)")
+            // DecodingError 상세(keyNotFound/typeMismatch + codingPath)를 그대로 남긴다 — 어느 키가 안 맞는지 바로 보이게
+            AppLog.shared.error("api", "\(method) \(path) 응답 해석 실패", ["error": "\(error)", "body": String(decoding: data.prefix(300), as: UTF8.self)])
+            throw APIError.decode("응답을 읽을 수 없습니다: \(error.localizedDescription)")
         }
     }
 

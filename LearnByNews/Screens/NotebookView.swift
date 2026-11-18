@@ -276,9 +276,23 @@ final class NotebookModel: ObservableObject {
             }
             catch {
                 // 멈춘 요청의 오류(취소, 409 cancelled)는 보여주지 않는다
-                if stopped.contains(attemptId) || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                if stopped.contains(attemptId) { return }
+                // 멈추기가 아닌데 취소됐다(시스템이 끊음) → "채점 중"으로 남기지 말고 큐로 (2026-11-18)
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { queue(sid, translation, attemptId: attemptId, redoing: redoing); return }
                 inflight[sid] = Inflight(translation: translation, attemptId: attemptId, wasRedo: redoing, error: error.localizedDescription)
             }
+        }
+    }
+    /// 포그라운드 복귀 안전망(2026-11-18): "채점 중"으로 보이는데 요청 Task가 없으면(앱이 정지되는 사이 끝나 버림) 큐로 보내 다시 전송한다.
+    /// 같은 attempt_id라 서버에 이미 저장돼 있으면 그 결과를 duplicate로 받는다
+    func recoverInflight() {
+        var n = 0
+        for (sid, f) in inflight where !f.pending && f.error == nil && tasks[sid] == nil && !stopped.contains(f.attemptId) {
+            queue(sid, f.translation, attemptId: f.attemptId, redoing: f.wasRedo); n += 1
+        }
+        if n > 0 {
+            AppLog.shared.warn("notebook", "inflight without task after foreground → queued", ["count": "\(n)"])
+            Task { await SyncManager.shared.flushQueue() }
         }
     }
     private func queue(_ sid: String, _ translation: String, attemptId: String, redoing: Bool) {
@@ -589,6 +603,7 @@ struct NotebookView: View {
     var browseAll: Bool = false
     var round: Int? = nil
     @EnvironmentObject var router: Router
+    @Environment(\.scenePhase) private var phase
     @ObservedObject private var session = SessionModel.shared
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
@@ -662,6 +677,7 @@ struct NotebookView: View {
             #endif
         }
         .onChange(of: m.allDone) { _, _ in checkFinish() }
+        .onChange(of: phase) { _, p in if p == .active { m.recoverInflight() } }   // 백그라운드에서 돌아왔을 때 안전망
         .onChange(of: m.inflight.isEmpty) { _, _ in checkFinish() }
         .onChange(of: m.finishingPass) { _, _ in checkFinish() }
         .onChange(of: m.focusRequest) { _, _ in focused = true }
