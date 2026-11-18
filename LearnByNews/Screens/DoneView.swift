@@ -89,8 +89,11 @@ final class DoneModel: ObservableObject {
     func togglePhrase(_ sid: String, _ e: Expression) async {
         guard var d = data else { return }
         do {
-            if let ex = d.phrases.first(where: { $0.sentenceId == sid && $0.phrase == e.phrase }) {
-                try await SyncManager.shared.deletePhrase(id: ex.id); d.phrases.removeAll { $0.id == ex.id }
+            if let ex = d.phrases.first(where: { $0.sentenceId == sid && $0.phrase == e.phrase }), let i = d.phrases.firstIndex(where: { $0.id == ex.id }) {
+                // 붙은 포스트잇을 다시 누르면 떼는 게 아니라 습득 완료 토글 (goni 2026-11-18 "포스트잇 떼기 자체를 습득 완료로"). 지우는 건 표현장의 ×뿐
+                let on = !ex.isMastered
+                d.phrases[i].masteredAt = try await SyncManager.shared.setMastered(ex.id, on: on)
+                AppLog.shared.info("notebook", on ? "phrase mastered" : "phrase unmastered", ["id": ex.id])
             } else {
                 let p = try await SyncManager.shared.savePhrase(e, sentenceId: sid, articleId: d.id, articleTitle: d.title, sentenceText: d.sentences.first { $0.id == sid }?.text)
                 d.phrases.append(p)

@@ -237,8 +237,9 @@ struct EntryView: View {
                 // 버튼은 지적 글 아래 오른쪽에 (글 옆에 두면 글이 좁아져 줄이 늘어난다)
                 HStack(spacing: 14) {
                     Spacer(minLength: 0)
-                    Tiny(title: saved ? "붙여 둠 ✓\u{FE0E}" : "표현장에 ＋", color: saved ? Theme.grade(.A) : Theme.pencil, size: 17) { onTogglePhrase(e) }
-                        .help(saved ? "표현장에 붙여 둠. 누르면 뗀다" : "이 표현을 표현장에 붙인다 → 응용에서 연습할 수 있다")
+                    // 붙은 뒤 다시 누르면 습득 완료 토글(떼는 게 아니다, goni 2026-11-18). 찍히면 "습득 완료 ✓"
+                    Tiny(title: sp?.isMastered == true ? "습득 완료 ✓\u{FE0E}" : saved ? "붙여 둠 ✓\u{FE0E}" : "표현장에 ＋", color: saved ? Theme.grade(.A) : Theme.pencil, size: 17) { onTogglePhrase(e) }
+                        .help(sp?.isMastered == true ? "습득 완료. 누르면 도장을 떼고 다시 본다" : saved ? "붙여 둠. 누르면 습득 완료(표현장에 남고 응용·시험지에서 빠짐). 떼려면 표현장에서 ×" : "이 표현을 표현장에 붙인다 → 응용에서 연습할 수 있다")
                     if saved, onFree != nil {
                         TryButton(title: tryExpr == e ? "접기" : "써 보기 ✎\u{FE0E}", count: tryExpr == e ? 0 : (drillCounts[src] ?? 0)) { tryExpr = tryExpr == e ? nil : e }
                     }
@@ -313,6 +314,7 @@ struct StickyRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false)) }
                         .buttonStyle(.plain)
+                        .help(saved ? "붙여 둠. 누르면 습득 완료(표현장에 남고 응용·시험지에서 빠짐). 떼려면 표현장에서 ×" : "누르면 표현장에 붙인다")
                     if onTry != nil || (saved && onLink != nil) {
                         HStack(spacing: 12) {
                             if let onTry { TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) } }
