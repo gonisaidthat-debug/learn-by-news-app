@@ -79,42 +79,35 @@ final class SessionModel: ObservableObject {
     func close() async {
         guard let start, !busy else { return }
         busy = true; msg = nil
-        do {
-            let s: StudySession
-            var queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
-            if Connectivity.shared.isOnline, queued > 0 {
-                // 온라인인데 채점 대기가 남아 있으면(막 연결됨) 먼저 보내고 닫아야 세션에 들어간다
-                msg = "채점 대기 \(queued)개를 먼저 보낸다…"
-                await SyncManager.shared.flushAndWait()
-                queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+        var queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+        if Connectivity.shared.isOnline, queued > 0 {
+            // 온라인인데 채점 대기가 남아 있으면(막 연결됨) 먼저 보내고 닫아야 세션에 들어간다
+            msg = "채점 대기 \(queued)개를 먼저 보낸다…"
+            await SyncManager.shared.flushAndWait()
+            queued = Cache.shared.pending(kind: "attempt").count + Cache.shared.pending(kind: "drill_answer").count
+        }
+        var s: StudySession?
+        if Connectivity.shared.isOnline, queued == 0 {
+            do { s = try await API.shared.closeSession(startedAt: start) }
+            catch let e as APIError where e.isNetwork {
+                // 응답만 잃었을 수 있다(2026-11-17 13:12 iPhone: POST /api/sessions "The network connection was lost."인데 서버엔 기록됨 → 시작점이 남아 "11시간 48분").
+                // 서버가 같은 started_at에 멱등(저장된 세션을 duplicate로 돌려줌)이므로 오프라인과 같이 큐에 넣어 연결되면 다시 보낸다
+                AppLog.shared.warn("session", "close network failure, queueing: \(e.localizedDescription)")
             }
-            if Connectivity.shared.isOnline, queued == 0 {
-                s = try await API.shared.closeSession(startedAt: start)
-            } else {
-                // 오프라인(또는 아직 못 보낸 채점 대기가 있음): 캐시+대기분을 세어 임시 세션, 연결되면 서버에 기록(총평 포함)
-                guard let local = Cache.shared.closeSessionLocally(startedAt: start) else { msg = "시작 이후 쓴 문장이 없습니다"; busy = false; return }
-                Cache.shared.enqueue("session_close", SessionStartState(startedAt: start)); s = local
-            }
-            SessionStore.start = nil; self.start = nil
-            await SyncManager.shared.deleteSessionStart()
-            msg = "기록했다 · \(s.line)" + (s.id.hasPrefix("local-") && queued > 0 ? " · 채점 대기 \(queued)개" : "")
-            closed = s
-            sessions.insert(s, at: 0)
-            AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
-        } catch let e as APIError where e.isNetwork {
-            // 응답만 잃었을 수 있다 (2026-11-17 13:12 iPhone: POST /api/sessions "The network connection was lost."인데 서버엔 기록됨 → 로컬 시작점이 남아 "11시간 48분"으로 보였다).
-            // 목록을 다시 읽어 그 시작점의 세션이 있으면 닫힌 것으로 마무리한다. 같은 started_at으로 다시 보내면 세션이 겹치므로 재전송은 하지 않는다
-            if let list = try? await API.shared.sessions(), let s = list.first(where: { $0.startedAt == start }) {
-                sessions = list
-                SessionStore.start = nil; self.start = nil
-                await SyncManager.shared.deleteSessionStart()
-                msg = "기록했다 · \(s.line)"; closed = s
-                AppLog.shared.warn("session", "close response lost but server has the session; finishing locally", ["id": s.id])
-            } else {
-                msg = e.localizedDescription
-                AppLog.shared.warn("session", "close failed (network), start kept: \(e.localizedDescription)")
-            }
-        } catch { msg = error.localizedDescription }
+            catch { msg = error.localizedDescription; busy = false; return }
+        }
+        if s == nil {
+            // 오프라인(또는 아직 못 보낸 채점 대기가 있음, 또는 방금 연결이 끊김): 캐시+대기분을 세어 임시 세션, 연결되면 서버에 기록(총평 포함)
+            guard let local = Cache.shared.closeSessionLocally(startedAt: start) else { msg = "시작 이후 쓴 문장이 없습니다"; busy = false; return }
+            Cache.shared.enqueue("session_close", SessionStartState(startedAt: start)); s = local
+        }
+        guard let s else { busy = false; return }
+        SessionStore.start = nil; self.start = nil
+        await SyncManager.shared.deleteSessionStart()
+        msg = "기록했다 · \(s.line)" + (s.id.hasPrefix("local-") && queued > 0 ? " · 채점 대기 \(queued)개" : "")
+        closed = s
+        sessions.insert(s, at: 0)
+        AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
         busy = false
     }
     func remove(_ s: StudySession) async {
