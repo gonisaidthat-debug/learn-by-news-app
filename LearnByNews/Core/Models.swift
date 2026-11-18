@@ -102,6 +102,7 @@ struct Phrase: Codable, Identifiable, Hashable {
     var backlinks: [Backlink]?
     var links: [HighlightLink]?  // 이 표현에서 엮은 것 (from_kind "phrase", 2026-11-18)
     var masteredAt: Int64?      // 습득 완료 도장 (null = 아직). 기본 숨김, 응용 출제·시험지에서 빠진다 (2026-11-18)
+    var masteryLog: [MasteryLogEntry]?   // 찍기/떼기/자동 취소 기록(최신순, GET /api/phrases)
     var isMastered: Bool { masteredAt != nil }
 
     init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil) {
@@ -192,6 +193,19 @@ struct ArticleDetail: Codable, Identifiable, Hashable {
     }
 }
 
+/// 번역 채점의 지적과 겹쳐 서버가 습득 완료를 자동 취소한 표현 (2026-11-18)
+struct RevokedPhrase: Codable, Identifiable, Hashable { var id: String; var phrase: String; var note: String? }
+/// 습득 완료 기록 (phrase_mastery_log): mastered | unmastered | revoked
+struct MasteryLogEntry: Codable, Identifiable, Hashable {
+    var id: String
+    var phraseId: String?
+    var action: String
+    var note: String?
+    var attemptId: String?
+    var sentenceId: String?
+    var createdAt: Int64
+}
+
 struct AttemptResult: Codable {
     var id: String?            // 서버 시도 id (잘못 눌렀다에 쓴다)
     var grade: Grade
@@ -201,6 +215,7 @@ struct AttemptResult: Codable {
     var translation: String
     var createdAt: Int64
     var phrases: [Phrase]      // 서버가 이번에 표현장에 새로 저장한 포스트잇
+    var revoked: [RevokedPhrase]   // 이 번역의 지적과 겹쳐 습득 완료가 자동 취소된 표현 (큐 재전송의 duplicate 응답에는 없다)
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -212,6 +227,7 @@ struct AttemptResult: Codable {
         translation = try c.decodeIfPresent(String.self, forKey: .translation) ?? ""
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? Int64(Date().timeIntervalSince1970 * 1000)
         phrases = try c.decodeIfPresent([Phrase].self, forKey: .phrases) ?? []
+        revoked = (try? c.decodeIfPresent([RevokedPhrase].self, forKey: .revoked)) ?? []
     }
 
     var asAttempt: Attempt {
@@ -252,6 +268,7 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var key: String
     var phrase: String
     var meaning: String
+    var masteredAt: Int64?      // 묶음(아직/습득 완료/전체)은 클라가 거른다 (2026-11-18)
     var sentenceId: String?
     var articleId: String?
     var sentenceText: String?
@@ -261,6 +278,7 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var lastAt: Int64?
     var tries: Int
     var wrong: Int
+    var isMastered: Bool { masteredAt != nil }
 }
 
 /// 세션 총평: 그 시간의 번역·응용을 모아 쓴 세 줄

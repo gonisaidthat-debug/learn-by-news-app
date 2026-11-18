@@ -6,7 +6,13 @@ import SwiftUI
 @MainActor
 final class PhraseTestModel: ObservableObject {
     enum Reveal { case right, wrong }
+    /// 묶음: 아직(습득 완료 아닌 것, 기본) / 습득 완료 / 전체 — 선택은 기기에 기억 (goni 2026-11-18, 웹 49a6eb3)
+    enum Bucket: String, CaseIterable { case pending, mastered, all }
     @Published var all: [PhraseTestItem]?
+    @Published var bucket: Bucket = Bucket(rawValue: UserDefaults.standard.string(forKey: "lbn_phrase_test_bucket") ?? "") ?? .pending {
+        didSet { UserDefaults.standard.set(bucket.rawValue, forKey: "lbn_phrase_test_bucket") }
+    }
+    @Published var revokedPrev: String?   // 바로 앞 카드에서 몰랐다고 해 습득 완료가 취소된 표현 → 다음 카드 위 한 줄
     @Published var items: [PhraseTestItem] = []
     @Published var i = 0
     @Published var answer = ""
@@ -21,6 +27,8 @@ final class PhraseTestModel: ObservableObject {
     var done: Bool { all != nil && i >= items.count }
     var fresh: Int { items.filter { $0.lastCorrect == nil }.count }
     var missed: Int { items.filter { $0.lastCorrect == false }.count }
+    var pendingCount: Int { (all ?? []).filter { !$0.isMastered }.count }
+    var masteredCount: Int { (all ?? []).filter(\.isMastered).count }
 
     func load() async {
         if all == nil, let c = Cache.shared.phraseTest() { all = c; rebuild() }
@@ -31,12 +39,14 @@ final class PhraseTestModel: ObservableObject {
     /// 안 본 것 → 틀린 것 → 맞힌 것(오래된 순). 같은 묶음 안에서는 섞는다 (시험지와 같은 규칙)
     private func rebuild() {
         func bucket(_ it: PhraseTestItem) -> Int { it.lastCorrect == nil ? 0 : (it.lastCorrect! ? 2 : 1) }
-        items = (all ?? []).shuffled().sorted { a, b in
+        let pool = (all ?? []).filter { self.bucket == .all || ($0.isMastered == (self.bucket == .mastered)) }
+        items = pool.shuffled().sorted { a, b in
             let (ba, bb) = (bucket(a), bucket(b))
             return ba != bb ? ba < bb : (a.lastAt ?? 0) < (b.lastAt ?? 0)
         }
     }
-    func restart() { i = 0; answer = ""; hint = false; revealed = nil; right = 0; wrong = 0; rebuild() }
+    func restart() { i = 0; answer = ""; hint = false; revealed = nil; right = 0; wrong = 0; revokedPrev = nil; rebuild() }
+    func restart(_ b: Bucket) { bucket = b; restart() }
     func next() { i += 1; answer = ""; hint = false; revealed = nil }
 
     /// 비교용: 소문자, 구두점 제거, 공백 정리, 앞의 to/a/an/the 떼기 (웹 norm과 같다)
@@ -56,15 +66,25 @@ final class PhraseTestModel: ObservableObject {
         else { revealed = .wrong }
     }
     func giveUp() { if current != nil, revealed == nil { revealed = .wrong } }
-    /// 틀렸을 때 스스로 매기기
+    /// 틀렸을 때 스스로 매기기. 습득 완료 카드에서 몰랐다고 하면 서버가 도장을 뗀다(revoked) → 다음 카드 위에 한 줄
     func mark(_ correct: Bool) {
         guard let it = current, revealed == .wrong else { return }
         if correct { right += 1 } else { wrong += 1 }
+        revokedPrev = nil
         record(it, correct); next()
     }
     private func record(_ it: PhraseTestItem, _ correct: Bool) {
         AppLog.shared.info("phrasetest", correct ? "right" : "wrong", ["key": it.key])
-        Task { do { try await SyncManager.shared.answerQuiz(key: it.key, sentenceId: it.sentenceId ?? "", source: it.phrase, correct: correct) } catch { err = error.localizedDescription } }
+        Task {
+            do {
+                let revoked = try await SyncManager.shared.answerQuiz(key: it.key, sentenceId: it.sentenceId ?? "", source: it.phrase, correct: correct)
+                if revoked {
+                    revokedPrev = it.phrase
+                    if let j = all?.firstIndex(where: { $0.id == it.id }) { all?[j].masteredAt = nil }
+                    if let j = items.firstIndex(where: { $0.id == it.id }) { items[j].masteredAt = nil }
+                }
+            } catch { err = error.localizedDescription }
+        }
     }
     /// 맞힌 김에 습득 완료 (표현장에 남고 응용·시험에서 빠진다)
     func master() async {
@@ -83,9 +103,18 @@ struct PhraseTestView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 NotebookHead(tab: "\(min(m.i + 1, m.items.count)) / \(m.items.count)") {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("표현장 시험")
-                        Tiny(title: "←\u{FE0E} 표현장", size: 17) { dismiss() }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text("표현장 시험")
+                            Tiny(title: "←\u{FE0E} 표현장", size: 17) { dismiss() }
+                        }
+                        HStack(spacing: 10) {
+                            ForEach(PhraseTestModel.Bucket.allCases, id: \.self) { b in
+                                let label = b == .pending ? "아직 \(m.pendingCount)" : b == .mastered ? "습득 완료 \(m.masteredCount)" : "전체"
+                                Tiny(title: label, color: m.bucket == b ? Theme.ink : Theme.pencil, size: 19) { m.restart(b); focused = true }
+                                    .overlay(alignment: .bottom) { if m.bucket == b { Rectangle().fill(Theme.red).frame(height: 2) } }
+                            }
+                        }
                     }
                 }
                 Paper { paper }
@@ -101,7 +130,11 @@ struct PhraseTestView: View {
             focused = true
             #if DEBUG
             // 화면 확인용: LBN_TESTANSWER=right|wrong 이면 첫 카드에 답을 넣고 확인한다
-            if let v = ProcessInfo.processInfo.environment["LBN_TESTANSWER"], let it = m.current { m.answer = v == "right" ? it.phrase : "keep the rate"; m.check() }
+            if let b = ProcessInfo.processInfo.environment["LBN_TESTBUCKET"].flatMap(PhraseTestModel.Bucket.init(rawValue:)) { m.restart(b) }
+            if let v = ProcessInfo.processInfo.environment["LBN_TESTANSWER"], let it = m.current {
+                m.answer = v == "right" ? it.phrase : "keep the rate"; m.check()
+                if v == "wrongmark" { m.mark(false) }   // 몰랐다까지 → 다음 카드 위 "⟲ 앞 표현…" 확인용
+            }
             #endif
         }
         .refreshable { await m.load(); m.restart() }
@@ -139,6 +172,7 @@ struct PhraseTestView: View {
             }
         } else if let it = m.current {
             Entry(stamp: AnyView(Stamp(kind: .pin))) {
+                if let rp = m.revokedPrev { Text("⟲\u{FE0E} 앞 표현(\(rp))의 습득 완료를 취소했다").font(Theme.hand(18)).foregroundStyle(Theme.red) }
                 Text(it.meaning.isEmpty ? "(뜻 없음)" : it.meaning).handLine(size: 25, color: Theme.ink)
                 Text("이 뜻의 영어 표현은?").pencil()
                 if let t = it.sentenceText, !t.isEmpty, m.hint || m.revealed != nil {
@@ -181,7 +215,7 @@ struct PhraseTestView: View {
                         else { Tiny(title: "습득 완료 ✓\u{FE0E}") { Task { await m.master() } }.help("다 익혔다. 표현장에 남고 응용·시험에서 빠진다") }
                     case .wrong:
                         Tiny(title: "그래도 알았다 ○", color: Theme.grade(.A)) { m.mark(true); focused = true }.keyboardShortcut("1", modifiers: [])
-                        Tiny(title: "몰랐다 ×", color: Theme.red) { m.mark(false); focused = true }.keyboardShortcut("2", modifiers: [])
+                        Tiny(title: it.isMastered ? "몰랐다 × · 도장 뗌" : "몰랐다 ×", color: Theme.red) { m.mark(false); focused = true }.keyboardShortcut("2", modifiers: [])
                     }
                 }
                 if let e = m.err { ErrorText(message: e) }

@@ -77,6 +77,10 @@ struct PhrasesView: View {
                     // 엮은 것 · 다시 본 곳 (읽기만, 2026-11-18)
                     ForEach(p.links ?? []) { l in Text("↗\u{FE0E} \(l.text ?? "") · \(shorten(l.title ?? ""))").font(Theme.hand(15)).foregroundStyle(Theme.blueInk).lineLimit(1) }
                     ForEach(p.backlinks ?? []) { b in Text("←\u{FE0E} \(b.text ?? "") · \(shorten(b.title ?? ""))").font(Theme.hand(15)).foregroundStyle(Theme.pencil).lineLimit(1) }
+                    // 습득 완료 기록 최근 4개: 찍음 / 도장 뗌 / 번역에서 틀려 자동 취소 (2026-11-18)
+                    ForEach((p.masteryLog ?? []).prefix(4)) { e in
+                        Text(Self.logLine(e)).font(Theme.hand(14)).foregroundStyle(e.action == "revoked" ? Theme.red : Theme.pencil).lineLimit(1)
+                    }
                     Spacer(minLength: 4)
                     Text(p.articleTitle ?? "").font(Theme.hand(15)).foregroundStyle(Theme.pencil)
                 } else {
@@ -112,6 +116,14 @@ struct PhrasesView: View {
         do { list = try await API.shared.phrases(q: q); err = nil }
         catch let e as APIError where e.isNetwork { err = Cache.shared.isEmpty ? e.localizedDescription : nil }
         catch { err = error.localizedDescription }
+    }
+    static func logLine(_ e: MasteryLogEntry) -> String {
+        let d = Date(ms: e.createdAt).monthDay
+        switch e.action {
+        case "mastered": return "✓\u{FE0E} 습득 완료 · \(d)"
+        case "unmastered": return "↻\u{FE0E} 도장 뗌 · \(d)"
+        default: return "⟲\u{FE0E} 취소 · \((e.note ?? "").isEmpty ? "" : (e.note! + " · "))\(d)"
+        }
     }
     /// 습득 완료 도장: 지우지 않고 표시만. 기본 보기·응용 출제·시험지에서 빠진다
     private func master(_ p: Phrase, _ on: Bool) async {

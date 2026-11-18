@@ -378,9 +378,9 @@ final class Cache {
             let p = last[r.key]
             last[r.key] = (r.correct, r.createdAt, (p?.n ?? 0) + 1, (p?.wrong ?? 0) + (r.correct ? 0 : 1))
         }
-        return all(CachedPhrase.self).filter { $0.masteredAt == nil }.sorted { $0.createdAt > $1.createdAt }.map { p in
+        return all(CachedPhrase.self).sorted { $0.createdAt > $1.createdAt }.map { p in
             let key = "pr|\(p.id)", l = last[key], s = sents[p.sentenceId]
-            return PhraseTestItem(id: p.id, key: key, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId,
+            return PhraseTestItem(id: p.id, key: key, phrase: p.phrase, meaning: p.meaning, masteredAt: p.masteredAt, sentenceId: p.sentenceId, articleId: p.articleId,
                                   sentenceText: s?.text, sentenceIdx: s?.idx, articleTitle: arts[p.articleId]?.title,
                                   lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0)
         }

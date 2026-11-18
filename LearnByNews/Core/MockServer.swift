@@ -69,6 +69,7 @@ struct MockState {
     var trash: [String: [String: Any]] = [:]
     var links: [[String: Any]] = []   // {id, from_highlight, to_kind, to_id, created_at}
     var cancelledDrills: Set<String> = []   // 응용 채점 멈추기 묘비 (서버 cancelled_attempts)
+    var masteryLog: [[String: Any]] = []   // phrase_mastery_log {id, phrase_id, action, note, attempt_id, sentence_id, created_at}
     // LBN_SESSION=1: 서버에도 시작점이 있는 상태(앱은 서버가 null이면 기기 캐시를 지우므로 둘이 맞아야 세션이 보인다)
     var sessionStart: Int64? = ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" ? Date().ms - 600_000 : nil
     var highlights: [[String: Any]] = []
@@ -125,6 +126,7 @@ struct MockState {
                       ["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
                        "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "note": "뉴스에서 자주 봄", "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
+        if ProcessInfo.processInfo.environment["LBN_MASTERED"] == "1" { masteryLog = [["id": "ml0", "phrase_id": "p1", "action": "mastered", "note": NSNull(), "attempt_id": NSNull(), "sentence_id": NSNull(), "created_at": now - 3_600_000]] }
     }
 
     private mutating func nextId(_ p: String) -> String { seq += 1; return "\(p)\(seq)" }
@@ -156,6 +158,7 @@ struct MockState {
         var o = p
         o["links"] = links.filter { fromKind($0) == "phrase" && $0["from_highlight"] as? String == p["id"] as? String }.map(decorateLink)
         o["backlinks"] = links.filter { $0["to_kind"] as? String == "phrase" && $0["to_id"] as? String == p["id"] as? String }.map(decorateBacklink)
+        o["mastery_log"] = masteryLog.filter { $0["phrase_id"] as? String == p["id"] as? String }.sorted { ($0["created_at"] as! Int64) > ($1["created_at"] as! Int64) }
         return o
     }
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
@@ -234,7 +237,27 @@ struct MockState {
                 let p: [String: Any] = ["id": nextId("p"), "phrase": e["phrase"]!, "meaning": e["meaning"]!, "sentence_id": id, "article_id": sentences[i]["article_id"]!, "created_at": at, "sentence_text": sentences[i]["text"]!, "article_title": a?["title"] ?? ""]
                 phrases.append(p); saved.append(p)
             }
-            var out = f; out["id"] = "at-\(at)"; out["translation"] = tr; out["created_at"] = at; out["phrases"] = saved
+            // 지적과 겹치는 습득 완료 표현은 도장을 떼고 revoked로 기록 (서버 규칙: 정규화 후 한쪽이 다른 쪽에 포함, 3글자 이상).
+            // 모의에서는 같은 공책의 습득 완료 표현을 지적에 하나 끼워 넣어 흐름을 보여 준다
+            var issues = (f["issues"] as? [[String: String]]) ?? []
+            if tr.count >= 6, let mp = phrases.first(where: { $0["article_id"] as? String == sentences[i]["article_id"] as? String && !($0["mastered_at"] is NSNull) }) {
+                issues.append(["source": mp["phrase"] as! String, "mine": String(tr.prefix(5)), "meaning": mp["meaning"] as! String, "why": "(모의) 습득 완료 표현인데 틀렸다"])
+            }
+            var revoked: [[String: Any]] = []
+            for iss in issues {
+                let src = (iss["source"] ?? "").lowercased()
+                guard src.count >= 3 else { continue }
+                for j in phrases.indices where !(phrases[j]["mastered_at"] is NSNull) {
+                    let ph = (phrases[j]["phrase"] as! String).lowercased()
+                    guard ph.count >= 3, src.contains(ph) || ph.contains(src) else { continue }
+                    phrases[j]["mastered_at"] = NSNull()
+                    let note = "\(iss["source"] ?? "") → \(iss["meaning"] ?? "")"
+                    masteryLog.append(["id": nextId("ml"), "phrase_id": phrases[j]["id"]!, "action": "revoked", "note": note, "attempt_id": "at-\(at)", "sentence_id": id, "created_at": at])
+                    revoked.append(["id": phrases[j]["id"]!, "phrase": phrases[j]["phrase"]!, "note": note])
+                }
+            }
+            var out = f; out["issues"] = issues; out["id"] = "at-\(at)"; out["translation"] = tr; out["created_at"] = at; out["phrases"] = saved; out["revoked"] = revoked
+            if var atv = sentences[i]["attempt"] as? [String: Any], var fb2 = atv["feedback"] as? [String: Any] { fb2["issues"] = issues; atv["feedback"] = fb2; sentences[i]["attempt"] = atv }
             return (200, out)
         case "POST /api/sentences/:id/merge":
             guard let i = sentences.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
@@ -288,10 +311,10 @@ struct MockState {
         case "GET /api/phrases/test":
             var last: [String: (Bool, Int64, Int, Int)] = [:]
             for r in quizResults { let k = r["key"] as! String; let p = last[k]; let c = r["correct"] as! Bool; last[k] = (c, r["created_at"] as! Int64, (p?.2 ?? 0) + 1, (p?.3 ?? 0) + (c ? 0 : 1)) }
-            return (200, phrases.filter { $0["mastered_at"] is NSNull }.reversed().map { p -> [String: Any] in
+            return (200, phrases.reversed().map { p -> [String: Any] in
                 let key = "pr|\(p["id"]!)"; let l = last[key]
                 let s = sentences.first { $0["id"] as? String == p["sentence_id"] as? String }
-                return ["id": p["id"]!, "key": key, "phrase": p["phrase"]!, "meaning": p["meaning"]!, "sentence_id": p["sentence_id"]!, "article_id": p["article_id"]!,
+                return ["id": p["id"]!, "key": key, "phrase": p["phrase"]!, "meaning": p["meaning"]!, "mastered_at": p["mastered_at"] ?? NSNull(), "sentence_id": p["sentence_id"]!, "article_id": p["article_id"]!,
                         "sentence_text": s?["text"] ?? NSNull(), "sentence_idx": s?["idx"] ?? NSNull(), "article_title": p["article_title"] ?? NSNull(),
                         "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0]
             } as [[String: Any]])
@@ -314,6 +337,7 @@ struct MockState {
             let on = (body["on"] as? Bool) ?? true
             let at: Any = on ? Date().ms : NSNull()
             phrases[i]["mastered_at"] = at
+            masteryLog.append(["id": nextId("ml"), "phrase_id": id, "action": on ? "mastered" : "unmastered", "note": NSNull(), "attempt_id": NSNull(), "sentence_id": NSNull(), "created_at": Date().ms])
             return (200, ["ok": true, "id": id, "mastered_at": at])
         case "GET /api/quiz":
             var items: [[String: Any]] = []
@@ -347,7 +371,14 @@ struct MockState {
             }
             return (200, items)
         case "POST /api/quiz/results":
-            quizResults.append(["id": nextId("q"), "key": body["key"] ?? "", "source": body["source"] ?? "", "correct": body["correct"] ?? false, "created_at": Date().ms, "kind": (body["key"] as? String ?? "").contains("|") ? "issue" : "phrase"])
+            let key = body["key"] as? String ?? "", correct = body["correct"] as? Bool ?? false
+            quizResults.append(["id": nextId("q"), "key": key, "source": body["source"] ?? "", "correct": correct, "created_at": Date().ms, "kind": key.contains("|") ? "issue" : "phrase"])
+            // 표현장 시험에서 몰랐다 → 습득 완료였으면 도장을 떼고 기록 (2026-11-18)
+            if key.hasPrefix("pr|"), !correct, let i = phrases.firstIndex(where: { $0["id"] as? String == String(key.dropFirst(3)) }), !(phrases[i]["mastered_at"] is NSNull) {
+                phrases[i]["mastered_at"] = NSNull()
+                masteryLog.append(["id": nextId("ml"), "phrase_id": phrases[i]["id"]!, "action": "revoked", "note": "표현장 시험에서 몰랐음", "attempt_id": NSNull(), "sentence_id": phrases[i]["sentence_id"]!, "created_at": Date().ms])
+                return (200, ["ok": true, "revoked": true])
+            }
             return (200, ["ok": true])
         case "GET /api/sessions":
             return (200, sessions.sorted { ($0["started_at"] as! Int64) > ($1["started_at"] as! Int64) })

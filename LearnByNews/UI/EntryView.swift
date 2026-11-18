@@ -125,6 +125,7 @@ struct EntryView: View {
     var onAnswerDrill: ((Drill, String) async throws -> Drill?)?   // nil = 큐에 들어감(연결되면 채점)
     var drillCounts: [String: Int] = [:]
     var onDrillGraded: ((String) -> Void)?      // 상자에서 채점이 끝났다 → 그 표현 횟수 +1
+    var revoked: [RevokedPhrase] = []           // 이번 채점으로 습득 완료가 취소된 표현 → 첨삭 위 한 줄 (2026-11-18)
     @State private var tryExpr: Expression?
     @State private var linkingPhrase: String?     // "엮기"가 열린 표현(표현장 id)
 
@@ -153,7 +154,12 @@ struct EntryView: View {
             } else {
                 if a.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) }
                 else { Text(markWrong(a.translation, fb.issues)).koLine() }
-                if expanded { marks(fb) }
+                if expanded {
+                    ForEach(revoked) { rv in
+                        Text("⟲\u{FE0E} 습득 완료 취소 · \(rv.phrase) — 이 문장에서 틀려서 표현장에 다시 보인다").font(Theme.hand(18)).foregroundStyle(Theme.red)
+                    }
+                    marks(fb)
+                }
             }
         }
         #if DEBUG

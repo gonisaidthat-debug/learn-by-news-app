@@ -113,6 +113,7 @@ final class SyncManager: ObservableObject {
                     let sid = real(b.sentenceId)
                     let r = try await API.shared.attempt(sid, translation: b.skip ? "" : b.translation, attemptId: b.attemptId, writtenAt: b.createdAt)   // 쓴 시각이 created_at이 돼야 세션 범위·기록 날짜가 맞는다
                     for p in r.phrases { Cache.shared.upsertPhrase(p) }
+                    for rv in r.revoked { Cache.shared.setPhraseMastered(id: rv.id, at: nil) }   // 지적과 겹쳐 자동 취소된 습득 완료
                     sentAttempts = true
                     NotificationCenter.default.post(name: .lbnAttemptGraded, object: nil, userInfo: ["attemptId": b.attemptId, "sentenceId": b.sentenceId, "result": r])
                 case "attempt_cancel":
@@ -173,7 +174,8 @@ final class SyncManager: ObservableObject {
                     _ = try await API.shared.cancelDrillGrading(b.id)
                 case "quiz_result":
                     let b = try JSONDecoder.api.decode(API.QuizResultBody.self, from: op.payload)
-                    let _: API.OK = try await API.shared.send("POST", "/api/quiz/results", body: b)
+                    let r: QuizResultResponse = try await API.shared.send("POST", "/api/quiz/results", body: b)
+                    _ = Self.applyQuizRevoke(key: b.key, r)
                 case "phrase_save":
                     let b = try JSONDecoder.api.decode(PhraseSaveOp.self, from: op.payload)
                     let p = try await API.shared.savePhrase(Expression(phrase: b.phrase, meaning: b.meaning), sentenceId: b.sentenceId, articleId: b.articleId)
@@ -501,16 +503,27 @@ final class SyncManager: ObservableObject {
     func answerQuiz(_ it: QuizItem, correct: Bool) async throws {
         try await answerQuiz(key: it.key, sentenceId: it.sentenceId, source: it.source, correct: correct)
     }
-    /// 시험 결과 기록(시험지·표현장 시험 공용): 캐시에 먼저, 온라인이면 바로, 아니면 큐 quiz_result
-    func answerQuiz(key: String, sentenceId: String, source: String, correct: Bool) async throws {
+    struct QuizResultResponse: Decodable { var ok: Bool; var revoked: Bool? }
+    /// 시험 결과 기록(시험지·표현장 시험 공용): 캐시에 먼저, 온라인이면 바로, 아니면 큐 quiz_result.
+    /// 돌려주는 값: 표현장 시험("pr|id")에서 몰랐다고 해 서버가 습득 완료를 뗐으면 true (캐시도 뗀다)
+    @discardableResult
+    func answerQuiz(key: String, sentenceId: String, source: String, correct: Bool) async throws -> Bool {
         Cache.shared.addQuizResult(key: key, sentenceId: sentenceId, source: source, correct: correct)
         let body = API.QuizResultBody(key: key, sentenceId: sentenceId, source: source, correct: correct)
         if Connectivity.shared.isOnline {
-            do { let _: API.OK = try await API.shared.send("POST", "/api/quiz/results", body: body); return }
+            do { let r: QuizResultResponse = try await API.shared.send("POST", "/api/quiz/results", body: body); return Self.applyQuizRevoke(key: key, r) }
             catch let e as APIError where e.isNetwork { /* 아래 큐로 */ }
         }
         Cache.shared.enqueue("quiz_result", body)
         pendingCount = Cache.shared.pendingCount
+        return false
+    }
+    /// 서버가 몰랐다 기록으로 습득 완료를 뗐으면 캐시 phrases의 masteredAt도 지운다
+    @MainActor static func applyQuizRevoke(key: String, _ r: QuizResultResponse) -> Bool {
+        guard r.revoked == true, key.hasPrefix("pr|") else { return false }
+        Cache.shared.setPhraseMastered(id: String(key.dropFirst(3)), at: nil)
+        AppLog.shared.info("phrasetest", "mastered revoked by wrong answer", ["key": key])
+        return true
     }
 
     /// 포스트잇 붙이기: 온라인이면 바로 서버 Phrase, 아니면 임시 id로 큐

@@ -60,6 +60,7 @@ final class NotebookModel: ObservableObject {
     @Published var lastGraded: String?
     @Published var err: String?
     @Published var scrollTo: String?     // 스크롤 목표 ("bottom" 또는 문장 id)
+    @Published var revokedNotes: [String: [RevokedPhrase]] = [:]   // 이번에 채점하며 습득 완료가 취소된 표현 (문장 id별, 화면에 있는 동안만)
     @Published var focusRequest = 0      // 입력란에 포커스를 달라는 신호
     var browse: Bool { focusId != nil || browseAll }
     /// 열람(링크 따라가기·책갈피·기록에서 열기·전체 열람)에서 다음에 쓸 문장 자리에 "이어서 쓰기 →"를 둔다(goni 2026-11-18, 웹과 같은 규칙).
@@ -253,6 +254,12 @@ final class NotebookModel: ObservableObject {
         // 서버가 이번에 표현장에 저장한 포스트잇 → 처음부터 "붙은" 상태로
         let have = Set(d.phrases.map(\.id))
         d.phrases.append(contentsOf: r.phrases.filter { !have.contains($0.id) })
+        // 지적과 겹쳐 습득 완료가 자동 취소된 표현(goni 2026-11-18): 캐시·이 공책의 도장을 떼고 첨삭 위에 한 줄
+        for rv in r.revoked {
+            Cache.shared.setPhraseMastered(id: rv.id, at: nil)
+            if let j = d.phrases.firstIndex(where: { $0.id == rv.id }) { d.phrases[j].masteredAt = nil }
+        }
+        if !r.revoked.isEmpty { revokedNotes[sid] = r.revoked; AppLog.shared.info("notebook", "mastered revoked", ["sentence": sid, "phrases": r.revoked.map(\.phrase).joined(separator: ", ")]) }
         data = d
         inflight[sid] = nil
         if r.grade != .skip { open = sid; lastGraded = sid; requestScroll("bottom") }
@@ -902,7 +909,8 @@ struct NotebookView: View {
                 onDrillFor: { e in try await m.drillFor(x.id, e) },
                 onAnswerDrill: { d, a in try await m.answerDrill(d, a) },
                 drillCounts: d.drillCounts,
-                onDrillGraded: { ph in m.bumpDrillCount(ph) }
+                onDrillGraded: { ph in m.bumpDrillCount(ph) },
+                revoked: m.revokedNotes[x.id] ?? []
             )
             .id(x.id)
         } else {
