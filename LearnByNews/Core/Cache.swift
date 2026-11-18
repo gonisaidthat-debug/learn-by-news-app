@@ -374,15 +374,17 @@ final class Cache {
         let sents = Dictionary(uniqueKeysWithValues: all(CachedSentence.self).map { ($0.id, $0) })
         let arts = Dictionary(uniqueKeysWithValues: all(CachedArticle.self).map { ($0.id, $0) })
         var last: [String: (correct: Bool, at: Int64, n: Int, wrong: Int)] = [:]
-        for r in all(CachedQuizResult.self).sorted(by: { $0.createdAt < $1.createdAt }) where r.key.hasPrefix("pr|") {
+        for r in all(CachedQuizResult.self).sorted(by: { $0.createdAt < $1.createdAt }) where r.key.hasPrefix("pr|") || r.key.hasPrefix("pm|") {
             let p = last[r.key]
             last[r.key] = (r.correct, r.createdAt, (p?.n ?? 0) + 1, (p?.wrong ?? 0) + (r.correct ? 0 : 1))
         }
         return all(CachedPhrase.self).sorted { $0.createdAt > $1.createdAt }.map { p in
             let key = "pr|\(p.id)", l = last[key], s = sents[p.sentenceId]
+            let mk = "pm|\(p.id)", ml = last[mk]
             return PhraseTestItem(id: p.id, key: key, phrase: p.phrase, meaning: p.meaning, masteredAt: p.masteredAt, sentenceId: p.sentenceId, articleId: p.articleId,
                                   sentenceText: s?.text, sentenceIdx: s?.idx, articleTitle: arts[p.articleId]?.title,
-                                  lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0)
+                                  lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0,
+                                  mKey: mk, mLastCorrect: ml?.correct, mLastAt: ml?.at, mTries: ml?.n ?? 0, mWrong: ml?.wrong ?? 0)
         }
     }
     func quiz() -> [QuizItem]? {

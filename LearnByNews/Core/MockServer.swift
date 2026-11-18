@@ -313,10 +313,12 @@ struct MockState {
             for r in quizResults { let k = r["key"] as! String; let p = last[k]; let c = r["correct"] as! Bool; last[k] = (c, r["created_at"] as! Int64, (p?.2 ?? 0) + 1, (p?.3 ?? 0) + (c ? 0 : 1)) }
             return (200, phrases.reversed().map { p -> [String: Any] in
                 let key = "pr|\(p["id"]!)"; let l = last[key]
+                let mk = "pm|\(p["id"]!)"; let ml = last[mk]
                 let s = sentences.first { $0["id"] as? String == p["sentence_id"] as? String }
                 return ["id": p["id"]!, "key": key, "phrase": p["phrase"]!, "meaning": p["meaning"]!, "mastered_at": p["mastered_at"] ?? NSNull(), "sentence_id": p["sentence_id"]!, "article_id": p["article_id"]!,
                         "sentence_text": s?["text"] ?? NSNull(), "sentence_idx": s?["idx"] ?? NSNull(), "article_title": p["article_title"] ?? NSNull(),
-                        "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0]
+                        "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0,
+                        "m_key": mk, "m_last_correct": ml.map { $0.0 } ?? NSNull(), "m_last_at": ml.map { $0.1 } ?? NSNull(), "m_tries": ml?.2 ?? 0, "m_wrong": ml?.3 ?? 0]
             } as [[String: Any]])
         case "GET /api/phrases":
             let q = query.split(separator: "=").dropFirst().joined().removingPercentEncoding?.lowercased() ?? ""
@@ -374,7 +376,7 @@ struct MockState {
             let key = body["key"] as? String ?? "", correct = body["correct"] as? Bool ?? false
             quizResults.append(["id": nextId("q"), "key": key, "source": body["source"] ?? "", "correct": correct, "created_at": Date().ms, "kind": key.contains("|") ? "issue" : "phrase"])
             // 표현장 시험에서 몰랐다 → 습득 완료였으면 도장을 떼고 기록 (2026-11-18)
-            if key.hasPrefix("pr|"), !correct, let i = phrases.firstIndex(where: { $0["id"] as? String == String(key.dropFirst(3)) }), !(phrases[i]["mastered_at"] is NSNull) {
+            if key.hasPrefix("pr|") || key.hasPrefix("pm|"), !correct, let i = phrases.firstIndex(where: { $0["id"] as? String == String(key.dropFirst(3)) }), !(phrases[i]["mastered_at"] is NSNull) {
                 phrases[i]["mastered_at"] = NSNull()
                 masteryLog.append(["id": nextId("ml"), "phrase_id": phrases[i]["id"]!, "action": "revoked", "note": "표현장 시험에서 몰랐음", "attempt_id": NSNull(), "sentence_id": phrases[i]["sentence_id"]!, "created_at": Date().ms])
                 return (200, ["ok": true, "revoked": true])

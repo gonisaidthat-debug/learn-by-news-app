@@ -520,7 +520,7 @@ final class SyncManager: ObservableObject {
     }
     /// 서버가 몰랐다 기록으로 습득 완료를 뗐으면 캐시 phrases의 masteredAt도 지운다
     @MainActor static func applyQuizRevoke(key: String, _ r: QuizResultResponse) -> Bool {
-        guard r.revoked == true, key.hasPrefix("pr|") else { return false }
+        guard r.revoked == true, key.hasPrefix("pr|") || key.hasPrefix("pm|") else { return false }
         Cache.shared.setPhraseMastered(id: String(key.dropFirst(3)), at: nil)
         AppLog.shared.info("phrasetest", "mastered revoked by wrong answer", ["key": key])
         return true

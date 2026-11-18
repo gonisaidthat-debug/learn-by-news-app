@@ -278,7 +278,14 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var lastAt: Int64?
     var tries: Int
     var wrong: Int
+    // 뜻 쓰기(표현 → 뜻) 기록은 따로: key "pm|<id>" (2026-11-18)
+    var mKey: String?
+    var mLastCorrect: Bool?
+    var mLastAt: Int64?
+    var mTries: Int?
+    var mWrong: Int?
     var isMastered: Bool { masteredAt != nil }
+    var meaningKey: String { mKey ?? "pm|\(id)" }
 }
 
 /// 세션 총평: 그 시간의 번역·응용을 모아 쓴 세 줄
