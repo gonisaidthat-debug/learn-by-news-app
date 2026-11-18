@@ -83,7 +83,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/sentences/:id/memo` | `{start_word, end_word, span, note, links?: {to_kind, to_id}[]}` | `Highlight & {phrase, links, backlinks: []}` — Claude 없이 내 메모만 붙인다(answer 빈 값, note에 메모). 표현장에 메모를 뜻으로 붙는다. `links`는 메모와 함께 엮을 대상(최대 20, 틀린 건 건너뜀). 오프라인 큐 가능 |
 | PATCH `/api/highlights/:id` | `{note}` | `{ok, note}` 기존 형광펜에 내 메모 넣기·고치기(빈 문자열이면 지움). 오프라인 큐 가능 |
 | POST `/api/drills/next` | `{phrase_id?}` | `Drill`(reference 없음). 안 푼 최근 문제가 있으면 그걸 다시 준다. 없으면 표현장에서 골라 Claude가 한국어 문장을 만든다(호출 1) |
-| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}`. **`answered_at`(ms, 선택, 2026-11-15)**: 오프라인에서 쓴 시각, 큐 재생 때 보낸다. **멈추기(2026-11-18)**: 채점 중 `DELETE /api/drills/:id/grading`이 오면 결과를 버리고 409 `{cancelled:true}`, 문제는 안 푼 채로 남는다 |
+| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}`. **`answered_at`(ms, 선택, 2026-11-15)**: 오프라인에서 쓴 시각, 큐 재생 때 보낸다. **멈추기(2026-11-18)**: 채점 중 `DELETE /api/drills/:id/grading`이 오면 결과를 버리고 409 `{cancelled:true}`, 문제는 안 푼 채로 남는다 **멱등(2026-11-18)**: 이미 채점된 문제에 답이 다시 오면 재채점 없이 저장된 결과를 `duplicate:true`로 돌려준다(한 문제는 한 번만 채점) |
 | DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
 | DELETE `/api/drills/:id/grading` | — | `{ok, removed}` **응용 채점 멈추기**(2026-11-18): 채점이 끝났으면 되돌리고(자유 작문은 행 삭제, 출제형은 답·등급·answered_at을 비워 안 푼 문제로) removed:true, 아직이면 묘비를 남겨 결과가 와도 버리게 하고 removed:false. 번역의 `DELETE /api/attempts/:id`와 같은 방식 |
 | GET `/api/drills?days=30` | — | 푼 문제 목록 최신순 |
