@@ -61,11 +61,9 @@ final class NotebookModel: ObservableObject {
     @Published var scrollTo: String?     // 스크롤 목표 ("bottom" 또는 문장 id)
     @Published var focusRequest = 0      // 입력란에 포커스를 달라는 신호
     var browse: Bool { focusId != nil || browseAll }
-    /// 열람(링크 따라가기·책갈피·기록에서 열기·전체 열람)이어도 다음에 쓸 문장 자리에는 입력란을 둔다(goni 2026-11-18, 웹과 같은 규칙).
-    /// 회차 열람(round)과 다시 쓰기 진행 중(RedoProgress)은 빼고 — 그때는 보기만
-    var writableBrowse: Bool { browse && round == nil && RedoProgress.load(id) == nil }
-    /// 제출·채점 뒤 스크롤 목표: 쓰기 모드는 바닥(= 입력란), 열람은 뒤 문장이 다 그려져 있으니 입력란(다음 문장)으로
-    var afterWriteScroll: String { browse ? (current?.id ?? "bottom") : "bottom" }
+    /// 열람(링크 따라가기·책갈피·기록에서 열기·전체 열람)에서 다음에 쓸 문장 자리에 "이어서 쓰기 →"를 둔다(goni 2026-11-18, 웹과 같은 규칙).
+    /// 입력란은 열지 않는다(처음엔 열었다가 "버튼이 바로 보이니 열람에서 안 열어도 된다"로 정리). 회차 열람(round)과 다시 쓰기 진행 중(RedoProgress)은 빼고 — 그때는 보기만
+    var continueInBrowse: Bool { browse && round == nil && RedoProgress.load(id) == nil }
     private var tasks: [String: Task<Void, Never>] = [:]   // 채점 요청. 멈추기 때 cancel
     private var stopped: Set<String> = []                   // 멈춘 attempt_id. 뒤늦은 오류를 무시한다
 
@@ -256,7 +254,7 @@ final class NotebookModel: ObservableObject {
         d.phrases.append(contentsOf: r.phrases.filter { !have.contains($0.id) })
         data = d
         inflight[sid] = nil
-        if r.grade != .skip { open = sid; lastGraded = sid; requestScroll(afterWriteScroll) }
+        if r.grade != .skip { open = sid; lastGraded = sid; requestScroll("bottom") }
     }
 
     func send(_ sid: String, _ translation: String, wasRedo: Bool? = nil) {
@@ -329,7 +327,7 @@ final class NotebookModel: ObservableObject {
             return
         }
         redo = nil
-        requestScroll(afterWriteScroll)
+        requestScroll("bottom")
     }
 
     func startRedo(_ s: Sentence) { redo = s.id; open = nil; input = "" }
@@ -789,9 +787,13 @@ struct NotebookView: View {
 
     @ViewBuilder
     private func row(_ x: Sentence, d: ArticleDetail) -> some View {
-        if m.writableBrowse, m.redo == nil, x.id == m.current?.id {
-            // 열람으로 들어왔어도 다음에 쓸 문장 자리는 입력란, 그 뒤 문장만 "(아직)" (goni 2026-11-18)
-            inputBlock(x).id(x.id)
+        if m.continueInBrowse, m.redo == nil, x.id == m.current?.id {
+            // 열람: 다음에 쓸 문장 자리에 원문 + "이어서 쓰기 →"(쓰기 화면으로, 그 문장부터). 입력란은 열지 않는다. 그 뒤 문장만 "(아직)" (goni 2026-11-18)
+            Entry {
+                Text(x.text).enLine()
+                Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }.frame(height: Theme.lh)
+            }
+            .id(x.id)
         } else if m.redo == x.id {
             inputBlock(x)
         } else if let f = m.inflight[x.id] {
@@ -869,10 +871,6 @@ struct NotebookView: View {
                         if v.contains("\n") { m.input = v.replacingOccurrences(of: "\n", with: " "); m.submit(skip: false) }
                     }
             }
-            if m.writableBrowse, !redo {
-                // 열람 상태의 입력란 바로 아래: 쓰기 화면(다음 입력란까지만 보이는 평소 공책)으로 전환, 그 문장부터 (goni 2026-11-18, 웹 16f601b)
-                Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }.frame(height: Theme.lh)
-            }
         }
         .id(s.id)
     }
@@ -887,8 +885,8 @@ struct NotebookView: View {
                     Tiny(title: "←\u{FE0E} 돌아가기") { if router.shelfPath.count > 1 { router.shelfPath.removeLast() } else { router.shelfPath = [] } }
                     if RedoProgress.load(articleId) != nil {
                         Tiny(title: "다시 쓰기 이어서 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }
-                    } else if cur != nil, m.writableBrowse {
-                        if session.inSession { Tiny(title: "건너뛰기") { m.submit(skip: true) } }   // "이어서 쓰기 →"는 본문 입력란 바로 아래에 있다
+                    } else if cur != nil, m.continueInBrowse {
+                        // "이어서 쓰기 →"는 본문의 다음 문장 자리에 있다
                     } else if cur != nil {
                         Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }
                     } else {
