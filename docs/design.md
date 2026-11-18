@@ -65,7 +65,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/sentences/:id/merge` | `{dir:"prev"\|"next"}` | `{ok, kept, text}` 붙는 쪽 문장 줄만 삭제. 그 문장의 attempts·phrases·highlights(start/end_word += 앞 문장 단어 수)·quiz_results·drills·bookmark는 `kept`로 옮겨짐. 채점된 문장끼리도 됨 → 합친 뒤 공책을 다시 받고 `kept`에 attempt가 있으면 다시 쓰기로 연다 |
 | DELETE `/api/sentences/:id` | — | `{ok, trash_id}` — 문장·채점·표현·형광펜을 `trash`에 담고 지운다 |
 | POST `/api/trash/:id/restore` | — | `{ok, sentence_id}` 휴지통에서 그대로 되살림 |
-| GET `/api/phrases?q=` | — | `Phrase[]` 최신순, q는 phrase/meaning LIKE. `mastered_at`(ms\|null, 2026-11-18) 포함 — 습득 완료는 서버가 거르지 않고 클라이언트가 기본 숨김 |
+| GET `/api/phrases?q=` | — | `Phrase[]` 최신순(최대 5000, 2026-11-18까지 500으로 잘려 표현장이 오래된 것을 못 보였다), q는 phrase/meaning LIKE. `mastered_at`(ms\|null, 2026-11-18) 포함 — 습득 완료는 서버가 거르지 않고 클라이언트가 기본 숨김 |
 | POST `/api/phrases` | `{phrase, meaning, sentence_id, article_id}` | `Phrase` |
 | DELETE `/api/phrases/:id` | — | `{ok}` |
 | PUT `/api/phrases/:id/mastered` | `{on?: boolean}` (기본 true) | `{ok, id, mastered_at}` **습득 완료 도장**(goni 2026-11-18): 지우지 않고 `mastered_at`만 찍는다/뗀다(on:false → null). 찍힌 표현은 응용 출제(`/api/drills/next` 무작위 선택, `/batch`)와 시험지 카드에서 빠진다. `phrase_id`를 지정한 써 보기·문제 내줘는 그대로 된다. 404 없는 id. 찍기/떼기는 서버 `phrase_mastery_log`에 남는다. **자동 취소(2026-11-18)**: 번역 채점의 지적과 겹치는 습득 완료 표현은 서버가 도장을 떼고 `revoked`로 기록 → attempts 응답 `revoked: [{id, phrase, note}]`, `GET /api/phrases`의 각 표현에 `mastery_log: [{id, phrase_id, action: mastered\|unmastered\|revoked, note, attempt_id, sentence_id, created_at}]`(최신순) |
