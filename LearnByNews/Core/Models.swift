@@ -246,6 +246,23 @@ struct QuizItem: Codable, Identifiable, Hashable {
     var id: String { key }
 }
 
+/// 표현장 시험 카드 (GET /api/phrases/test, 2026-11-18): 뜻 → 영어 표현. key "pr|<id>"로 quiz_results에 기록
+struct PhraseTestItem: Codable, Identifiable, Hashable {
+    var id: String
+    var key: String
+    var phrase: String
+    var meaning: String
+    var sentenceId: String?
+    var articleId: String?
+    var sentenceText: String?
+    var sentenceIdx: Int?
+    var articleTitle: String?
+    var lastCorrect: Bool?
+    var lastAt: Int64?
+    var tries: Int
+    var wrong: Int
+}
+
 /// 세션 총평: 그 시간의 번역·응용을 모아 쓴 세 줄
 struct SessionReview: Codable, Hashable {
     var summary: String

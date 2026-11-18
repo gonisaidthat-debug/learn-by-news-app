@@ -161,7 +161,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -285,6 +285,16 @@ struct MockState {
             guard let s = trash[id] else { return (404, ["error": "휴지통에 없다"]) }
             sentences.append(s); trash[id] = nil
             return (200, ["ok": true, "sentence_id": s["id"]!])
+        case "GET /api/phrases/test":
+            var last: [String: (Bool, Int64, Int, Int)] = [:]
+            for r in quizResults { let k = r["key"] as! String; let p = last[k]; let c = r["correct"] as! Bool; last[k] = (c, r["created_at"] as! Int64, (p?.2 ?? 0) + 1, (p?.3 ?? 0) + (c ? 0 : 1)) }
+            return (200, phrases.filter { $0["mastered_at"] is NSNull }.reversed().map { p -> [String: Any] in
+                let key = "pr|\(p["id"]!)"; let l = last[key]
+                let s = sentences.first { $0["id"] as? String == p["sentence_id"] as? String }
+                return ["id": p["id"]!, "key": key, "phrase": p["phrase"]!, "meaning": p["meaning"]!, "sentence_id": p["sentence_id"]!, "article_id": p["article_id"]!,
+                        "sentence_text": s?["text"] ?? NSNull(), "sentence_idx": s?["idx"] ?? NSNull(), "article_title": p["article_title"] ?? NSNull(),
+                        "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0]
+            } as [[String: Any]])
         case "GET /api/phrases":
             let q = query.split(separator: "=").dropFirst().joined().removingPercentEncoding?.lowercased() ?? ""
             return (200, phrases.filter { q.isEmpty || ($0["phrase"] as! String).lowercased().contains(q) || ($0["meaning"] as! String).lowercased().contains(q) }.reversed().map(decoratePhrase) as [[String: Any]])

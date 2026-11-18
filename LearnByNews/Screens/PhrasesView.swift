@@ -9,6 +9,7 @@ struct PhrasesView: View {
     @State private var searchTask: Task<Void, Never>?
     /// 습득 완료는 기본으로 숨긴다 (goni 2026-11-18). 보기로 바꾸면 기기에 기억
     @AppStorage("lbn_phrases_show_mastered") private var showMastered = false
+    @State private var showTest = false     // 표현장 시험 (뜻 → 영어 표현)
 
     private var mastered: [Phrase] { list.filter(\.isMastered) }
     private var shown: [Phrase] { showMastered ? list : list.filter { !$0.isMastered } }
@@ -23,13 +24,15 @@ struct PhrasesView: View {
                         .background(Theme.paper, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0xD6CFC0)))
                     if let err { ErrorText(message: err) }
-                    if !mastered.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    HStack(alignment: .firstTextBaseline, spacing: 14) {
+                        // 표현장 시험: 뜻을 보고 영어 표현을 떠올려 쓴다 (goni 2026-11-18 "표현장 시험 기능도 만들어줘")
+                        if !list.isEmpty || !mastered.isEmpty { Tiny(title: "시험 보기 ✎\u{FE0E}", color: Theme.red, size: 19) { showTest = true } }
+                        if !mastered.isEmpty {
                             Text("\(list.count - mastered.count)개 · 습득 완료 \(mastered.count)개").font(Theme.hand(19)).foregroundStyle(Theme.pencil)
                             Tiny(title: showMastered ? "습득 완료 숨기기" : "습득 완료도 보기", size: 19) { withAnimation(.easeInOut(duration: 0.15)) { showMastered.toggle() } }
                         }
-                        .padding(.top, -8)
                     }
+                    .padding(.top, -8)
                     if shown.isEmpty {
                         MutedText(text: !q.isEmpty ? "없음" : !mastered.isEmpty ? "남은 표현이 없다. 모두 습득 완료." : "아직 붙인 표현이 없다. 첨삭에서 포스트잇을 누르면 여기 붙는다.")
                     } else {
@@ -47,9 +50,11 @@ struct PhrasesView: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $showTest) { PhraseTestView() }
             .task {
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["LBN_SHOWMASTERED"] == "1" { showMastered = true }   // 화면 확인용
+                if ProcessInfo.processInfo.environment["LBN_PHRASETEST"] == "1" { showTest = true }         // 화면 확인용: 표현장 시험으로 바로
                 if let f = ProcessInfo.processInfo.environment["LBN_FLIP"] { flipped = f }   // 화면 확인용: 그 표현의 뒷면
                 #endif
                 await load()
