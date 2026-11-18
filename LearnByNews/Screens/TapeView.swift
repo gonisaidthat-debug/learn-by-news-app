@@ -86,7 +86,8 @@ struct TapeView: View {
             FlowLayout(spacing: 14) {
                 MutedText(text: "순서")
                 Tiny(title: "섞음", color: t.order == .shuffle ? Theme.ink : Theme.pencil, size: 18) { t.set(order: .shuffle) }
-                Tiny(title: "최근 순", color: t.order == .recent ? Theme.ink : Theme.pencil, size: 18) { t.set(order: .recent) }
+                Tiny(title: "최근 순 ↓\u{FE0E}", color: t.order == .recent ? Theme.ink : Theme.pencil, size: 18) { t.set(order: .recent) }
+                Tiny(title: "번호 순 ↑\u{FE0E}", color: t.order == .numeric ? Theme.ink : Theme.pencil, size: 18) { t.set(order: .numeric) }
                 MutedText(text: "· 속도")
                 ForEach([0.8, 1.0, 1.25], id: \.self) { r in Tiny(title: "\(r == 1.0 ? "1" : String(r))×", color: t.rate == r ? Theme.ink : Theme.pencil, size: 18) { t.rate = r } }
             }

@@ -9,7 +9,7 @@ import MediaPlayer
 final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     static let shared = TapePlayer()
     enum Bucket: String, CaseIterable { case pending, mastered, all }
-    enum Order: String, CaseIterable { case shuffle, recent }
+    enum Order: String, CaseIterable { case shuffle, recent, numeric }   // 섞음 / 최근 순(번호 큰 것부터) / 번호 순(작은 것부터)
 
     @Published private(set) var items: [Phrase] = []
     @Published private(set) var index = 0
@@ -52,10 +52,14 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     func rebuild() {
         let pool = all.filter { bucket == .all || ($0.isMastered == (bucket == .mastered)) }
             .filter { p in range.map { r in p.seq.map(r.contains) ?? false } ?? true }
-        // 번호(seq)가 붙인 순서의 진실. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 시각이 같아 그 안에서 뒤집힌다(goni 2026-11-18 "#124 #125 #122 #123")
-        let base = range != nil ? pool.sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }                                   // 범위 안은 번호 순
-                                : pool.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) }       // "최근 순" = 번호 큰 것부터
-        items = order == .shuffle ? base.shuffled() : base
+        // 번호(seq)가 붙인 순서의 진실. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 시각이 같아 그 안에서 뒤집힌다(goni 2026-11-18 "#124 #125 #122 #123").
+        // "최근 순"은 범위가 있어도 번호 큰 것부터(goni "500–720이면 720부터 나와야"), 작은 것부터 듣고 싶으면 "번호 순 ↑"
+        let desc = pool.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) }
+        switch order {
+        case .shuffle: items = desc.shuffled()
+        case .recent: items = desc
+        case .numeric: items = desc.reversed()
+        }
         index = 0; step = 0
     }
     func set(bucket b: Bucket) { stop(); bucket = b; rebuild() }
