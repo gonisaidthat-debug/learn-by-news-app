@@ -100,6 +100,7 @@ struct Phrase: Codable, Identifiable, Hashable {
     var sentenceText: String?
     var articleTitle: String?
     var backlinks: [Backlink]?
+    var links: [HighlightLink]?  // 이 표현에서 엮은 것 (from_kind "phrase", 2026-11-18)
     var masteredAt: Int64?      // 습득 완료 도장 (null = 아직). 기본 숨김, 응용 출제·시험지에서 빠진다 (2026-11-18)
     var isMastered: Bool { masteredAt != nil }
 
@@ -504,6 +505,7 @@ struct Related: Codable, Identifiable, Hashable {
 /// 이 형광펜에서 나가는 링크
 struct HighlightLink: Codable, Identifiable, Hashable {
     var id: String
+    var fromKind: String? = nil     // "highlight" | "phrase" (출발점 종류, 2026-11-18). fromHighlight는 그 종류의 id
     var fromHighlight: String?
     var toKind: String
     var toId: String
@@ -518,6 +520,7 @@ struct HighlightLink: Codable, Identifiable, Hashable {
 /// 거꾸로 링크: 다른 형광펜이 이것을 가리킨다
 struct Backlink: Codable, Identifiable, Hashable {
     var id: String
+    var fromKind: String? = nil     // "highlight" | "phrase": 출발점이 표현이면 fromId/text/note는 표현 id/phrase/meaning (2026-11-18)
     var toKind: String?
     var toId: String?
     var createdAt: Int64?

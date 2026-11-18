@@ -50,6 +50,7 @@ struct PhrasesView: View {
             .task {
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["LBN_SHOWMASTERED"] == "1" { showMastered = true }   // 화면 확인용
+                if let f = ProcessInfo.processInfo.environment["LBN_FLIP"] { flipped = f }   // 화면 확인용: 그 표현의 뒷면
                 #endif
                 await load()
             }
@@ -68,6 +69,9 @@ struct PhrasesView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if back {
                     Text(p.sentenceText ?? "").font(Theme.hand(17)).foregroundStyle(Color(hex: 0x3B3627)).lineSpacing(-2)
+                    // 엮은 것 · 다시 본 곳 (읽기만, 2026-11-18)
+                    ForEach(p.links ?? []) { l in Text("↗\u{FE0E} \(l.text ?? "") · \(shorten(l.title ?? ""))").font(Theme.hand(15)).foregroundStyle(Theme.blueInk).lineLimit(1) }
+                    ForEach(p.backlinks ?? []) { b in Text("←\u{FE0E} \(b.text ?? "") · \(shorten(b.title ?? ""))").font(Theme.hand(15)).foregroundStyle(Theme.pencil).lineLimit(1) }
                     Spacer(minLength: 4)
                     Text(p.articleTitle ?? "").font(Theme.hand(15)).foregroundStyle(Theme.pencil)
                 } else {

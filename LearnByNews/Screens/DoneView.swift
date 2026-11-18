@@ -142,11 +142,30 @@ final class DoneModel: ObservableObject {
         removeBacklinkLocally(linkId: l.id, toKind: l.toKind, toId: l.toId)
         await SyncManager.shared.deleteLink(l, from: h.id)
     }
+    /// 붙여 둔 표현에서 엮기 (goni 2026-11-18). 형광펜 엮기와 같은 경로(SyncManager.addLink from "phrase")
+    func addPhraseLink(_ p: Phrase, _ r: Related) async {
+        guard let i = data?.phrases.firstIndex(where: { $0.id == p.id }) else { return }
+        if (data!.phrases[i].links ?? []).contains(where: { $0.key == r.key }) { return }
+        do {
+            let l = try await SyncManager.shared.addLink(from: "phrase", id: p.id, to: LinkTarget(toKind: r.kind, toId: r.id), candidate: r)
+            data?.phrases[i].links = (data?.phrases[i].links ?? []) + [l]
+            let sp = data!.phrases[i]
+            insertBacklink(Backlink(id: l.id, fromKind: "phrase", toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: sp.id, text: sp.phrase, note: sp.meaning, sentenceId: sp.sentenceId, articleId: sp.articleId, title: data?.title), toKind: l.toKind, toId: l.toId)
+        } catch { err = error.localizedDescription }
+    }
+    func removePhraseLink(_ p: Phrase, _ l: HighlightLink) async {
+        guard let i = data?.phrases.firstIndex(where: { $0.id == p.id }) else { return }
+        data?.phrases[i].links?.removeAll { $0.id == l.id }
+        removeBacklinkLocally(linkId: l.id, toKind: l.toKind, toId: l.toId)
+        await SyncManager.shared.deleteLink(l, from: p.id)
+    }
     /// 대상이 같은 공책의 형광펜/표현이면 그쪽 backlinks도 바로 넣는다
     private func addBacklinkLocally(from h: Highlight, link l: HighlightLink) {
-        let b = Backlink(id: l.id, toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: h.id, text: h.span, note: h.note, sentenceId: h.sentenceId, articleId: h.articleId, title: data?.title)
-        if l.toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == l.toId }) { data?.highlights[j].backlinks.append(b) }
-        if l.toKind == "phrase", let j = data?.phrases.firstIndex(where: { $0.id == l.toId }) { data?.phrases[j].backlinks = (data?.phrases[j].backlinks ?? []) + [b] }
+        insertBacklink(Backlink(id: l.id, fromKind: "highlight", toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: h.id, text: h.span, note: h.note, sentenceId: h.sentenceId, articleId: h.articleId, title: data?.title), toKind: l.toKind, toId: l.toId)
+    }
+    private func insertBacklink(_ b: Backlink, toKind: String, toId: String) {
+        if toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == toId }) { data?.highlights[j].backlinks.append(b) }
+        if toKind == "phrase", let j = data?.phrases.firstIndex(where: { $0.id == toId }) { data?.phrases[j].backlinks = (data?.phrases[j].backlinks ?? []) + [b] }
     }
     private func removeBacklinkLocally(linkId: String, toKind: String, toId: String) {
         if toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == toId }) { data?.highlights[j].backlinks.removeAll { $0.id == linkId } }
@@ -326,6 +345,8 @@ struct DoneView: View {
                                 onRelated: { sp, q, es, ex in await m.related(span: sp, q: q, excludeSentence: es, exclude: ex) },
                                 onAddLink: { h, r in await m.addLink(h, r) },
                                 onRemoveLink: { h, l in await m.removeLink(h, l) },
+                                onAddPhraseLink: { p, r in await m.addPhraseLink(p, r) },
+                                onRemovePhraseLink: { p, l in await m.removePhraseLink(p, l) },
                                 onOpenSentence: { aid, sid in openSentence(aid, sid) },
                                 onFree: { e, a, did in try await m.freeDrill(s.id, e, answer: a, drillId: did) },
                                 onDrillFor: { e in try await m.drillFor(s.id, e) },

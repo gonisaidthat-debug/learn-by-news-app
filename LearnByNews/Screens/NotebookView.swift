@@ -506,11 +506,30 @@ final class NotebookModel: ObservableObject {
         removeBacklinkLocally(linkId: l.id, toKind: l.toKind, toId: l.toId)
         await SyncManager.shared.deleteLink(l, from: h.id)
     }
+    /// 붙여 둔 표현에서 엮기 (goni 2026-11-18). 형광펜 엮기와 같은 경로(SyncManager.addLink from "phrase")
+    func addPhraseLink(_ p: Phrase, _ r: Related) async {
+        guard let i = data?.phrases.firstIndex(where: { $0.id == p.id }) else { return }
+        if (data!.phrases[i].links ?? []).contains(where: { $0.key == r.key }) { return }
+        do {
+            let l = try await SyncManager.shared.addLink(from: "phrase", id: p.id, to: LinkTarget(toKind: r.kind, toId: r.id), candidate: r)
+            data?.phrases[i].links = (data?.phrases[i].links ?? []) + [l]
+            let sp = data!.phrases[i]
+            insertBacklink(Backlink(id: l.id, fromKind: "phrase", toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: sp.id, text: sp.phrase, note: sp.meaning, sentenceId: sp.sentenceId, articleId: sp.articleId, title: data?.title), toKind: l.toKind, toId: l.toId)
+        } catch { err = error.localizedDescription }
+    }
+    func removePhraseLink(_ p: Phrase, _ l: HighlightLink) async {
+        guard let i = data?.phrases.firstIndex(where: { $0.id == p.id }) else { return }
+        data?.phrases[i].links?.removeAll { $0.id == l.id }
+        removeBacklinkLocally(linkId: l.id, toKind: l.toKind, toId: l.toId)
+        await SyncManager.shared.deleteLink(l, from: p.id)
+    }
     /// 대상이 같은 공책의 형광펜/표현이면 그쪽 backlinks도 바로 넣는다
     private func addBacklinkLocally(from h: Highlight, link l: HighlightLink) {
-        let b = Backlink(id: l.id, toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: h.id, text: h.span, note: h.note, sentenceId: h.sentenceId, articleId: h.articleId, title: data?.title)
-        if l.toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == l.toId }) { data?.highlights[j].backlinks.append(b) }
-        if l.toKind == "phrase", let j = data?.phrases.firstIndex(where: { $0.id == l.toId }) { data?.phrases[j].backlinks = (data?.phrases[j].backlinks ?? []) + [b] }
+        insertBacklink(Backlink(id: l.id, fromKind: "highlight", toKind: l.toKind, toId: l.toId, createdAt: l.createdAt, fromId: h.id, text: h.span, note: h.note, sentenceId: h.sentenceId, articleId: h.articleId, title: data?.title), toKind: l.toKind, toId: l.toId)
+    }
+    private func insertBacklink(_ b: Backlink, toKind: String, toId: String) {
+        if toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == toId }) { data?.highlights[j].backlinks.append(b) }
+        if toKind == "phrase", let j = data?.phrases.firstIndex(where: { $0.id == toId }) { data?.phrases[j].backlinks = (data?.phrases[j].backlinks ?? []) + [b] }
     }
     private func removeBacklinkLocally(linkId: String, toKind: String, toId: String) {
         if toKind == "highlight", let j = data?.highlights.firstIndex(where: { $0.id == toId }) { data?.highlights[j].backlinks.removeAll { $0.id == linkId } }
@@ -623,7 +642,7 @@ struct NotebookView: View {
             }
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
             // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 써 보기 상자(EntryView가 연다)가 보이도록 잠시 뒤 맨 아래로 스크롤
-            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil { Task { try? await Task.sleep(for: .seconds(3.5)); m.requestScroll("bottom") } }
+            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil || ProcessInfo.processInfo.environment["LBN_AUTOLINK"] != nil { Task { try? await Task.sleep(for: .seconds(3.5)); m.requestScroll("bottom") } }
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
             if let dir = ProcessInfo.processInfo.environment["LBN_AUTOMERGE"], let cur = m.current { await m.merge(cur.id, dir: dir) }
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
@@ -837,6 +856,8 @@ struct NotebookView: View {
                 onRelated: { sp, q, es, ex in await m.related(span: sp, q: q, excludeSentence: es, exclude: ex) },
                 onAddLink: { h, r in await m.addLink(h, r) },
                 onRemoveLink: { h, l in await m.removeLink(h, l) },
+                onAddPhraseLink: { p, r in await m.addPhraseLink(p, r) },
+                onRemovePhraseLink: { p, l in await m.removePhraseLink(p, l) },
                 onOpenSentence: { aid, sid in openSentence(aid, sid) },
                 onFree: { e, a, did in try await m.freeDrill(x.id, e, answer: a, drillId: did) },
                 onDrillFor: { e in try await m.drillFor(x.id, e) },

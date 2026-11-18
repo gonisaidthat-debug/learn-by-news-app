@@ -147,7 +147,9 @@ final class SyncManager: ObservableObject {
                     var map = idMap; map[b.tempId] = r.highlight.id; idMap = map
                 case "link_add":
                     let b = try JSONDecoder.api.decode(LinkOp.self, from: op.payload)
-                    _ = try await API.shared.addLink(real(b.highlightId), to: LinkTarget(toKind: b.toKind ?? "", toId: real(b.toId ?? "")))
+                    let target = LinkTarget(toKind: b.toKind ?? "", toId: real(b.toId ?? ""))
+                    if b.fromKind == "phrase" { _ = try await API.shared.addPhraseLink(real(b.highlightId), to: target) }
+                    else { _ = try await API.shared.addLink(real(b.highlightId), to: target) }
                 case "link_delete":
                     let b = try JSONDecoder.api.decode(LinkOp.self, from: op.payload)
                     if !Self.isTemp(b.linkId ?? "") { try await API.shared.deleteLink(b.linkId ?? "") }
@@ -230,16 +232,20 @@ final class SyncManager: ObservableObject {
     struct BookmarkOp: Codable { var articleId: String; var sentenceId: String; var round: Int? }
     struct DrillAnswerOp: Codable { var id: String; var answer: String; var answeredAtLocal: Int64; var phrase: String?; var korean: String? }
     struct MemoOp: Codable { var tempId: String; var sentenceId: String; var articleId: String; var startWord: Int; var endWord: Int; var span: String; var note: String; var links: [LinkTarget]? }
-    struct LinkOp: Codable { var highlightId: String; var toKind: String?; var toId: String?; var linkId: String? }
+    /// highlightId = 출발점 id(형광펜 또는 표현). fromKind nil이면 형광펜(예전 큐 항목)
+    struct LinkOp: Codable { var highlightId: String; var toKind: String?; var toId: String?; var linkId: String?; var fromKind: String? }
 
-    /// 엮기: 온라인이면 서버, 아니면 임시 id 링크 + 큐
+    /// 엮기: 온라인이면 서버, 아니면 임시 id 링크 + 큐. 출발점은 형광펜(from "highlight") 또는 붙여 둔 표현(from "phrase", 2026-11-18)
     func addLink(_ highlightId: String, to: LinkTarget, candidate: Related?) async throws -> HighlightLink {
-        if Connectivity.shared.isOnline, !Self.isTemp(highlightId), !Self.isTemp(to.toId) {
-            do { return try await API.shared.addLink(highlightId, to: to) }
+        try await addLink(from: "highlight", id: highlightId, to: to, candidate: candidate)
+    }
+    func addLink(from kind: String, id fromId: String, to: LinkTarget, candidate: Related?) async throws -> HighlightLink {
+        if Connectivity.shared.isOnline, !Self.isTemp(fromId), !Self.isTemp(to.toId) {
+            do { return kind == "phrase" ? try await API.shared.addPhraseLink(fromId, to: to) : try await API.shared.addLink(fromId, to: to) }
             catch let e as APIError where e.isNetwork { /* 큐로 */ }
         }
-        Cache.shared.enqueue("link_add", LinkOp(highlightId: highlightId, toKind: to.toKind, toId: to.toId, linkId: nil)); refreshCounts()
-        return HighlightLink(id: "local-" + UUID().uuidString.lowercased(), fromHighlight: highlightId, toKind: to.toKind, toId: to.toId, createdAt: Date().ms,
+        Cache.shared.enqueue("link_add", LinkOp(highlightId: fromId, toKind: to.toKind, toId: to.toId, linkId: nil, fromKind: kind)); refreshCounts()
+        return HighlightLink(id: "local-" + UUID().uuidString.lowercased(), fromKind: kind, fromHighlight: fromId, toKind: to.toKind, toId: to.toId, createdAt: Date().ms,
                              text: candidate?.text, sentenceId: candidate?.sentenceId, articleId: candidate?.articleId, title: candidate?.title)
     }
     func deleteLink(_ link: HighlightLink, from highlightId: String) async {

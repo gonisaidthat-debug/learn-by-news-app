@@ -115,6 +115,9 @@ struct EntryView: View {
     var onRelated: ((String?, String?, String?, String?) async -> [Related])?
     var onAddLink: ((Highlight, Related) async -> Void)?
     var onRemoveLink: ((Highlight, HighlightLink) async -> Void)?
+    /// 붙여 둔 표현(포스트잇·빨간 펜 지적)에서 엮기 (goni 2026-11-18). 후보 찾기는 onRelated 공용
+    var onAddPhraseLink: ((Phrase, Related) async -> Void)?
+    var onRemovePhraseLink: ((Phrase, HighlightLink) async -> Void)?
     var onOpenSentence: ((String, String) -> Void)?
     /// 포스트잇에서 바로 "써 보기": 자유 작문 채점(nil이면 큐에 들어감), 문제 내줘(표현장에 없으면 nil), 문제 답 채점
     var onFree: ((Expression, String, String) async throws -> Drill?)?   // (표현, 내 문장, drill_id)
@@ -123,6 +126,7 @@ struct EntryView: View {
     var drillCounts: [String: Int] = [:]
     var onDrillGraded: ((String) -> Void)?      // 상자에서 채점이 끝났다 → 그 표현 횟수 +1
     @State private var tryExpr: Expression?
+    @State private var linkingPhrase: String?     // "엮기"가 열린 표현(표현장 id)
 
     var body: some View {
         let a = s.attempt!
@@ -154,8 +158,10 @@ struct EntryView: View {
         }
         #if DEBUG
         // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 그 문장의 첫 붙은 표현으로 써 보기 상자를 연다 (상자가 열리면 문장을 넣고 제출까지 한다)
-        .onChange(of: savedPhrases.count, initial: true) { _, _ in
+        .onChange(of: "\(savedPhrases.count)|\(expanded)", initial: true) { _, _ in
             if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] == s.id, expanded, tryExpr == nil, let p = savedPhrases.first { tryExpr = Expression(phrase: p.phrase, meaning: p.meaning) }
+            // LBN_AUTOLINK=<문장 id>: 그 문장의 첫 붙은 표현의 "엮기"를 연다
+            if ProcessInfo.processInfo.environment["LBN_AUTOLINK"] == s.id, expanded, linkingPhrase == nil, let p = savedPhrases.first { linkingPhrase = p.id }
         }
         #endif
         .overlay(alignment: .topLeading) {
@@ -194,13 +200,37 @@ struct EntryView: View {
         return n > 0 ? "써 보기 ✎\u{FE0E} · \(n)" : "써 보기 ✎\u{FE0E}"
     }
 
+    /// 붙여 둔 표현의 "↗ 엮은 것"(풀기 ×) · "← 다시 본 곳" 줄 (형광펜과 같은 줄)
+    @ViewBuilder
+    private func phraseLinkLines(_ sp: Phrase) -> some View {
+        ForEach(sp.links ?? []) { l in LinkLine(l: l, onOpen: onOpenSentence, onRemove: onRemovePhraseLink == nil ? nil : { Task { await onRemovePhraseLink?(sp, l) } }) }
+        ForEach(sp.backlinks ?? []) { b in BacklinkLine(b: b, onOpen: onOpenSentence) }
+    }
+    /// 붙여 둔 표현에서 엮을 후보 칩 (어근 같은 것 → 다른 구절 찾기…). 칩 토글로 잇기/풀기
+    @ViewBuilder
+    private func phraseLinkPicker(_ sp: Phrase) -> some View {
+        if let onRelated, let onAddPhraseLink {
+            RelatedChips(span: sp.phrase, excludeSentence: s.id, exclude: sp.id, selectedKeys: Set((sp.links ?? []).map(\.key)),
+                         onToggle: { r in
+                             Task {
+                                 if let l = sp.links?.first(where: { $0.key == r.key }) { await onRemovePhraseLink?(sp, l) }
+                                 else { await onAddPhraseLink(sp, r) }
+                             }
+                         }, load: onRelated)
+                .padding(.vertical, 2)
+        }
+    }
+
     @ViewBuilder
     private func marks(_ fb: Feedback) -> some View {
         ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
             // 빨간 펜으로 지적된 표현도 표현장에 붙여 응용에서 연습할 수 있다 (goni 2026-11-17 "빨간색으로 알려준 표현도 공부하고 싶은데"). 포스트잇과 같은 경로(POST/DELETE phrases)
             let src = i.source.trimmingCharacters(in: .whitespacesAndNewlines)
-            let saved = !src.isEmpty && savedPhrases.contains { $0.phrase == src }
+            let sp = src.isEmpty ? nil : savedPhrases.first { $0.phrase == src }
+            let saved = sp != nil
             let e = Expression(phrase: src, meaning: i.meaning)
+            // 같은 표현이 포스트잇에도 있으면 엮기 줄은 포스트잇 쪽에서만 보여 준다
+            let onSticky = fb.expressions.contains { $0.phrase == src }
             (Text(i.source).underline(true, color: Theme.red) + Text(" →\u{FE0E} \(i.meaning)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A)))
                 .redpen()
             if !src.isEmpty {
@@ -212,8 +242,15 @@ struct EntryView: View {
                     if saved, onFree != nil {
                         TryButton(title: tryExpr == e ? "접기" : "써 보기 ✎\u{FE0E}", count: tryExpr == e ? 0 : (drillCounts[src] ?? 0)) { tryExpr = tryExpr == e ? nil : e }
                     }
+                    if let sp, !onSticky, onAddPhraseLink != nil, onRelated != nil {
+                        Tiny(title: linkingPhrase == sp.id ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id }
+                    }
                 }
                 .frame(height: Theme.lh)
+                if let sp, !onSticky {
+                    phraseLinkLines(sp)
+                    if linkingPhrase == sp.id { phraseLinkPicker(sp) }
+                }
             }
         }
         if showRef {
@@ -240,7 +277,13 @@ struct EntryView: View {
                       onTry: onFree == nil ? nil : { e in tryExpr = tryExpr == e ? nil : e },
                       tryLabel: { e in tryExpr == e ? "접기" : tryTitle(e.phrase) }, counts: drillCounts, openPhrase: tryExpr?.phrase,
                       backlinks: { e in savedPhrases.first { $0.phrase == e.phrase }?.backlinks ?? [] }, onOpenSentence: onOpenSentence,
-                      mastered: { e in savedPhrases.first { $0.phrase == e.phrase }?.isMastered ?? false })
+                      mastered: { e in savedPhrases.first { $0.phrase == e.phrase }?.isMastered ?? false },
+                      links: { e in savedPhrases.first { $0.phrase == e.phrase }?.links ?? [] },
+                      onLink: onAddPhraseLink == nil || onRelated == nil ? nil : { e in if let sp = savedPhrases.first(where: { $0.phrase == e.phrase }) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id } },
+                      linkLabel: { e in savedPhrases.first { $0.phrase == e.phrase }.map { linkingPhrase == $0.id ? "접기" : "엮기 ↗\u{FE0E}" } ?? "엮기 ↗\u{FE0E}" },
+                      onRemoveLink: onRemovePhraseLink == nil ? nil : { e, l in if let sp = savedPhrases.first(where: { $0.phrase == e.phrase }) { Task { await onRemovePhraseLink?(sp, l) } } })
+            // 포스트잇 쪽 "엮기"가 열려 있으면 후보 칩은 포스트잇 줄 아래에
+            if let id = linkingPhrase, let sp = savedPhrases.first(where: { $0.id == id }), fb.expressions.contains(where: { $0.phrase == sp.phrase }) { phraseLinkPicker(sp) }
         }
         if let e = tryExpr, let onFree {
             TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil }, onGraded: { onDrillGraded?(e.phrase) })
@@ -259,17 +302,29 @@ struct StickyRow: View {
     var backlinks: ((Expression) -> [Backlink])? = nil
     var onOpenSentence: ((String, String) -> Void)? = nil
     var mastered: ((Expression) -> Bool)? = nil     // 표현장에서 습득 완료 도장이 찍힌 표현이면 공책 포스트잇에도 도장
+    /// 붙여 둔 표현에서 엮기 (2026-11-18): "써 보기 ✎" 옆 "엮기 ↗"(접기), 그 아래 "↗ 엮은 것"(풀기 ×)
+    var links: ((Expression) -> [HighlightLink])? = nil
+    var onLink: ((Expression) -> Void)? = nil
+    var linkLabel: ((Expression) -> String)? = nil
+    var onRemoveLink: ((Expression, HighlightLink) -> Void)? = nil
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
                 VStack(alignment: .leading, spacing: 2) {
                     Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false)) }
                         .buttonStyle(.plain)
-                    if let onTry {
-                        TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) }
-                            .padding(.leading, 6)
+                    if onTry != nil || (saved && onLink != nil) {
+                        HStack(spacing: 12) {
+                            if let onTry { TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) } }
+                            if saved, let onLink { Tiny(title: linkLabel?(e) ?? "엮기 ↗\u{FE0E}", size: 17) { onLink(e) } }
+                        }
+                        .padding(.leading, 6)
                     }
-                    // 이 표현을 가리키는 형광펜들 (거꾸로 링크)
+                    // 엮은 것 (풀기 ×)
+                    ForEach(links?(e) ?? []) { l in
+                        LinkLine(l: l, onOpen: onOpenSentence, onRemove: onRemoveLink == nil ? nil : { onRemoveLink?(e, l) }).padding(.leading, 6)
+                    }
+                    // 이 표현을 가리키는 형광펜·표현들 (거꾸로 링크)
                     ForEach(backlinks?(e) ?? []) { b in
                         BacklinkLine(b: b, onOpen: onOpenSentence).padding(.leading, 6)
                     }

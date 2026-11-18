@@ -119,7 +119,8 @@ struct MockState {
                    "answer": "The Fed decided to hold rates steady this month.", "grade": "A", "answered_at": now - 7_200_000,
                    "feedback": ["grade": "A", "used_expression": true, "issues": [], "reference": "The Fed held rates steady this month.", "reference_ko": "연준은 이번 달 금리를 동결했다.", "note": "자연스럽다."] as [String: Any],
                    "reference": "The Fed held rates steady this month."]]
-        links = [["id": "l1", "from_highlight": "h2", "to_kind": "highlight", "to_id": "h1", "created_at": now - 500_000]]
+        links = [["id": "l1", "from_kind": "highlight", "from_highlight": "h2", "to_kind": "highlight", "to_id": "h1", "created_at": now - 500_000],
+                 ["id": "l2", "from_kind": "phrase", "from_highlight": "p1", "to_kind": "phrase", "to_id": "p2", "created_at": now - 400_000]]   // 표현 p1에서 표현 p2로 엮음 (2026-11-18)
         highlights = [["id": "h2", "sentence_id": "s7", "article_id": "a2", "start_word": 1, "end_word": 1, "span": "will", "answer": ["meaning": "", "why": "", "similar": ""], "note": "조동사 — hold와 비교", "created_at": now - 600_000],
                       ["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
                        "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "note": "뉴스에서 자주 봄", "created_at": h]]
@@ -139,12 +140,22 @@ struct MockState {
         return o
     }
     /// 거꾸로 링크: 출발 형광펜의 text·note·문장·기사
+    private func fromKind(_ l: [String: Any]) -> String { l["from_kind"] as? String ?? "highlight" }
     private func decorateBacklink(_ l: [String: Any]) -> [String: Any] {
-        var o: [String: Any] = ["id": l["id"]!, "to_kind": l["to_kind"]!, "to_id": l["to_id"]!, "created_at": l["created_at"]!, "from_id": l["from_highlight"]!]
-        if let h = highlights.first(where: { $0["id"] as? String == l["from_highlight"] as? String }) {
+        var o: [String: Any] = ["id": l["id"]!, "from_kind": fromKind(l), "to_kind": l["to_kind"]!, "to_id": l["to_id"]!, "created_at": l["created_at"]!, "from_id": l["from_highlight"]!]
+        if fromKind(l) == "phrase", let p = phrases.first(where: { $0["id"] as? String == l["from_highlight"] as? String }) {
+            o["text"] = p["phrase"]; o["note"] = p["meaning"]; o["sentence_id"] = p["sentence_id"]; o["article_id"] = p["article_id"]; o["title"] = p["article_title"] ?? ""
+        } else if let h = highlights.first(where: { $0["id"] as? String == l["from_highlight"] as? String }) {
             o["text"] = h["span"]; o["note"] = h["note"] ?? NSNull(); o["sentence_id"] = h["sentence_id"]; o["article_id"] = h["article_id"]
             o["title"] = articles.first { $0["id"] as? String == h["article_id"] as? String }?["title"] ?? ""
         }
+        return o
+    }
+    /// 표현에 links(그 표현에서 나간 것)·backlinks 붙이기 (2026-11-18)
+    private func decoratePhrase(_ p: [String: Any]) -> [String: Any] {
+        var o = p
+        o["links"] = links.filter { fromKind($0) == "phrase" && $0["from_highlight"] as? String == p["id"] as? String }.map(decorateLink)
+        o["backlinks"] = links.filter { $0["to_kind"] as? String == "phrase" && $0["to_id"] as? String == p["id"] as? String }.map(decorateBacklink)
         return o
     }
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
@@ -180,13 +191,11 @@ struct MockState {
             a["reviews"] = reviews.filter { $0["article_id"] as? String == id }.sorted { ($0["created_at"] as! Int64) > ($1["created_at"] as! Int64) }
             a["highlights"] = highlights.filter { $0["article_id"] as? String == id }.map { h -> [String: Any] in
                 var o = h
-                o["links"] = links.filter { $0["from_highlight"] as? String == h["id"] as? String }.map(decorateLink)
+                o["links"] = links.filter { fromKind($0) == "highlight" && $0["from_highlight"] as? String == h["id"] as? String }.map(decorateLink)
                 o["backlinks"] = links.filter { $0["to_kind"] as? String == "highlight" && $0["to_id"] as? String == h["id"] as? String }.map(decorateBacklink)
                 return o
             }
-            a["phrases"] = (a["phrases"] as! [[String: Any]]).map { p -> [String: Any] in
-                var o = p; o["backlinks"] = links.filter { $0["to_kind"] as? String == "phrase" && $0["to_id"] as? String == p["id"] as? String }.map(decorateBacklink); return o
-            }
+            a["phrases"] = (a["phrases"] as! [[String: Any]]).map(decoratePhrase)
             var counts: [String: Int] = [:]
             let keys = Set((a["phrases"] as! [[String: Any]]).map { $0["phrase"] as! String } + (a["highlights"] as! [[String: Any]]).map { $0["span"] as! String })
             for d in drills where !(d["feedback"] is NSNull) { let ph = d["phrase"] as! String; if keys.contains(ph) { counts[ph, default: 0] += 1 } }
@@ -278,7 +287,7 @@ struct MockState {
             return (200, ["ok": true, "sentence_id": s["id"]!])
         case "GET /api/phrases":
             let q = query.split(separator: "=").dropFirst().joined().removingPercentEncoding?.lowercased() ?? ""
-            return (200, phrases.filter { q.isEmpty || ($0["phrase"] as! String).lowercased().contains(q) || ($0["meaning"] as! String).lowercased().contains(q) }.reversed() as [[String: Any]])
+            return (200, phrases.filter { q.isEmpty || ($0["phrase"] as! String).lowercased().contains(q) || ($0["meaning"] as! String).lowercased().contains(q) }.reversed().map(decoratePhrase) as [[String: Any]])
         case "POST /api/phrases":
             let sid = body["sentence_id"] as? String ?? ""
             let s = sentences.first { $0["id"] as? String == sid }
@@ -286,7 +295,10 @@ struct MockState {
             let p: [String: Any] = ["id": nextId("p"), "phrase": body["phrase"] ?? "", "meaning": body["meaning"] ?? "", "sentence_id": sid, "article_id": body["article_id"] ?? "", "created_at": Date().ms, "sentence_text": s?["text"] ?? "", "article_title": a?["title"] ?? "", "mastered_at": NSNull()]
             phrases.append(p); return (200, p)
         case "DELETE /api/phrases/:id":
-            phrases.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
+            phrases.removeAll { $0["id"] as? String == id }
+            let gone = links.filter { (fromKind($0) == "phrase" && $0["from_highlight"] as? String == id) || ($0["to_kind"] as? String == "phrase" && $0["to_id"] as? String == id) }.map { $0["id"] as! String }
+            links.removeAll { gone.contains($0["id"] as! String) }   // 나간 링크·들어온 링크 cascade
+            return (200, ["ok": true])
         case "PUT /api/phrases/:id/mastered":
             guard let i = phrases.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 표현"]) }
             let on = (body["on"] as? Bool) ?? true
@@ -488,11 +500,14 @@ struct MockState {
                 else { let n = Cache.overlap(want, Cache.roots(p["phrase"] as! String)); if n > 0 { out.append((r, n)) } }
             }
             return (200, out.sorted { $0.1 > $1.1 }.map { $0.0 })
-        case "POST /api/highlights/:id/links":
+        case "POST /api/highlights/:id/links", "POST /api/phrases/:id/links":
+            let from = route.hasPrefix("POST /api/phrases") ? "phrase" : "highlight"
             let kind = body["to_kind"] as? String ?? "", to = body["to_id"] as? String ?? ""
-            if kind == "highlight", to == id { return (400, ["error": "자기 자신"]) }
-            if let e = links.first(where: { $0["from_highlight"] as? String == id && $0["to_kind"] as? String == kind && $0["to_id"] as? String == to }) { return (200, decorateLink(e)) }
-            let l: [String: Any] = ["id": nextId("l"), "from_highlight": id, "to_kind": kind, "to_id": to, "created_at": Date().ms]
+            if kind == from, to == id { return (400, ["error": "자기 자신"]) }
+            let exists = kind == "highlight" ? highlights.contains { $0["id"] as? String == to } : phrases.contains { $0["id"] as? String == to }
+            guard exists else { return (400, ["error": "없는 대상"]) }
+            if let e = links.first(where: { fromKind($0) == from && $0["from_highlight"] as? String == id && $0["to_kind"] as? String == kind && $0["to_id"] as? String == to }) { return (200, decorateLink(e)) }
+            let l: [String: Any] = ["id": nextId("l"), "from_kind": from, "from_highlight": id, "to_kind": kind, "to_id": to, "created_at": Date().ms]
             links.append(l); return (200, decorateLink(l))
         case "DELETE /api/links/:id":
             links.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])

@@ -211,6 +211,8 @@ final class API {
         return try await send("GET", "/api/related?" + qs.joined(separator: "&"))
     }
     func addLink(_ highlightId: String, to: LinkTarget) async throws -> HighlightLink { try await send("POST", "/api/highlights/\(highlightId)/links", body: to) }
+    /// 붙여 둔 표현에서 엮기 (from_kind "phrase"). 규칙은 형광펜 엮기와 같다 (2026-11-18)
+    func addPhraseLink(_ phraseId: String, to: LinkTarget) async throws -> HighlightLink { try await send("POST", "/api/phrases/\(phraseId)/links", body: to) }
     func deleteLink(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/links/\(id)") }
     struct NoteBody: Codable { var note: String }
     struct NoteResult: Decodable { var ok: Bool; var note: String? }
