@@ -10,6 +10,8 @@ final class SessionModel: ObservableObject {
     @Published var busy = false
     @Published var closed: StudySession?       // 방금 기록한 세션 (총평 표시용)
     @Published var retrying = false
+    /// 공책이 방금 닫은 세션의 ✂ 줄+총평을 본문에 그리고 있다 → StudyDot 아래 패널에는 겹쳐 쓰지 않는다 (NotebookView가 켜고 끈다)
+    @Published var reviewInBody = false
     private var observer: NSObjectProtocol?
 
     init() {
@@ -125,46 +127,85 @@ final class SessionModel: ObservableObject {
     }
 }
 
-/// 모든 화면 아래(탭 바 위)에 늘 보이는 공부 상태 (웹 SessionDot, d63c702). 시작점은 SessionModel.shared 하나를 모두 구독.
-/// 공부 중: 숨 쉬는 빨간 점 + "22:03부터 · 1시간 12분"(30초마다 갱신, 오늘 시작이 아니면 "11/12 10:51부터 …"를 빨갛게) → 누르면 기사 목록.
-/// 아니면: 빈 빨간 점 + "공부 시작 ▶" → 어느 탭에서든 바로 시작(세션을 닫은 뒤 응용만 하면 어느 세션에도 안 들어가는데 알 길이 없었다).
-/// 끝내기 ✂는 총평이 붙어서 기존 세션 줄(목록·공책)에 그대로. 여기엔 두지 않는다.
+/// 모든 화면 아래(탭 바 위)에 늘 보이는 공부 상태 (웹 SessionDot, d63c702 → ca1191f). 시작점은 SessionModel.shared 하나를 모두 구독.
+/// 공부 중: 숨 쉬는 빨간 점 + "22:03부터 · 1시간 12분"(30초마다 갱신, 오늘 시작이 아니면 "11/12 10:51부터 …"를 빨갛게, 누르면 기사 목록) + "오늘 여기까지 ✂" + "버리기".
+/// 아니면: 빈 빨간 점 + "공부 시작 ▶" → 어느 탭에서든 바로 시작.
+/// goni 2026-11-18 "상단에 공부 시작이 있으면 종료도 돼야": ✂·버리기를 여기로 옮기고 기사 목록·공책 바닥의 세션 줄은 뺐다. 채점 중(직접 보내는 중)이면 ✂ 잠김("채점이 끝나면").
+/// 닫은 결과("기록했다 · …" + 총평)는 공책이 ✂ 줄로 그리거나 홈이 공부 기록에 보여 주면 생략, 아니면 이 줄 위 작은 패널(× 닫기, 총평 실패면 다시 시도).
 struct StudyDot: View {
     @ObservedObject private var model = SessionModel.shared
+    @ObservedObject private var sync = SyncManager.shared
     @EnvironmentObject var router: Router
     @State private var dim = false
+    @State private var confirmDiscard = false
+
+    /// 홈(기사 목록)은 닫은 세션을 공부 기록 맨 위에 총평과 함께 보여 준다
+    private var isHome: Bool { router.tab == .shelf && router.shelfPath.isEmpty }
+    /// 패널에 보여 줄 메시지. 닫기 결과("기록했다 · …")는 홈·공책 본문이 보여 주면 생략. 다른 메시지(오류 등)는 그대로
+    private var panelMsg: String? {
+        guard let msg = model.msg else { return nil }
+        if msg.hasPrefix("기록했다"), isHome || model.reviewInBody { return nil }
+        return msg
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            if let start = model.start {
-                let d = Date(ms: start)
-                Button { router.tab = .shelf; router.shelfPath = [] } label: {
-                    HStack(spacing: 7) {
-                        Circle().fill(Theme.red).frame(width: 8, height: 8)
-                            .opacity(dim ? 0.45 : 1).scaleEffect(dim ? 0.8 : 1)
-                            .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: dim)
-                        TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                            Text((d.isToday ? "" : d.monthDay + " ") + d.hm + "부터 · " + Self.elapsed(from: d, to: ctx.date))
-                                .font(Theme.hand(17)).foregroundStyle(d.isToday ? Theme.ink : Theme.red)
-                        }
+        VStack(alignment: .leading, spacing: 0) {
+            if let msg = panelMsg {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(msg).font(Theme.hand(19)).foregroundStyle(Theme.red)
+                        Spacer(minLength: 0)
+                        Button { model.msg = nil } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
+                            .buttonStyle(.plain).accessibilityLabel("닫기")
                     }
-                    .contentShape(Rectangle())
+                    if let c = model.closed, msg.hasPrefix("기록했다") {
+                        SessionReviewLines(session: c, size: 17, retrying: model.retrying) { Task { await model.retryReview(c) } }
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("공부 중 · 기사 목록으로")
-                .onAppear { dim = true }
-                .onDisappear { dim = false }
-            } else {
-                HStack(spacing: 7) {
-                    Circle().strokeBorder(Theme.red, lineWidth: 1.5).frame(width: 8, height: 8)
-                    Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red, size: 17) { model.begin() }
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.tab.opacity(0.35))
+                .overlay(alignment: .leading) { Rectangle().fill(Theme.red).frame(width: 3) }
+            }
+            HStack(spacing: 14) {
+                Spacer(minLength: 0)
+                if let start = model.start {
+                    let d = Date(ms: start)
+                    Button { router.tab = .shelf; router.shelfPath = [] } label: {
+                        HStack(spacing: 7) {
+                            Circle().fill(Theme.red).frame(width: 8, height: 8)
+                                .opacity(dim ? 0.45 : 1).scaleEffect(dim ? 0.8 : 1)
+                                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: dim)
+                            TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                                Text((d.isToday ? "" : d.monthDay + " ") + d.hm + "부터 · " + Self.elapsed(from: d, to: ctx.date))
+                                    .font(Theme.hand(17)).foregroundStyle(d.isToday ? Theme.ink : Theme.red).lineLimit(1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("공부 중 · 기사 목록으로")
+                    .onAppear { dim = true }
+                    .onDisappear { dim = false }
+                    // 채점 중(직접 보내는 중)이면 잠근다. 채점 대기(큐)는 막지 않는다(닫을 때 먼저 보낸다)
+                    let locked = model.busy || sync.grading > 0
+                    Tiny(title: model.busy ? "총평 쓰는 중… ✎\u{FE0E}" : sync.grading > 0 ? "채점이 끝나면 ✂\u{FE0E}" : "오늘 여기까지 ✂\u{FE0E}", color: locked ? Theme.pencil : Theme.red, size: 17) { Task { await model.close() } }
+                        .disabled(locked).opacity(locked ? 0.6 : 1).lineLimit(1)
+                    Tiny(title: "버리기", size: 17) { confirmDiscard = true }.disabled(model.busy)
+                } else {
+                    HStack(spacing: 7) {
+                        Circle().strokeBorder(Theme.red, lineWidth: 1.5).frame(width: 8, height: 8)
+                        Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red, size: 17) { model.begin() }
+                    }
                 }
             }
+            .padding(.horizontal, 16).padding(.vertical, 3)
+            .frame(maxWidth: .infinity, minHeight: 24)
         }
-        .padding(.horizontal, 16).padding(.vertical, 3)
-        .frame(maxWidth: .infinity, minHeight: 24)
         .background(Theme.desk)
+        .confirmationDialog("시작점을 버릴까요? 그동안 채점한 건 기록 없이 남습니다.", isPresented: $confirmDiscard, titleVisibility: .visible) {
+            Button("버리기", role: .destructive) { model.discard() }
+        }
     }
 
     /// 웹과 같은 형식: 60분 미만 "12분", 그 이상 "1시간 12분"
@@ -178,58 +219,6 @@ extension View {
     /// 탭의 뿌리에 붙여 그 탭의 모든 화면(밀어 넣은 공책·마지막 장 포함) 아래에 공부 상태를 둔다
     func studyDot() -> some View { safeAreaInset(edge: .bottom, spacing: 0) { StudyDot() } }
 }
-
-/// 공부 세션 줄: "공부 시작 ▶\u{FE0E}" →\u{FE0E} "HH:MM부터 · 오늘 여기까지 ✂\u{FE0E} · 버리기"
-struct SessionBar: View {
-    @ObservedObject var model: SessionModel
-    var waiting = 0
-    var hideStart = false
-    /// 방금 닫은 세션의 ✂ 줄과 총평이 이미 본문에 있다(공책) → "기록했다" 줄과 총평을 여기에 겹쳐 쓰지 않는다 (goni 2026-11-18, 웹과 같은 규칙).
-    /// 총평을 못 받았으면(review nil) 호출 쪽이 false를 줘 "다시 시도"가 남는다
-    var reviewShownInBody = false
-    @State private var confirmDiscard = false
-
-    /// 보여 줄 메시지. 닫기 결과("기록했다 · …")는 본문에 총평이 있으면 숨긴다. 다른 메시지(오류 등)는 그대로
-    private var visibleMsg: String? {
-        guard let msg = model.msg else { return nil }
-        if reviewShownInBody, msg.hasPrefix("기록했다") { return nil }
-        return msg
-    }
-
-    var body: some View {
-        if model.start == nil && hideStart && visibleMsg == nil {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 14) {
-                    if let start = model.start {
-                        let d = Date(ms: start)
-                        Text((d.isToday ? "" : d.monthDay + " ") + d.hm + "부터")
-                            .font(Theme.hand(20)).foregroundStyle(d.isToday ? Theme.ink : Theme.red)
-                        Tiny(title: model.busy ? "총평 쓰는 중… ✎\u{FE0E}" : "오늘 여기까지 ✂\u{FE0E}", color: Theme.red) { Task { await model.close() } }
-                            .disabled(model.busy || waiting > 0)
-                            .opacity(model.busy || waiting > 0 ? 0.45 : 1)
-                        if waiting > 0 { MutedText(text: "채점이 끝나면 누를 수 있다") }   // 지금 채점 중(온라인)인 것만. 채점 대기(큐)는 막지 않는다
-                        Tiny(title: "버리기") { confirmDiscard = true }
-                    } else if !hideStart {
-                        Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red) { model.begin() }
-                    }
-                }
-                if let msg = visibleMsg {
-                    Text(msg).font(Theme.hand(20)).foregroundStyle(Theme.red)
-                }
-                if let c = model.closed, visibleMsg != nil {
-                    SessionReviewLines(session: c, size: 19, retrying: model.retrying) { Task { await model.retryReview(c) } }
-                }
-            }
-            .frame(minHeight: Theme.lh)
-            .confirmationDialog("시작점을 버릴까요? 그동안 채점한 건 기록 없이 남습니다.", isPresented: $confirmDiscard, titleVisibility: .visible) {
-                Button("버리기", role: .destructive) { model.discard() }
-            }
-        }
-    }
-}
-
 
 /// 세션 총평 세 줄: summary(빨간 펜) · "✓ keep"(초록) · "→ next"(연필). 없으면 실패 이유 + 다시 시도 / 연결되면 받는다
 struct SessionReviewLines: View {

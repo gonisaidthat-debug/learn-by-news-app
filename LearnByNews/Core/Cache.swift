@@ -368,6 +368,23 @@ final class Cache {
             .map { Phrase(id: $0.id, phrase: $0.phrase, meaning: $0.meaning, sentenceId: $0.sentenceId, articleId: $0.articleId, createdAt: $0.createdAt, sentenceText: sents[$0.sentenceId]?.text, articleTitle: arts[$0.articleId]?.title, masteredAt: $0.masteredAt) }
     }
 
+    /// 표현장 시험 카드(오프라인): 습득 완료 아닌 캐시 표현 + 로컬 quiz_results("pr|<id>")로 기록
+    func phraseTest() -> [PhraseTestItem]? {
+        guard !isEmpty else { return nil }
+        let sents = Dictionary(uniqueKeysWithValues: all(CachedSentence.self).map { ($0.id, $0) })
+        let arts = Dictionary(uniqueKeysWithValues: all(CachedArticle.self).map { ($0.id, $0) })
+        var last: [String: (correct: Bool, at: Int64, n: Int, wrong: Int)] = [:]
+        for r in all(CachedQuizResult.self).sorted(by: { $0.createdAt < $1.createdAt }) where r.key.hasPrefix("pr|") {
+            let p = last[r.key]
+            last[r.key] = (r.correct, r.createdAt, (p?.n ?? 0) + 1, (p?.wrong ?? 0) + (r.correct ? 0 : 1))
+        }
+        return all(CachedPhrase.self).filter { $0.masteredAt == nil }.sorted { $0.createdAt > $1.createdAt }.map { p in
+            let key = "pr|\(p.id)", l = last[key], s = sents[p.sentenceId]
+            return PhraseTestItem(id: p.id, key: key, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId,
+                                  sentenceText: s?.text, sentenceIdx: s?.idx, articleTitle: arts[p.articleId]?.title,
+                                  lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0)
+        }
+    }
     func quiz() -> [QuizItem]? {
         guard !isEmpty else { return nil }
         let sents = Dictionary(uniqueKeysWithValues: all(CachedSentence.self).map { ($0.id, $0) })
@@ -635,6 +652,8 @@ final class Cache {
     func pendingOp(id: String) -> PendingOp? { all(PendingOp.self).first { $0.id == id } }
     /// 화면의 "채점 대기 N개": 직접 보내는 중인 건 세지 않는다
     var pendingCount: Int { pending().filter { !$0.isClaimed }.count }
+    /// 지금 채점 중(직접 보내는 중)인 번역·응용 수 — "오늘 여기까지 ✂"는 이게 0일 때만
+    var gradingCount: Int { pending().filter { $0.isClaimed && ["attempt", "drill_answer", "drill_free"].contains($0.kind) }.count }
     func pending(kind: String) -> [PendingOp] { pending().filter { $0.kind == kind } }
     func pendingUnclaimed(kind: String) -> [PendingOp] { pending(kind: kind).filter { !$0.isClaimed } }
     /// 임시 세션(오프라인 닫기)을 서버 세션으로 교체

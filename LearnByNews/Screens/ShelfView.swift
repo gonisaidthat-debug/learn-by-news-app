@@ -32,7 +32,7 @@ struct ShelfView: View {
                     .padding(.bottom, 2)
                     if let b = bookmark { bookmarkBar(b).padding(.bottom, 12) }
                     sheet
-                    SessionBar(model: session).padding(.horizontal, 4).padding(.top, 14)
+                    // 세션 줄(공부 시작·오늘 여기까지·버리기)은 모든 화면 아래 StudyDot으로 옮겼다 (goni 2026-11-18). 닫은 세션은 아래 공부 기록 맨 위에 총평과 함께
                     if !list.isEmpty { notebooks.padding(.top, 36) }
                     if !session.sessions.isEmpty { ledger.padding(.top, 40) }
                 }

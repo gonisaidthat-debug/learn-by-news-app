@@ -181,6 +181,8 @@ struct DrillsView: View {
                     m.answer = "The committee pushed back the vote until next week."
                     if v == "stop" { Task { try? await Task.sleep(for: .seconds(2)); m.stop(); focused = true } }   // 2초 뒤 멈추기까지
                     await m.submit()
+                    // LBN_AUTOCLOSE=1: 채점 뒤 "오늘 여기까지"까지 (공책이 아닌 화면의 닫기 결과 패널 확인용)
+                    if ProcessInfo.processInfo.environment["LBN_AUTOCLOSE"] == "1" { await SessionModel.shared.close() }
                 }
                 #endif
             }

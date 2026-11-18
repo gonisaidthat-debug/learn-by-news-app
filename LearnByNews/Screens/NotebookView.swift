@@ -785,11 +785,10 @@ struct NotebookView: View {
                             inputBlock(cur)
                         }
                         foot(d, waiting: waiting)
-                        // 방금 닫은 세션이 이 공책에 ✂ 줄을 만들고 총평까지 있으면 아래 줄에는 "기록했다"도 총평도 쓰지 않는다(두 번 보이던 일). 총평이 없으면 남겨 "다시 시도"를 누른다
-                        SessionBar(model: session, waiting: m.inflight.values.filter { !$0.pending }.count, hideStart: true,
-                                   reviewShownInBody: session.closed.map { c in c.review != nil && markers.values.contains { $0.id == c.id } } ?? false)   // 채점 대기(큐)는 닫기를 막지 않는다
-                            .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
                     }
+                    // 세션 줄(오늘 여기까지·버리기)은 StudyDot으로 옮겼다. 방금 닫은 세션이 이 공책에 ✂ 줄을 만들고 총평까지 있으면 StudyDot 패널에는 "기록했다"도 총평도 겹쳐 쓰지 않는다(두 번 보이던 일). 총평이 없으면 패널에 남아 "다시 시도"를 누른다
+                    .onChange(of: session.closed.map { c in c.review != nil && markers.values.contains { $0.id == c.id } } ?? false, initial: true) { _, v in session.reviewInBody = v }
+                    .onDisappear { session.reviewInBody = false }
                 }
                 .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()

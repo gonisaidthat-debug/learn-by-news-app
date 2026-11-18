@@ -44,6 +44,8 @@ final class SyncManager: ObservableObject {
     @Published private(set) var lastSyncAt: Int64? = Cache.shared.exportedAt
     @Published private(set) var pendingCount = Cache.shared.pendingCount
     @Published private(set) var pendingAttempts = Cache.shared.pendingUnclaimed(kind: "attempt").count
+    /// 지금 채점 중(직접 보내는 중)인 번역·응용 수. StudyDot의 ✂ 잠금용
+    @Published private(set) var grading = Cache.shared.gradingCount
     private var flushing = false
     /// 진행 중인 큐 전송이 끝날 때까지 기다린 뒤, 남은 것도 보낸다(세션 닫기 전에 채점 대기분을 먼저 보내려고)
     func flushAndWait() async {
@@ -71,7 +73,7 @@ final class SyncManager: ObservableObject {
         await sync(full: full)
     }
 
-    private func refreshCounts() { pendingCount = Cache.shared.pendingCount; pendingAttempts = Cache.shared.pendingUnclaimed(kind: "attempt").count }
+    private func refreshCounts() { pendingCount = Cache.shared.pendingCount; pendingAttempts = Cache.shared.pendingUnclaimed(kind: "attempt").count; grading = Cache.shared.gradingCount }
 
     /// full: 전체 받아 교체. 아니면 ?since=exported_at 증분
     func sync(full: Bool) async {
@@ -497,12 +499,17 @@ final class SyncManager: ObservableObject {
 
     /// 시험 결과: 온라인이면 바로, 아니면 큐 (캐시에도 남겨 다음 순서 계산에 반영)
     func answerQuiz(_ it: QuizItem, correct: Bool) async throws {
-        Cache.shared.addQuizResult(key: it.key, sentenceId: it.sentenceId, source: it.source, correct: correct)
+        try await answerQuiz(key: it.key, sentenceId: it.sentenceId, source: it.source, correct: correct)
+    }
+    /// 시험 결과 기록(시험지·표현장 시험 공용): 캐시에 먼저, 온라인이면 바로, 아니면 큐 quiz_result
+    func answerQuiz(key: String, sentenceId: String, source: String, correct: Bool) async throws {
+        Cache.shared.addQuizResult(key: key, sentenceId: sentenceId, source: source, correct: correct)
+        let body = API.QuizResultBody(key: key, sentenceId: sentenceId, source: source, correct: correct)
         if Connectivity.shared.isOnline {
-            do { try await API.shared.answerQuiz(it, correct: correct); return }
+            do { let _: API.OK = try await API.shared.send("POST", "/api/quiz/results", body: body); return }
             catch let e as APIError where e.isNetwork { /* 아래 큐로 */ }
         }
-        Cache.shared.enqueue("quiz_result", API.QuizResultBody(key: it.key, sentenceId: it.sentenceId, source: it.source, correct: correct))
+        Cache.shared.enqueue("quiz_result", body)
         pendingCount = Cache.shared.pendingCount
     }
 
