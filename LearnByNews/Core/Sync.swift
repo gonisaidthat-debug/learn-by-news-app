@@ -164,6 +164,9 @@ final class SyncManager: ObservableObject {
                     let d = try await API.shared.answerDrill(b.id, answer: b.answer, answeredAt: b.answeredAtLocal)
                     DrillStore.shared.didGrade(d)
                     NotificationCenter.default.post(name: .lbnDrillGraded, object: nil, userInfo: ["drill": d])
+                case "drill_grading_cancel":
+                    let b = try JSONDecoder.api.decode(DrillCancelOp.self, from: op.payload)
+                    _ = try await API.shared.cancelDrillGrading(b.id)
                 case "quiz_result":
                     let b = try JSONDecoder.api.decode(API.QuizResultBody.self, from: op.payload)
                     let _: API.OK = try await API.shared.send("POST", "/api/quiz/results", body: b)
@@ -256,14 +259,28 @@ final class SyncManager: ObservableObject {
     }
     struct NoteOp: Codable { var highlightId: String; var note: String }
 
-    /// 자유 작문: 온라인이면 바로 채점, 아니면 큐(drill_free) → nil("연결되면 채점")
+    /// 자유 작문: 온라인이면 바로 채점, 아니면 큐(drill_free) → nil("연결되면 채점"). 큐 항목에 drillId가 들어 있어 재전송이 중복 저장되지 않는다
     func freeDrill(_ b: API.DrillFreeBody) async throws -> Drill? {
         if Connectivity.shared.isOnline {
             do { return try await API.shared.freeDrill(b) }
             catch let e as APIError where e.isNetwork { /* 큐로 */ }
         }
+        if Task.isCancelled { throw CancellationError() }   // 멈추기로 끊긴 요청은 큐에 넣지 않는다
         Cache.shared.enqueue("drill_free", b); refreshCounts()
         return nil
+    }
+    struct DrillCancelOp: Codable { var id: String }
+    /// 응용 채점 멈추기: 큐에 있으면(자유 작문 drill_free·출제형 drill_answer) 빼고 끝. 이미 보냈으면 서버에 DELETE grading(오프라인이면 그것도 큐)
+    func stopDrillGrading(id: String) async {
+        for op in Cache.shared.pending(kind: "drill_free") {
+            if let b = try? JSONDecoder.api.decode(API.DrillFreeBody.self, from: op.payload), b.drillId == id { Cache.shared.remove(op); refreshCounts(); return }
+        }
+        for op in Cache.shared.pending(kind: "drill_answer") {
+            if let b = try? JSONDecoder.api.decode(DrillAnswerOp.self, from: op.payload), b.id == id { Cache.shared.remove(op); DrillStore.shared.dropPending(id); refreshCounts(); return }
+        }
+        await sendOrQueue("drill_grading_cancel", DrillCancelOp(id: id)) {
+            _ = try await API.shared.cancelDrillGrading(id)
+        }
     }
 
     /// 형광펜 내 메모 (Claude 없음): 온라인이면 서버, 아니면 임시 id로 캐시 + 큐

@@ -81,11 +81,12 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/sentences/:id/memo` | `{start_word, end_word, span, note, links?: {to_kind, to_id}[]}` | `Highlight & {phrase, links, backlinks: []}` — Claude 없이 내 메모만 붙인다(answer 빈 값, note에 메모). 표현장에 메모를 뜻으로 붙는다. `links`는 메모와 함께 엮을 대상(최대 20, 틀린 건 건너뜀). 오프라인 큐 가능 |
 | PATCH `/api/highlights/:id` | `{note}` | `{ok, note}` 기존 형광펜에 내 메모 넣기·고치기(빈 문자열이면 지움). 오프라인 큐 가능 |
 | POST `/api/drills/next` | `{phrase_id?}` | `Drill`(reference 없음). 안 푼 최근 문제가 있으면 그걸 다시 준다. 없으면 표현장에서 골라 Claude가 한국어 문장을 만든다(호출 1) |
-| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}`. **`answered_at`(ms, 선택, 2026-11-15)**: 오프라인에서 쓴 시각, 큐 재생 때 보낸다 |
+| POST `/api/drills/:id/answer` | `{answer}` | `Drill`(feedback·reference 포함) — Claude 채점(호출 1): `{grade A~D, used_expression, issues[{mine, better, why}], reference, note}`. **`answered_at`(ms, 선택, 2026-11-15)**: 오프라인에서 쓴 시각, 큐 재생 때 보낸다. **멈추기(2026-11-18)**: 채점 중 `DELETE /api/drills/:id/grading`이 오면 결과를 버리고 409 `{cancelled:true}`, 문제는 안 푼 채로 남는다 |
 | DELETE `/api/drills/:id` | — | `{ok}` 안 푼 문제 건너뛰기 |
+| DELETE `/api/drills/:id/grading` | — | `{ok, removed}` **응용 채점 멈추기**(2026-11-18): 채점이 끝났으면 되돌리고(자유 작문은 행 삭제, 출제형은 답·등급·answered_at을 비워 안 푼 문제로) removed:true, 아직이면 묘비를 남겨 결과가 와도 버리게 하고 removed:false. 번역의 `DELETE /api/attempts/:id`와 같은 방식 |
 | GET `/api/drills?days=30` | — | 푼 문제 목록 최신순 |
 | POST `/api/drills/batch` | `{count}` 1~30 | `{drills: Drill[], made}` 안 푼 문제를 count개까지 채워 전부(오프라인용 미리 받기) |
-| POST `/api/drills/free` | `{phrase, meaning?, phrase_id?, sentence_id?, answer}` | `Drill`(kind "free", feedback·reference 포함) — 한국어 원문 없이 표현을 써서 지은 내 문장을 채점(호출 1). 오프라인이면 큐(drill_free) |
+| POST `/api/drills/free` | `{phrase, meaning?, phrase_id?, sentence_id?, answer}` | `Drill`(kind "free", feedback·reference 포함) — 한국어 원문 없이 표현을 써서 지은 내 문장을 채점(호출 1). 오프라인이면 큐(drill_free). **`drill_id`(클라이언트 UUID, 선택, 2026-11-18)**: 주면 그 id로 저장되고 `DELETE /api/drills/:drill_id/grading`으로 멈출 수 있다(409 `{cancelled:true}`, 저장 안 함). 같은 drill_id 재전송은 저장된 것을 `duplicate:true`로 돌려준다 |
 | GET / PUT / DELETE `/api/articles/:id/pass` | PUT `{done: string[]}` | GET → `{done, updated_at}|null`. **다시 쓰기 진행 상태는 서버가 진실**. 제출마다 PUT, 완료·중단 시 DELETE. UserDefaults는 캐시(오프라인 큐로 지연 전송 가능). 서버가 null이면 기기 저장(RedoProgress)도 지운다, 이관하지 않는다 (2026-11-15) |
 | GET / PUT / DELETE `/api/session-start` | PUT `{started_at}` | GET → `{started_at}|null`(이미 기록된 세션의 `started_at` 이하면 서버가 지우고 null, 2026-11-17). PUT → `{started_at}` (앱은 이 형식으로 읽는다. 400만 "거절"로 보고 로컬 시작점을 지운다, 2026-11-15). **공부 세션 시작점도 서버에 하나**. 서버가 null이면 기기 캐시도 지운다(캐시를 서버로 이관하지 않는다, 2026-11-13). PUT은 이미 기록된 세션의 `started_at` 이하 값을 400으로 거절 |
 | POST `/api/logs` | `{device, app_version, entries:[{level, tag, message, context?, at}]}` 최대 500개 | `{ok, saved}` |
@@ -96,6 +97,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - **문장 분리**는 클라이언트 몫. 첫 줄 제목, URL만 있는 줄은 source, 빈 줄 사이가 문단. 약어(월 약어, Mr./Dr./Jr., No., vs., U.S. 등) 뒤는 끊지 않고, 소문자·구두점으로 시작하는 조각은 앞에 붙인다. iOS는 `NLTokenizer(unit: .sentence)` + 같은 보정.
 - **제출 즉시 다음 문장**으로 넘어가고 채점은 뒤에서 받는다(여러 개 동시 가능). 결과가 오면 그 문장을 펼쳐 보여준다.
 - **멈추기**: 채점 중인 문장에 "멈추기 ↩". 누르면 요청을 취소(URLSessionTask.cancel)하고 `DELETE /api/attempts/:attempt_id`를 보낸 뒤, 그 문장이 다시 입력란이 되고 쓰던 번역이 그대로 들어간다(다시 쓰기 중이었으면 그 자리에서). 제출할 때 attempt_id를 UUID로 만들어 보내야 멈추기가 된다.
+- **응용 채점 멈추기**(goni 2026-11-18, 웹 26a36a8): 응용 탭은 "선생님이 보는 중… ✎" 옆, 써 보기 상자는 "채점 중… ✎" 옆에 "멈추기 ↩". 누르면 요청 Task를 취소하고 `DELETE /api/drills/:id/grading`(출제형은 문제 id, 자유 작문은 제출 때 만든 클라이언트 UUID `drill_id`)을 보낸다(오프라인이면 큐 `drill_grading_cancel`). 쓰던 문장은 입력란에 그대로 남고 포커스, 문제는 안 푼 채로 남아 다시 제출할 수 있다. 늦게 온 결과·오류(409 cancelled, 취소)는 버린다. 자유 작문 큐(`drill_free`)에도 `drill_id`가 들어가 재전송이 중복 저장되지 않는다(`duplicate`). 큐에 있는 채점 대기 항목은 멈추기 버튼이 없다(기존 흐름 그대로).
 - **열람 모드**: 완료 여부·다시 쓰기 진행과 무관하게 전체 문장과 최신 번역·첨삭·이전 시도를 보여주는 화면. 다시 쓰기 중 "이전 회차 열람"(별도 화면으로 push, 진행 상태는 유지), 마지막 장 "공책 전체 열람", 기록·시험지의 문장 링크가 여기로 온다.
 - **읽는 위치 진행 줄**(goni 요청 2026-11-12): 공책·열람 화면 맨 위에 고정된 얇은 줄. 화면 가운데쯤에 걸린 문장이 전체의 어디인지 "41 / 111 · 37%"로, 문단 경계는 눈금으로. 탭/드래그하면 그 비율의 문장으로 스크롤(아직 안 그려진 뒤쪽이면 끝으로).
 - **회차 열람**(공책 목록 카드의 "1회차 2회차 …" 링크, 진행 중이면 "n회차 진행 중"은 공책으로): 회차 = n번째 총평. 각 문장의 번역을 "그 총평 시각까지의 마지막 시도"로 바꿔 열람 화면에 보여준다(이전 시도도 그 시점까지만, 총평도 n번째까지). 탭 "n회차 열람". 클라이언트가 history(created_at)로 계산, 서버 변경 없음.
@@ -124,6 +126,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - `SIMCTL_CHILD_LBN_AUTOMERGE=prev|next`: 공책을 열자마자 현재 문장을 그 방향으로 합친다(다시 쓰기 중 합치기 확인용).
 - `SIMCTL_CHILD_LBN_SESSION=1`: 공부 세션이 시작된 상태로 시작(모의 서버와 기기 캐시 둘 다 시작점을 가짐. 서버가 null이면 앱이 캐시를 지운다).
 - `SIMCTL_CHILD_LBN_AUTOSUBMIT=1`: 공책을 열자마자 현재 문장에 번역을 넣고 제출(채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다).
+- `SIMCTL_CHILD_LBN_AUTOANSWER=1`: 응용 탭(`LBN_ROUTE=drills`)에서 첫 문제에 답을 넣고 바로 제출. `SIMCTL_CHILD_LBN_AUTOTRY=<문장 id>`: 그 문장의 첫 붙은 표현으로 써 보기 상자를 열고 문장을 넣어 제출(`LBN_AUTOPIN`·`LBN_AUTOOPEN`과 함께). 둘 다 모의 응용 채점이 8초 걸린다(멈추기 확인용).
 - 모의 모드에서는 Face ID 잠금을 끈다.
 - 예: `SIMCTL_CHILD_LBN_MOCK=1 SIMCTL_CHILD_LBN_ROUTE=notebook:a1 xcrun simctl launch <sim> com.goni.learn-by-news`
 

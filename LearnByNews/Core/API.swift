@@ -178,9 +178,11 @@ final class API {
     func answerDrill(_ id: String, answer: String, answeredAt: Int64? = nil) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer, answeredAt: answeredAt)) }
     func deleteDrill(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/drills/\(id)") }
     func drills(days: Int = 30) async throws -> [Drill] { try await send("GET", "/api/drills?days=\(days)") }
-    struct DrillFreeBody: Codable { var phrase: String; var meaning: String?; var phraseId: String?; var sentenceId: String?; var answer: String }
-    /// 자유 작문: 한국어 원문 없이 표현을 써서 지은 내 문장을 채점
+    struct DrillFreeBody: Codable { var phrase: String; var meaning: String?; var phraseId: String?; var sentenceId: String?; var answer: String; var drillId: String? }
+    /// 자유 작문: 한국어 원문 없이 표현을 써서 지은 내 문장을 채점. drillId(클라이언트 UUID)를 주면 멈추기(DELETE grading)가 되고 같은 id 재전송은 저장된 것을 돌려준다(duplicate)
     func freeDrill(_ b: DrillFreeBody) async throws -> Drill { try await send("POST", "/api/drills/free", body: b) }
+    /// 응용 채점 멈추기: 채점이 끝났으면 되돌리고(자유 작문은 삭제, 출제형은 안 푼 문제로), 아직이면 결과 도착 시 버린다(그 요청은 409 cancelled)
+    func cancelDrillGrading(_ id: String) async throws -> Cancelled { try await send("DELETE", "/api/drills/\(id)/grading") }
     struct DrillBatchBody: Encodable { var count: Int }
     struct DrillBatch: Decodable { var drills: [Drill]; var made: Int? }
     /// 안 푼 문제를 count개까지 채워 전부 돌려준다 (오프라인용 미리 받기, 중복 생성 없음)

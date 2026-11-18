@@ -518,9 +518,9 @@ final class NotebookModel: ObservableObject {
         await SyncManager.shared.setHighlightNote(h.id, note: note)
     }
     /// 포스트잇에서 바로 써 보기 (자유 작문). 오프라인이면 큐 → nil
-    func freeDrill(_ sid: String, _ e: Expression, answer: String) async throws -> Drill? {
+    func freeDrill(_ sid: String, _ e: Expression, answer: String, drillId: String) async throws -> Drill? {
         let pid = data?.phrases.first { $0.sentenceId == sid && $0.phrase == e.phrase }?.id
-        return try await SyncManager.shared.freeDrill(API.DrillFreeBody(phrase: e.phrase, meaning: e.meaning, phraseId: pid, sentenceId: sid, answer: answer))
+        return try await SyncManager.shared.freeDrill(API.DrillFreeBody(phrase: e.phrase, meaning: e.meaning, phraseId: pid, sentenceId: sid, answer: answer, drillId: drillId))
     }
     /// "문제 내줘": 표현장에 붙어 있으면 그 표현으로 한국어 문장을 받는다. 없으면 nil
     func drillFor(_ sid: String, _ e: Expression) async throws -> Drill? {
@@ -619,6 +619,8 @@ struct NotebookView: View {
                 await m.togglePhrase(sid, Expression(phrase: i.source.trimmingCharacters(in: .whitespacesAndNewlines), meaning: i.meaning))
             }
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
+            // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 써 보기 상자(EntryView가 연다)가 보이도록 잠시 뒤 맨 아래로 스크롤
+            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil { Task { try? await Task.sleep(for: .seconds(3.5)); m.requestScroll("bottom") } }
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
             if let dir = ProcessInfo.processInfo.environment["LBN_AUTOMERGE"], let cur = m.current { await m.merge(cur.id, dir: dir) }
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
@@ -819,7 +821,7 @@ struct NotebookView: View {
                 onAddLink: { h, r in await m.addLink(h, r) },
                 onRemoveLink: { h, l in await m.removeLink(h, l) },
                 onOpenSentence: { aid, sid in openSentence(aid, sid) },
-                onFree: { e, a in try await m.freeDrill(x.id, e, answer: a) },
+                onFree: { e, a, did in try await m.freeDrill(x.id, e, answer: a, drillId: did) },
                 onDrillFor: { e in try await m.drillFor(x.id, e) },
                 onAnswerDrill: { id, a in try await m.answerDrill(id, a) },
                 drillCounts: d.drillCounts,

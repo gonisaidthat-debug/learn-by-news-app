@@ -15,6 +15,9 @@ final class DrillsModel: ObservableObject {
     @Published var setFinished = false
     @Published var pendingCurrent = false  // 지금 문제의 답이 큐에 있다(채점 대기)
     private var prefetched: Drill?
+    private var gradingTask: Task<Void, Never>?   // 채점 요청. 멈추기 때 cancel
+    private var gradingToken: UUID?
+    private var stopped: Set<String> = []          // 멈춘 문제 id (늦게 온 결과·오류를 버린다)
     private var observers: [NSObjectProtocol] = []
     let store = DrillStore.shared
 
@@ -72,15 +75,37 @@ final class DrillsModel: ObservableObject {
         guard !a.isEmpty else { return }
         if !Connectivity.shared.isOnline { answerOffline(d, a); return }
         grading = true; err = nil
-        do {
-            let r = try await API.shared.answerDrill(d.id, answer: a)
-            current = r; setDone.append(r)
-            recent.insert(r, at: 0); if recent.count > 20 { recent.removeLast(recent.count - 20) }
-            store.remove(d.id)
-            AppLog.shared.info("drills", "answered", ["id": d.id, "grade": r.grade?.rawValue ?? ""])
-        } catch let e as APIError where e.isNetwork { answerOffline(d, a) }
-        catch { err = error.localizedDescription }
-        grading = false
+        stopped.remove(d.id)
+        let token = UUID(); gradingToken = token
+        let t = Task {
+            do {
+                let r = try await API.shared.answerDrill(d.id, answer: a)
+                guard !stopped.contains(d.id) else { return }
+                current = r; setDone.append(r)
+                recent.insert(r, at: 0); if recent.count > 20 { recent.removeLast(recent.count - 20) }
+                store.remove(d.id)
+                AppLog.shared.info("drills", "answered", ["id": d.id, "grade": r.grade?.rawValue ?? ""])
+            } catch let e as APIError where e.isNetwork {
+                // 보내는 중 끊김: 큐로. 멈추기로 끊은 요청은 아니다
+                guard !stopped.contains(d.id), !Task.isCancelled else { return }
+                answerOffline(d, a)
+            } catch {
+                guard !stopped.contains(d.id) else { return }
+                err = error.localizedDescription
+            }
+        }
+        gradingTask = t
+        await t.value
+        if gradingToken == token { gradingTask = nil; gradingToken = nil; grading = false }
+    }
+    /// 멈추기: 요청 취소 → 서버에 DELETE grading → 쓰던 문장은 입력란에 그대로. 문제는 안 푼 채로 남는다
+    func stop() {
+        guard grading, let d = current else { return }
+        stopped.insert(d.id)
+        gradingTask?.cancel(); gradingTask = nil; gradingToken = nil
+        grading = false; err = nil
+        AppLog.shared.info("drills", "stop", ["id": d.id])
+        Task { await SyncManager.shared.stopDrillGrading(id: d.id) }
     }
     private func answerOffline(_ d: Drill, _ a: String) {
         store.answerOffline(d, answer: a)
@@ -148,7 +173,17 @@ struct DrillsView: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .task { await m.start(); focused = true }
+            .task {
+                await m.start(); focused = true
+                #if DEBUG
+                // 화면 확인용: LBN_AUTOANSWER=1 이면 첫 문제에 답을 넣고 바로 제출한다 (채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다)
+                if let v = ProcessInfo.processInfo.environment["LBN_AUTOANSWER"], m.current != nil {
+                    m.answer = "The committee pushed back the vote until next week."
+                    if v == "stop" { Task { try? await Task.sleep(for: .seconds(2)); m.stop(); focused = true } }   // 2초 뒤 멈추기까지
+                    await m.submit()
+                }
+                #endif
+            }
             .refreshable { await m.loadRecent() }
         }
     }
@@ -218,7 +253,9 @@ struct DrillsView: View {
                             // 한글 조합 중 Return은 줄바꿈이 안 들어온다 → 줄바꿈이 들어온 뒤에만 제출
                             if v.contains("\n") { m.answer = v.replacingOccurrences(of: "\n", with: " "); Task { await m.submit() } }
                         }
-                    if m.grading { Text("선생님이 보는 중… ✎\u{FE0E}").pencil() }
+                    if m.grading {
+                        HStack(spacing: 14) { Text("선생님이 보는 중… ✎\u{FE0E}").pencil(); Tiny(title: "멈추기 ↩\u{FE0E}") { m.stop(); focused = true } }
+                    }
                 } else if let fb {
                     Text(d.answer ?? "").koLine()
                     if fb.usedExpression {

@@ -29,8 +29,10 @@ final class MockServer: URLProtocol {
             while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n > 0 { out.append(buf, count: n) } else { break } }
             s.close(); return out
         }), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { body = j }
-        let slow = ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1" ? 8.0 : 1.5
-        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : path.hasSuffix("/review") ? 2 : 0.15
+        let env = ProcessInfo.processInfo.environment
+        let slow = env["LBN_AUTOSUBMIT"] == "1" ? 8.0 : 1.5
+        let slowDrill = (env["LBN_AUTOANSWER"] != nil || env["LBN_AUTOTRY"] != nil) ? 8.0 : 1.5   // 응용 채점(멈추기 확인용)
+        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
@@ -66,6 +68,7 @@ struct MockState {
     var passes: [String: [String]] = [:]
     var trash: [String: [String: Any]] = [:]
     var links: [[String: Any]] = []   // {id, from_highlight, to_kind, to_id, created_at}
+    var cancelledDrills: Set<String> = []   // 응용 채점 멈추기 묘비 (서버 cancelled_attempts)
     // LBN_SESSION=1: 서버에도 시작점이 있는 상태(앱은 서버가 null이면 기기 캐시를 지우므로 둘이 맞아야 세션이 보인다)
     var sessionStart: Int64? = ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" ? Date().ms - 600_000 : nil
     var highlights: [[String: Any]] = []
@@ -146,7 +149,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -399,8 +402,11 @@ struct MockState {
             drills.append(d); return (200, d)
         case "POST /api/drills/free":
             let a = body["answer"] as? String ?? "", ph = body["phrase"] as? String ?? ""
+            let did = body["drill_id"] as? String
+            if let did, let dup = drills.first(where: { $0["id"] as? String == did }) { var r = dup; r["duplicate"] = true; return (200, r) }
+            if let did, cancelledDrills.remove(did) != nil { return (409, ["error": "멈추기로 취소된 채점", "cancelled": true]) }
             let used = a.lowercased().contains(ph.lowercased().split(separator: " ").first.map(String.init) ?? "")
-            let d: [String: Any] = ["id": nextId("d"), "phrase_id": body["phrase_id"] ?? NSNull(), "phrase": ph, "meaning": body["meaning"] ?? "", "korean": "", "kind": "free", "sentence_id": body["sentence_id"] ?? NSNull(),
+            let d: [String: Any] = ["id": did ?? nextId("d"), "phrase_id": body["phrase_id"] ?? NSNull(), "phrase": ph, "meaning": body["meaning"] ?? "", "korean": "", "kind": "free", "sentence_id": body["sentence_id"] ?? NSNull(),
                                     "created_at": Date().ms, "answer": a, "grade": used ? "B" : "C", "answered_at": Date().ms,
                                     "feedback": ["grade": used ? "B" : "C", "used_expression": used, "issues": [["mine": String(a.prefix(5)), "better": "(better)", "why": "어순"]], "reference": "(모의 참고) " + a, "reference_ko": "(모의) 한국어 뜻", "note": "자유 작문 좋다."] as [String: Any],
                                     "reference": "(모의 참고) " + a]
@@ -421,6 +427,7 @@ struct MockState {
             return (200, ["drills": drills.filter { $0["feedback"] is NSNull }, "made": made])
         case "POST /api/drills/:id/answer":
             guard let i = drills.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문제"]) }
+            if cancelledDrills.remove(id) != nil { return (409, ["error": "멈추기로 취소된 채점", "cancelled": true]) }
             let a = body["answer"] as? String ?? ""
             let used = a.lowercased().contains((drills[i]["phrase"] as! String).lowercased().split(separator: " ").first.map(String.init) ?? "")
             drills[i]["answer"] = a; drills[i]["grade"] = used ? "B" : "C"; drills[i]["answered_at"] = Date().ms
@@ -431,6 +438,16 @@ struct MockState {
             return (200, drills[i])
         case "DELETE /api/drills/:id":
             drills.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
+        case "DELETE /api/drills/:id/grading":
+            // 서버와 같은 규칙: 자유 작문은 행 삭제, 채점 끝난 출제형은 답·등급을 비워 안 푼 문제로(removed:true), 아직이면 묘비(removed:false)
+            if let i = drills.firstIndex(where: { $0["id"] as? String == id }) {
+                if drills[i]["kind"] as? String == "free" { drills.remove(at: i); return (200, ["ok": true, "removed": true]) }
+                if !(drills[i]["answered_at"] is NSNull) && drills[i]["answered_at"] != nil {
+                    drills[i]["answer"] = NSNull(); drills[i]["grade"] = NSNull(); drills[i]["feedback"] = NSNull(); drills[i]["answered_at"] = NSNull()
+                    return (200, ["ok": true, "removed": true])
+                }
+            }
+            cancelledDrills.insert(id); return (200, ["ok": true, "removed": false])
         case "GET /api/drills":
             return (200, drills.filter { !($0["feedback"] is NSNull) }.reversed() as [[String: Any]])
         case "POST /api/sentences/:id/ask":

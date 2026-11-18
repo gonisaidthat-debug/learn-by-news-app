@@ -117,7 +117,7 @@ struct EntryView: View {
     var onRemoveLink: ((Highlight, HighlightLink) async -> Void)?
     var onOpenSentence: ((String, String) -> Void)?
     /// 포스트잇에서 바로 "써 보기": 자유 작문 채점(nil이면 큐에 들어감), 문제 내줘(표현장에 없으면 nil), 문제 답 채점
-    var onFree: ((Expression, String) async throws -> Drill?)?
+    var onFree: ((Expression, String, String) async throws -> Drill?)?   // (표현, 내 문장, drill_id)
     var onDrillFor: ((Expression) async throws -> Drill?)?
     var onAnswerDrill: ((String, String) async throws -> Drill)?
     var drillCounts: [String: Int] = [:]
@@ -152,6 +152,12 @@ struct EntryView: View {
                 if expanded { marks(fb) }
             }
         }
+        #if DEBUG
+        // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 그 문장의 첫 붙은 표현으로 써 보기 상자를 연다 (상자가 열리면 문장을 넣고 제출까지 한다)
+        .onChange(of: savedPhrases.count, initial: true) { _, _ in
+            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] == s.id, expanded, tryExpr == nil, let p = savedPhrases.first { tryExpr = Expression(phrase: p.phrase, meaning: p.meaning) }
+        }
+        #endif
         .overlay(alignment: .topLeading) {
             // 책갈피 리본 = 토글 버튼. 왼쪽 여백(빨간 세로선 왼쪽), 도장 바로 아래. 평소엔 흐리게, 꽂히면 빨강
             if let onBookmark {
@@ -394,7 +400,7 @@ struct TryButton: View {
 /// 포스트잇에서 바로 써 보기: "<표현> — 이 표현으로 네 문장 하나" + 영어 입력 → 채점. "문제 내줘"면 한국어 문장을 받아 같은 상자에서 푼다
 struct TryBox: View {
     var expr: Expression
-    var onFree: (Expression, String) async throws -> Drill?
+    var onFree: (Expression, String, String) async throws -> Drill?   // (표현, 내 문장, drill_id) — drill_id는 멈추기·재전송 중복 방지용 클라이언트 UUID
     var onDrillFor: ((Expression) async throws -> Drill?)?
     var onAnswerDrill: ((String, String) async throws -> Drill)?
     var onClose: () -> Void
@@ -409,6 +415,8 @@ struct TryBox: View {
     @State private var msg: String?
     @State private var past: [Drill] = []      // 같은 표현으로 푼 지난 시도 (최신순, 최대 10)
     @State private var openPast: String?       // 탭해서 펼친 지난 시도
+    @State private var gradingTask: Task<Void, Never>?   // 채점 요청. 멈추기 때 cancel
+    @State private var gradingId: String?                // 채점 중인 문제 id(출제형) 또는 drill_id(자유 작문). nil이면 채점 중이 아니다
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -485,6 +493,7 @@ struct TryBox: View {
                     // 서버가 일하는 동안 깜빡이는 연필색 글씨
                     Text(busyLabel).font(Theme.hand(19)).foregroundStyle(Theme.pencil).opacity(blink ? 0.25 : 1)
                         .onAppear { blink = false; withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { blink = true } }
+                    if gradingId != nil { Tiny(title: "멈추기 ↩\u{FE0E}", size: 19) { stop() } }
                 }
                 if let msg { ErrorText(message: msg) }
             }
@@ -495,7 +504,17 @@ struct TryBox: View {
         .overlay(alignment: .leading) { Rectangle().fill(Theme.tab).frame(width: 3) }
         .padding(.vertical, 6)
         .onAppear { focused = true }
-        .task { await loadPast() }
+        .task {
+            await loadPast()
+            #if DEBUG
+            // 화면 확인용: LBN_AUTOTRY=<문장 id>로 상자가 열렸으면 문장을 넣고 바로 제출한다 (채점 중·멈추기 확인용)
+            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil, result == nil, !busy {
+                answer = "She will set out a plan for the new policy."
+                if ProcessInfo.processInfo.environment["LBN_AUTOSTOP"] == "1" { Task { try? await Task.sleep(for: .seconds(2)); stop() } }   // 2초 뒤 멈추기까지
+                await submit()
+            }
+            #endif
+        }
     }
 
     /// 같은 표현으로 푼 지난 시도: 서버(1년), 안 되면 캐시
@@ -511,12 +530,28 @@ struct TryBox: View {
         let a = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !a.isEmpty, !busy else { return }
         busy = true; busyLabel = "채점 중… ✎\u{FE0E}"; msg = nil
-        do {
-            if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
-            else if let r = try await onFree(expr, a) { result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
-            else { queued = true }
-        } catch { msg = error.localizedDescription }
-        busy = false
+        let id = prompt?.id ?? UUID().uuidString.lowercased()
+        gradingId = id
+        let t = Task {
+            do {
+                if let p = prompt, let onAnswerDrill { let r = try await onAnswerDrill(p.id, a); guard gradingId == id else { return }; result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
+                else if let r = try await onFree(expr, a, id) { guard gradingId == id else { return }; result = r; past.insert(r, at: 0); if r.answeredAt != nil { onGraded?() } }
+                else { guard gradingId == id else { return }; queued = true }
+            } catch { if gradingId == id { msg = error.localizedDescription } }   // 멈춘 요청의 오류(취소·409 cancelled)는 보여주지 않는다
+        }
+        gradingTask = t
+        await t.value
+        if gradingId == id { gradingId = nil; gradingTask = nil; busy = false }
+    }
+    /// 멈추기: 요청 취소 → 서버에 DELETE grading → 쓰던 문장은 입력란에 그대로 두고 이어 쓴다
+    private func stop() {
+        guard busy, let id = gradingId else { return }
+        gradingId = nil
+        gradingTask?.cancel(); gradingTask = nil
+        busy = false; msg = nil
+        focused = true
+        AppLog.shared.info("trybox", "stop", ["id": id])
+        Task { await SyncManager.shared.stopDrillGrading(id: id) }
     }
     private func askPrompt() async {
         guard let onDrillFor else { return }

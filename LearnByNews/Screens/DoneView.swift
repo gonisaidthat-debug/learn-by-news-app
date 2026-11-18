@@ -157,9 +157,9 @@ final class DoneModel: ObservableObject {
         await SyncManager.shared.setHighlightNote(h.id, note: note)
     }
     /// 포스트잇에서 바로 써 보기 (자유 작문). 오프라인이면 큐 → nil
-    func freeDrill(_ sid: String, _ e: Expression, answer: String) async throws -> Drill? {
+    func freeDrill(_ sid: String, _ e: Expression, answer: String, drillId: String) async throws -> Drill? {
         let pid = data?.phrases.first { $0.sentenceId == sid && $0.phrase == e.phrase }?.id
-        return try await SyncManager.shared.freeDrill(API.DrillFreeBody(phrase: e.phrase, meaning: e.meaning, phraseId: pid, sentenceId: sid, answer: answer))
+        return try await SyncManager.shared.freeDrill(API.DrillFreeBody(phrase: e.phrase, meaning: e.meaning, phraseId: pid, sentenceId: sid, answer: answer, drillId: drillId))
     }
     /// "문제 내줘": 표현장에 붙어 있으면 그 표현으로 한국어 문장을 받는다. 없으면 nil
     func drillFor(_ sid: String, _ e: Expression) async throws -> Drill? {
@@ -327,7 +327,7 @@ struct DoneView: View {
                                 onAddLink: { h, r in await m.addLink(h, r) },
                                 onRemoveLink: { h, l in await m.removeLink(h, l) },
                                 onOpenSentence: { aid, sid in openSentence(aid, sid) },
-                                onFree: { e, a in try await m.freeDrill(s.id, e, answer: a) },
+                                onFree: { e, a, did in try await m.freeDrill(s.id, e, answer: a, drillId: did) },
                                 onDrillFor: { e in try await m.drillFor(s.id, e) },
                                 onAnswerDrill: { id, a in try await m.answerDrill(id, a) },
                                 drillCounts: d.drillCounts,
