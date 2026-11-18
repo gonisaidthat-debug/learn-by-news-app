@@ -175,10 +175,20 @@ struct SessionBar: View {
     @ObservedObject var model: SessionModel
     var waiting = 0
     var hideStart = false
+    /// 방금 닫은 세션의 ✂ 줄과 총평이 이미 본문에 있다(공책) → "기록했다" 줄과 총평을 여기에 겹쳐 쓰지 않는다 (goni 2026-11-18, 웹과 같은 규칙).
+    /// 총평을 못 받았으면(review nil) 호출 쪽이 false를 줘 "다시 시도"가 남는다
+    var reviewShownInBody = false
     @State private var confirmDiscard = false
 
+    /// 보여 줄 메시지. 닫기 결과("기록했다 · …")는 본문에 총평이 있으면 숨긴다. 다른 메시지(오류 등)는 그대로
+    private var visibleMsg: String? {
+        guard let msg = model.msg else { return nil }
+        if reviewShownInBody, msg.hasPrefix("기록했다") { return nil }
+        return msg
+    }
+
     var body: some View {
-        if model.start == nil && hideStart && model.msg == nil {
+        if model.start == nil && hideStart && visibleMsg == nil {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 4) {
@@ -196,10 +206,10 @@ struct SessionBar: View {
                         Tiny(title: "공부 시작 ▶\u{FE0E}", color: Theme.red) { model.begin() }
                     }
                 }
-                if let msg = model.msg {
+                if let msg = visibleMsg {
                     Text(msg).font(Theme.hand(20)).foregroundStyle(Theme.red)
                 }
-                if let c = model.closed, model.msg != nil {
+                if let c = model.closed, visibleMsg != nil {
                     SessionReviewLines(session: c, size: 19, retrying: model.retrying) { Task { await model.retryReview(c) } }
                 }
             }

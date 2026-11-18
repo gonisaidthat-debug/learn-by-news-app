@@ -98,6 +98,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - **제출 즉시 다음 문장**으로 넘어가고 채점은 뒤에서 받는다(여러 개 동시 가능). 결과가 오면 그 문장을 펼쳐 보여준다.
 - **멈추기**: 채점 중인 문장에 "멈추기 ↩". 누르면 요청을 취소(URLSessionTask.cancel)하고 `DELETE /api/attempts/:attempt_id`를 보낸 뒤, 그 문장이 다시 입력란이 되고 쓰던 번역이 그대로 들어간다(다시 쓰기 중이었으면 그 자리에서). 제출할 때 attempt_id를 UUID로 만들어 보내야 멈추기가 된다.
 - **응용 채점 멈추기**(goni 2026-11-18, 웹 26a36a8): 응용 탭은 "선생님이 보는 중… ✎" 옆, 써 보기 상자는 "채점 중… ✎" 옆에 "멈추기 ↩". 누르면 요청 Task를 취소하고 `DELETE /api/drills/:id/grading`(출제형은 문제 id, 자유 작문은 제출 때 만든 클라이언트 UUID `drill_id`)을 보낸다(오프라인이면 큐 `drill_grading_cancel`). 쓰던 문장은 입력란에 그대로 남고 포커스, 문제는 안 푼 채로 남아 다시 제출할 수 있다. 늦게 온 결과·오류(409 cancelled, 취소)는 버린다. 자유 작문 큐(`drill_free`)에도 `drill_id`가 들어가 재전송이 중복 저장되지 않는다(`duplicate`). 큐에 있는 채점 대기 항목은 멈추기 버튼이 없다(기존 흐름 그대로).
+- **닫은 뒤 총평은 한 번만**(goni 2026-11-18, 웹과 같은 규칙): 공책에서 "오늘 여기까지"를 누르면 본문의 "✂ 여기까지 · …" 줄 아래 총평이 붙는데, 같은 세션의 총평이 입력란 아래 "기록했다 · …" 줄에도 있었다. 닫힌 세션이 이 공책에 ✂ 줄을 만들고 총평이 있으면 아래 줄은 숨긴다(`SessionBar(reviewShownInBody:)`). 총평을 못 받았으면(review null) 아래 줄을 남겨 "다시 시도"를 누를 수 있게 하고, 다른 공책에서 닫은 세션(이 공책에 ✂ 줄 없음)이면 아래 줄 그대로.
 - **열람 모드**: 완료 여부·다시 쓰기 진행과 무관하게 전체 문장과 최신 번역·첨삭·이전 시도를 보여주는 화면. 다시 쓰기 중 "이전 회차 열람"(별도 화면으로 push, 진행 상태는 유지), 마지막 장 "공책 전체 열람", 기록·시험지의 문장 링크가 여기로 온다.
 - **읽는 위치 진행 줄**(goni 요청 2026-11-12): 공책·열람 화면 맨 위에 고정된 얇은 줄. 화면 가운데쯤에 걸린 문장이 전체의 어디인지 "41 / 111 · 37%"로, 문단 경계는 눈금으로. 탭/드래그하면 그 비율의 문장으로 스크롤(아직 안 그려진 뒤쪽이면 끝으로).
 - **회차 열람**(공책 목록 카드의 "1회차 2회차 …" 링크, 진행 중이면 "n회차 진행 중"은 공책으로): 회차 = n번째 총평. 각 문장의 번역을 "그 총평 시각까지의 마지막 시도"로 바꿔 열람 화면에 보여준다(이전 시도도 그 시점까지만, 총평도 n번째까지). 탭 "n회차 열람". 클라이언트가 history(created_at)로 계산, 서버 변경 없음.
@@ -126,7 +127,8 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - `SIMCTL_CHILD_LBN_AUTOMERGE=prev|next`: 공책을 열자마자 현재 문장을 그 방향으로 합친다(다시 쓰기 중 합치기 확인용).
 - `SIMCTL_CHILD_LBN_SESSION=1`: 공부 세션이 시작된 상태로 시작(모의 서버와 기기 캐시 둘 다 시작점을 가짐. 서버가 null이면 앱이 캐시를 지운다).
 - `SIMCTL_CHILD_LBN_AUTOSUBMIT=1`: 공책을 열자마자 현재 문장에 번역을 넣고 제출(채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다).
-- `SIMCTL_CHILD_LBN_AUTOANSWER=1`: 응용 탭(`LBN_ROUTE=drills`)에서 첫 문제에 답을 넣고 바로 제출. `SIMCTL_CHILD_LBN_AUTOTRY=<문장 id>`: 그 문장의 첫 붙은 표현으로 써 보기 상자를 열고 문장을 넣어 제출(`LBN_AUTOPIN`·`LBN_AUTOOPEN`과 함께). 둘 다 모의 응용 채점이 8초 걸린다(멈추기 확인용).
+- `SIMCTL_CHILD_LBN_AUTOANSWER=1|stop`: 응용 탭(`LBN_ROUTE=drills`)에서 첫 문제에 답을 넣고 바로 제출(`stop`이면 2초 뒤 멈추기까지). `SIMCTL_CHILD_LBN_AUTOTRY=<문장 id>`: 그 문장의 첫 붙은 표현으로 써 보기 상자를 열고 문장을 넣어 제출(`LBN_AUTOPIN`·`LBN_AUTOOPEN`과 함께, `LBN_AUTOSTOP=1`이면 2초 뒤 멈추기까지). 둘 다 모의 응용 채점이 8초 걸린다(멈추기 확인용).
+- `SIMCTL_CHILD_LBN_AUTOCLOSE=1`: `LBN_SESSION=1 LBN_AUTOSUBMIT=1`과 함께, 그 채점이 끝나면 "오늘 여기까지"까지 누른다(✂ 줄 아래 총평 확인용).
 - 모의 모드에서는 Face ID 잠금을 끈다.
 - 예: `SIMCTL_CHILD_LBN_MOCK=1 SIMCTL_CHILD_LBN_ROUTE=notebook:a1 xcrun simctl launch <sim> com.goni.learn-by-news`
 

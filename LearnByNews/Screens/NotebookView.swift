@@ -626,6 +626,11 @@ struct NotebookView: View {
             // 화면 확인용: LBN_AUTOSUBMIT=1 이면 현재 문장에 번역을 넣고 바로 제출한다 (채점 중 상태)
             if ProcessInfo.processInfo.environment["LBN_AUTOSUBMIT"] == "1", session.inSession, m.current != nil {
                 m.input = "분석가들은 노동 시장이 더 약해지면 12월 15일까지 인하를 예상한다."; m.submit(skip: false)
+                // LBN_AUTOCLOSE=1: 그 채점이 끝나면 "오늘 여기까지"까지 누른다 (✂ 줄 아래 총평 한 번만 보이는지 확인용)
+                if ProcessInfo.processInfo.environment["LBN_AUTOCLOSE"] == "1" {
+                    for _ in 0..<60 where !m.inflight.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
+                    await session.close()
+                }
             }
             #endif
         }
@@ -718,7 +723,9 @@ struct NotebookView: View {
                             inputBlock(cur)
                         }
                         foot(d, waiting: waiting)
-                        SessionBar(model: session, waiting: m.inflight.values.filter { !$0.pending }.count, hideStart: true)   // 채점 대기(큐)는 닫기를 막지 않는다
+                        // 방금 닫은 세션이 이 공책에 ✂ 줄을 만들고 총평까지 있으면 아래 줄에는 "기록했다"도 총평도 쓰지 않는다(두 번 보이던 일). 총평이 없으면 남겨 "다시 시도"를 누른다
+                        SessionBar(model: session, waiting: m.inflight.values.filter { !$0.pending }.count, hideStart: true,
+                                   reviewShownInBody: session.closed.map { c in c.review != nil && markers.values.contains { $0.id == c.id } } ?? false)   // 채점 대기(큐)는 닫기를 막지 않는다
                             .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
                     }
                 }
