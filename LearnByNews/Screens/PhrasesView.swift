@@ -13,6 +13,8 @@ struct PhrasesView: View {
     @State private var showTape = false     // 표현장 테이프 (읽어 주기)
 
     private var mastered: [Phrase] { list.filter(\.isMastered) }
+    /// 벽도 번호(붙인 순서) 큰 것부터. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 순서가 임의라서
+    private static func byNumber(_ xs: [Phrase]) -> [Phrase] { xs.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) } }
     private var shown: [Phrase] { showMastered ? list : list.filter { !$0.isMastered } }
 
     var body: some View {
@@ -119,8 +121,8 @@ struct PhrasesView: View {
     }
 
     private func load() async {
-        if let c = Cache.shared.phrases(q: q) { list = c }
-        do { list = try await API.shared.phrases(q: q); err = nil }
+        if let c = Cache.shared.phrases(q: q) { list = Self.byNumber(c) }
+        do { list = Self.byNumber(try await API.shared.phrases(q: q)); err = nil }
         catch let e as APIError where e.isNetwork { err = Cache.shared.isEmpty ? e.localizedDescription : nil }
         catch { err = error.localizedDescription }
     }

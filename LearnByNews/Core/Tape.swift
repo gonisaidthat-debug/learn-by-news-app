@@ -52,7 +52,9 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     func rebuild() {
         let pool = all.filter { bucket == .all || ($0.isMastered == (bucket == .mastered)) }
             .filter { p in range.map { r in p.seq.map(r.contains) ?? false } ?? true }
-        let base = range != nil ? pool.sorted { ($0.seq ?? 0) < ($1.seq ?? 0) } : pool   // 범위 안은 번호 순, 아니면 GET /api/phrases의 최신순
+        // 번호(seq)가 붙인 순서의 진실. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 시각이 같아 그 안에서 뒤집힌다(goni 2026-11-18 "#124 #125 #122 #123")
+        let base = range != nil ? pool.sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }                                   // 범위 안은 번호 순
+                                : pool.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) }       // "최근 순" = 번호 큰 것부터
         items = order == .shuffle ? base.shuffled() : base
         index = 0; step = 0
     }
