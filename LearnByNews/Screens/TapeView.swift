@@ -25,7 +25,16 @@ struct TapeView: View {
                         }
                     }
                     RangePick(range: Binding(get: { t.range }, set: { t.set(range: $0) }), max: t.maxSeq).padding(.horizontal, 4).padding(.bottom, 8)
-                    controls.padding(.bottom, 10)
+                    controls.padding(.bottom, 6)
+                    if let p = t.current {
+                        // 듣다가 습득 완료 찍기/떼기 (목록 순서는 그대로, 표시만 바뀐다)
+                        HStack(spacing: 14) {
+                            Tiny(title: p.isMastered ? "다시 보기 ↻\u{FE0E}" : "습득 완료 ✓\u{FE0E}", color: p.isMastered ? Theme.pencil : Theme.grade(.A), size: 18) { Task { await t.toggleMastered(p) } }
+                                .keyboardShortcut("m", modifiers: [])
+                            if p.isMastered { MasteredStamp().scaleEffect(0.85) }
+                        }
+                        .padding(.horizontal, 4).padding(.bottom, 10)
+                    }
                     settings.padding(.bottom, 14)
                     if let e = t.err { ErrorText(message: e).padding(.bottom, 8) }
                     list
@@ -43,6 +52,7 @@ struct TapeView: View {
             #if DEBUG
             if let r = ProcessInfo.processInfo.environment["LBN_RANGE"] { let p = r.split(separator: "-").compactMap { Int($0) }; if p.count == 2 { t.set(range: p[0]...p[1]) } }
             if ProcessInfo.processInfo.environment["LBN_TAPEPLAY"] == "1" { t.play() }   // 화면 확인용
+            if ProcessInfo.processInfo.environment["LBN_TAPEMASTER"] == "1", let p = t.current { await t.toggleMastered(p) }   // 화면 확인용: 첫 카드에 도장
             #endif
         }
     }
@@ -60,7 +70,9 @@ struct TapeView: View {
                 if let p = t.current {
                     (Text(p.phrase).fontWeight(.bold).foregroundColor(t.playing ? Theme.red : Theme.ink) + Text(p.seq.map { "  #\($0)" } ?? "").font(Theme.hand(15)).foregroundColor(Theme.pencil))
                         .font(Theme.hand(22)).lineLimit(3).multilineTextAlignment(.leading)
+                        .opacity(p.isMastered ? 0.62 : 1)   // 습득 완료면 흐리게
                     Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(3).multilineTextAlignment(.leading)
+                        .opacity(p.isMastered ? 0.62 : 1)
                 } else { MutedText(text: t.range != nil ? "이 번호 범위에 들을 표현이 없다" : "읽을 표현이 없다") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -105,6 +117,7 @@ struct TapeView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         if p.isMastered { Text("습득 완료").font(Theme.hand(14)).foregroundStyle(Theme.grade(.A)).padding(.top, 4) }
+                        else if now, !t.items.isEmpty { EmptyView() }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)

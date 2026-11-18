@@ -62,6 +62,18 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     func set(order o: Order) { stop(); order = o; rebuild() }
     func set(range r: ClosedRange<Int>?) { stop(); range = r; rebuild() }
 
+    /// 듣다가 습득 완료 찍기/떼기 (goni 2026-11-18): 재생 목록(id 순서)은 그대로 두고 표시만 바꾼다. 다음에 목록을 다시 만들 때 '아직' 묶음에서 빠진다.
+    /// 오프라인이면 SyncManager가 큐 phrase_mastered로
+    func toggleMastered(_ p: Phrase) async {
+        let on = !p.isMastered
+        do {
+            let at = try await SyncManager.shared.setMastered(p.id, on: on)
+            if let i = items.firstIndex(where: { $0.id == p.id }) { items[i].masteredAt = at }
+            if let i = all.firstIndex(where: { $0.id == p.id }) { all[i].masteredAt = at }
+            AppLog.shared.info("tape", on ? "mastered" : "unmastered", ["id": p.id])
+        } catch { err = error.localizedDescription }
+    }
+
     // MARK: 재생
     func play() {
         guard !items.isEmpty else { return }
