@@ -130,6 +130,7 @@ struct Sticky: View {
     var index: Int
     var pinned = true
     var big = false
+    var mastered = false      // 습득 완료 도장: 흐려지고 오른쪽 아래 초록 테두리 "습득 완료"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -137,16 +138,28 @@ struct Sticky: View {
             Text(meaning).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x5B5440))
         }
         .multilineTextAlignment(.leading)
-        .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+        .padding(EdgeInsets(top: 12, leading: 14, bottom: mastered ? 30 : 12, trailing: 14))
         .frame(minWidth: big ? 0 : 150, maxWidth: big ? .infinity : 260, minHeight: big ? 150 : 0, alignment: .topLeading)
         .background(Theme.stickyColors[index % 3])
-        .opacity(pinned ? 1 : 0.85)
+        .opacity(pinned ? (mastered ? 0.62 : 1) : 0.85)
         .overlay {
             if !pinned { Rectangle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3])).foregroundStyle(.black.opacity(0.15)) }
         }
+        .overlay(alignment: .bottomTrailing) { if mastered { MasteredStamp().padding(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 10)) } }
         .overlay(alignment: .top) { if pinned { Pin().offset(y: -6) } }
         .shadow(color: pinned ? .black.opacity(0.15) : .clear, radius: 2, x: 1, y: 2)
         .rotationEffect(.degrees(-1.5))
+    }
+}
+
+/// "습득 완료" 도장: 초록 테두리, 살짝 기울임 (웹 .sticky.mastered::after)
+struct MasteredStamp: View {
+    var body: some View {
+        Text("습득 완료").font(Theme.hand(18)).foregroundStyle(Theme.grade(.A))
+            .padding(.horizontal, 6).frame(height: 22)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.grade(.A), lineWidth: 2))
+            .opacity(0.9)
+            .rotationEffect(.degrees(-12))
     }
 }
 

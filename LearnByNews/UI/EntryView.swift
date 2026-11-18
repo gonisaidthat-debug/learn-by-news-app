@@ -239,7 +239,8 @@ struct EntryView: View {
             StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase,
                       onTry: onFree == nil ? nil : { e in tryExpr = tryExpr == e ? nil : e },
                       tryLabel: { e in tryExpr == e ? "접기" : tryTitle(e.phrase) }, counts: drillCounts, openPhrase: tryExpr?.phrase,
-                      backlinks: { e in savedPhrases.first { $0.phrase == e.phrase }?.backlinks ?? [] }, onOpenSentence: onOpenSentence)
+                      backlinks: { e in savedPhrases.first { $0.phrase == e.phrase }?.backlinks ?? [] }, onOpenSentence: onOpenSentence,
+                      mastered: { e in savedPhrases.first { $0.phrase == e.phrase }?.isMastered ?? false })
         }
         if let e = tryExpr, let onFree {
             TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil }, onGraded: { onDrillGraded?(e.phrase) })
@@ -257,11 +258,12 @@ struct StickyRow: View {
     var openPhrase: String? = nil
     var backlinks: ((Expression) -> [Backlink])? = nil
     var onOpenSentence: ((String, String) -> Void)? = nil
+    var mastered: ((Expression) -> Bool)? = nil     // 표현장에서 습득 완료 도장이 찍힌 표현이면 공책 포스트잇에도 도장
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
                 VStack(alignment: .leading, spacing: 2) {
-                    Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved) }
+                    Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false)) }
                         .buttonStyle(.plain)
                     if let onTry {
                         TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) }

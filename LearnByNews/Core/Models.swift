@@ -100,9 +100,11 @@ struct Phrase: Codable, Identifiable, Hashable {
     var sentenceText: String?
     var articleTitle: String?
     var backlinks: [Backlink]?
+    var masteredAt: Int64?      // 습득 완료 도장 (null = 아직). 기본 숨김, 응용 출제·시험지에서 빠진다 (2026-11-18)
+    var isMastered: Bool { masteredAt != nil }
 
-    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil) {
-        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks
+    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil) {
+        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt
     }
 }
 

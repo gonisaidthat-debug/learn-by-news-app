@@ -41,8 +41,9 @@ import SwiftData
     var sentenceId: String
     var articleId: String
     var createdAt: Int64
-    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64) {
-        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt
+    var masteredAt: Int64?      // 습득 완료 (2026-11-18, 선택 속성이라 가벼운 마이그레이션)
+    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, masteredAt: Int64? = nil) {
+        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.masteredAt = masteredAt
     }
 }
 
@@ -227,7 +228,7 @@ final class Cache {
         for a in x.attempts {
             ctx.insert(CachedAttempt(id: a.id, sentenceId: a.sentenceId, articleId: a.articleId, translation: a.translation, grade: a.grade.rawValue, feedback: (try? JSONEncoder.api.encode(a.feedback)) ?? Data(), createdAt: a.createdAt, isVoid: a.void == 1))
         }
-        for p in x.phrases { ctx.insert(CachedPhrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt)) }
+        for p in x.phrases { ctx.insert(CachedPhrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, masteredAt: p.masteredAt)) }
         for r in x.reviews {
             ctx.insert(CachedReview(id: r.id, articleId: r.articleId, score: r.score, summary: r.review.summary ?? "", patterns: (try? JSONEncoder.api.encode(r.review.patterns ?? [])) ?? Data(), praise: r.review.praise ?? "", createdAt: r.createdAt))
         }
@@ -287,7 +288,7 @@ final class Cache {
             return Sentence(id: s.id, idx: s.idx, paragraph: s.paragraph, text: s.text, attempt: cur, history: list.filter { $0 != cur })
         }
         let phrases = all(CachedPhrase.self).filter { $0.articleId == id }.sorted { $0.createdAt < $1.createdAt }.map { p in
-            Phrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, sentenceText: sentences.first { $0.id == p.sentenceId }?.text, articleTitle: a.title)
+            Phrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, sentenceText: sentences.first { $0.id == p.sentenceId }?.text, articleTitle: a.title, masteredAt: p.masteredAt)
         }
         let reviews = all(CachedReview.self).filter { $0.articleId == id }.sorted { $0.createdAt > $1.createdAt }.map(toReview)
         let highlights = all(CachedHighlight.self).filter { $0.articleId == id }.sorted { $0.createdAt < $1.createdAt }.map(\.value)
@@ -356,7 +357,7 @@ final class Cache {
         return all(CachedPhrase.self)
             .filter { needle.isEmpty || $0.phrase.lowercased().contains(needle) || $0.meaning.lowercased().contains(needle) }
             .sorted { $0.createdAt > $1.createdAt }
-            .map { Phrase(id: $0.id, phrase: $0.phrase, meaning: $0.meaning, sentenceId: $0.sentenceId, articleId: $0.articleId, createdAt: $0.createdAt, sentenceText: sents[$0.sentenceId]?.text, articleTitle: arts[$0.articleId]?.title) }
+            .map { Phrase(id: $0.id, phrase: $0.phrase, meaning: $0.meaning, sentenceId: $0.sentenceId, articleId: $0.articleId, createdAt: $0.createdAt, sentenceText: sents[$0.sentenceId]?.text, articleTitle: arts[$0.articleId]?.title, masteredAt: $0.masteredAt) }
     }
 
     func quiz() -> [QuizItem]? {
@@ -380,7 +381,7 @@ final class Cache {
                              lastCorrect: l?.correct, lastAt: l?.at, tries: l?.n ?? 0, wrong: l?.wrong ?? 0))
             }
         }
-        for p in all(CachedPhrase.self).sorted(by: { $0.createdAt < $1.createdAt }) {
+        for p in all(CachedPhrase.self).sorted(by: { $0.createdAt < $1.createdAt }) where p.masteredAt == nil {   // 습득 완료는 시험지에서 뺀다(서버와 같은 규칙)
             let key = "p|\(p.id)"; let l = last[key]; let s = sents[p.sentenceId]
             put(QuizItem(key: key, kind: .phrase, sentenceId: p.sentenceId, articleId: p.articleId, articleTitle: arts[p.articleId]?.title ?? "", sentenceIdx: s?.idx ?? 0, sentenceText: s?.text ?? "",
                          source: p.phrase, mine: "", meaning: p.meaning, why: "", issuedAt: p.createdAt,
@@ -475,9 +476,13 @@ final class Cache {
     // MARK: 오프라인에서 바뀐 것을 캐시에도 반영 (서버에 보내질 때까지 화면이 맞도록)
 
     func upsertPhrase(_ p: Phrase) {
-        if let e = all(CachedPhrase.self).first(where: { $0.id == p.id }) { e.phrase = p.phrase; e.meaning = p.meaning }
-        else { ctx.insert(CachedPhrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt)) }
+        if let e = all(CachedPhrase.self).first(where: { $0.id == p.id }) { e.phrase = p.phrase; e.meaning = p.meaning; e.masteredAt = p.masteredAt }
+        else { ctx.insert(CachedPhrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, masteredAt: p.masteredAt)) }
         try? ctx.save()
+    }
+    /// 습득 완료 도장 찍기/떼기 (증분 동기화는 created_at 기준이라 이 변경을 못 가져온다 → 로컬에서 바로 반영)
+    func setPhraseMastered(id: String, at: Int64?) {
+        if let e = all(CachedPhrase.self).first(where: { $0.id == id }) { e.masteredAt = at; try? ctx.save() }
     }
     func removePhrase(id: String) {
         if let e = all(CachedPhrase.self).first(where: { $0.id == id }) { ctx.delete(e); try? ctx.save() }

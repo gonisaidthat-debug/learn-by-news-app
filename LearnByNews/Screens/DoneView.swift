@@ -344,7 +344,7 @@ struct DoneView: View {
                         } else {
                             FlowLayout(spacing: 14) {
                                 ForEach(Array(d.phrases.enumerated()), id: \.element.id) { i, p in
-                                    Sticky(phrase: p.phrase, meaning: p.meaning, index: i)
+                                    Sticky(phrase: p.phrase, meaning: p.meaning, index: i, mastered: p.isMastered)
                                 }
                             }
                             .padding(.vertical, 10)

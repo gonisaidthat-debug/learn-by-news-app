@@ -64,9 +64,10 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 | POST `/api/sentences/:id/merge` | `{dir:"prev"\|"next"}` | `{ok, kept, text}` 붙는 쪽 문장 줄만 삭제. 그 문장의 attempts·phrases·highlights(start/end_word += 앞 문장 단어 수)·quiz_results·drills·bookmark는 `kept`로 옮겨짐. 채점된 문장끼리도 됨 → 합친 뒤 공책을 다시 받고 `kept`에 attempt가 있으면 다시 쓰기로 연다 |
 | DELETE `/api/sentences/:id` | — | `{ok, trash_id}` — 문장·채점·표현·형광펜을 `trash`에 담고 지운다 |
 | POST `/api/trash/:id/restore` | — | `{ok, sentence_id}` 휴지통에서 그대로 되살림 |
-| GET `/api/phrases?q=` | — | `Phrase[]` 최신순, q는 phrase/meaning LIKE |
+| GET `/api/phrases?q=` | — | `Phrase[]` 최신순, q는 phrase/meaning LIKE. `mastered_at`(ms\|null, 2026-11-18) 포함 — 습득 완료는 서버가 거르지 않고 클라이언트가 기본 숨김 |
 | POST `/api/phrases` | `{phrase, meaning, sentence_id, article_id}` | `Phrase` |
 | DELETE `/api/phrases/:id` | — | `{ok}` |
+| PUT `/api/phrases/:id/mastered` | `{on?: boolean}` (기본 true) | `{ok, id, mastered_at}` **습득 완료 도장**(goni 2026-11-18): 지우지 않고 `mastered_at`만 찍는다/뗀다(on:false → null). 찍힌 표현은 응용 출제(`/api/drills/next` 무작위 선택, `/batch`)와 시험지 카드에서 빠진다. `phrase_id`를 지정한 써 보기·문제 내줘는 그대로 된다. 404 없는 id |
 | GET `/api/quiz` | — | `QuizItem[]` (순서는 클라가: 안 본 것→틀린 것→맞힌 것, 묶음 안 섞기) |
 | POST `/api/quiz/results` | `{key, sentence_id, source, correct: bool}` | `{ok}` |
 | GET `/api/sessions` | — | `Session[]` 최신순 |
@@ -99,6 +100,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - **멈추기**: 채점 중인 문장에 "멈추기 ↩". 누르면 요청을 취소(URLSessionTask.cancel)하고 `DELETE /api/attempts/:attempt_id`를 보낸 뒤, 그 문장이 다시 입력란이 되고 쓰던 번역이 그대로 들어간다(다시 쓰기 중이었으면 그 자리에서). 제출할 때 attempt_id를 UUID로 만들어 보내야 멈추기가 된다.
 - **응용 채점 멈추기**(goni 2026-11-18, 웹 26a36a8): 응용 탭은 "선생님이 보는 중… ✎" 옆, 써 보기 상자는 "채점 중… ✎" 옆에 "멈추기 ↩". 누르면 요청 Task를 취소하고 `DELETE /api/drills/:id/grading`(출제형은 문제 id, 자유 작문은 제출 때 만든 클라이언트 UUID `drill_id`)을 보낸다(오프라인이면 큐 `drill_grading_cancel`). 쓰던 문장은 입력란에 그대로 남고 포커스, 문제는 안 푼 채로 남아 다시 제출할 수 있다. 늦게 온 결과·오류(409 cancelled, 취소)는 버린다. 자유 작문 큐(`drill_free`)에도 `drill_id`가 들어가 재전송이 중복 저장되지 않는다(`duplicate`). 큐에 있는 채점 대기 항목은 멈추기 버튼이 없다(기존 흐름 그대로).
 - **닫은 뒤 총평은 한 번만**(goni 2026-11-18, 웹과 같은 규칙): 공책에서 "오늘 여기까지"를 누르면 본문의 "✂ 여기까지 · …" 줄 아래 총평이 붙는데, 같은 세션의 총평이 입력란 아래 "기록했다 · …" 줄에도 있었다. 닫힌 세션이 이 공책에 ✂ 줄을 만들고 총평이 있으면 아래 줄은 숨긴다(`SessionBar(reviewShownInBody:)`). 총평을 못 받았으면(review null) 아래 줄을 남겨 "다시 시도"를 누를 수 있게 하고, 다른 공책에서 닫은 세션(이 공책에 ✂ 줄 없음)이면 아래 줄 그대로.
+- **습득 완료 도장**(goni 2026-11-18, 웹 6e8d2f6): 표현장 포스트잇 아래 왼쪽 "습득 완료 ✓" → `PUT /api/phrases/:id/mastered {on}`(캐시 `masteredAt` 먼저, 오프라인이면 큐 `phrase_mastered`). 찍히면 흐려지고(0.62) 오른쪽 아래 초록 테두리 "습득 완료" 도장(−12°), 버튼은 "다시 보기 ↻"(on:false). 검색창 아래 "N개 · 습득 완료 M개 · 습득 완료도 보기/숨기기"(도장이 하나라도 있을 때만, UserDefaults `lbn_phrases_show_mastered`, 기본 숨김). 공책·총평 화면의 포스트잇에도 같은 도장. ×(삭제)는 별개. 캐시 집계는 시험지에서 mastered를 뺀다(응용 로컬 출제는 서버 batch가 이미 뺀 것을 받는다). 증분 동기화는 created_at 기준이라 도장 변경이 안 오므로 로컬 반영 + 전체 동기화 때 맞춘다. `local-` 임시 표현은 서버에 붙기 전이라 도장을 거절한다.
 - **열람 모드**: 완료 여부·다시 쓰기 진행과 무관하게 전체 문장과 최신 번역·첨삭·이전 시도를 보여주는 화면. 다시 쓰기 중 "이전 회차 열람"(별도 화면으로 push, 진행 상태는 유지), 마지막 장 "공책 전체 열람", 기록·시험지의 문장 링크가 여기로 온다.
 - **읽는 위치 진행 줄**(goni 요청 2026-11-12): 공책·열람 화면 맨 위에 고정된 얇은 줄. 화면 가운데쯤에 걸린 문장이 전체의 어디인지 "41 / 111 · 37%"로, 문단 경계는 눈금으로. 탭/드래그하면 그 비율의 문장으로 스크롤(아직 안 그려진 뒤쪽이면 끝으로).
 - **회차 열람**(공책 목록 카드의 "1회차 2회차 …" 링크, 진행 중이면 "n회차 진행 중"은 공책으로): 회차 = n번째 총평. 각 문장의 번역을 "그 총평 시각까지의 마지막 시도"로 바꿔 열람 화면에 보여준다(이전 시도도 그 시점까지만, 총평도 n번째까지). 탭 "n회차 열람". 클라이언트가 history(created_at)로 계산, 서버 변경 없음.
@@ -129,6 +131,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - `SIMCTL_CHILD_LBN_AUTOSUBMIT=1`: 공책을 열자마자 현재 문장에 번역을 넣고 제출(채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다).
 - `SIMCTL_CHILD_LBN_AUTOANSWER=1|stop`: 응용 탭(`LBN_ROUTE=drills`)에서 첫 문제에 답을 넣고 바로 제출(`stop`이면 2초 뒤 멈추기까지). `SIMCTL_CHILD_LBN_AUTOTRY=<문장 id>`: 그 문장의 첫 붙은 표현으로 써 보기 상자를 열고 문장을 넣어 제출(`LBN_AUTOPIN`·`LBN_AUTOOPEN`과 함께, `LBN_AUTOSTOP=1`이면 2초 뒤 멈추기까지). 둘 다 모의 응용 채점이 8초 걸린다(멈추기 확인용).
 - `SIMCTL_CHILD_LBN_AUTOCLOSE=1`: `LBN_SESSION=1 LBN_AUTOSUBMIT=1`과 함께, 그 채점이 끝나면 "오늘 여기까지"까지 누른다(✂ 줄 아래 총평 확인용).
+- `SIMCTL_CHILD_LBN_MASTERED=1`: 모의 표현 p1에 습득 완료 도장이 찍힌 상태로 시작. `SIMCTL_CHILD_LBN_SHOWMASTERED=1`: 표현장이 "습득 완료도 보기"로 시작.
 - 모의 모드에서는 Face ID 잠금을 끈다.
 - 예: `SIMCTL_CHILD_LBN_MOCK=1 SIMCTL_CHILD_LBN_ROUTE=notebook:a1 xcrun simctl launch <sim> com.goni.learn-by-news`
 

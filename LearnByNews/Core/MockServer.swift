@@ -105,8 +105,9 @@ struct MockState {
              "attempt": attempt("시는 이 계획이 주말 혼잡을 완화할 것이라고 말했다.", fb("B", issues: [["source": "ease congestion", "mine": "혼잡을 완화할", "meaning": "혼잡을 덜어 줄", "why": "자연스러운 어감"]], ref: "시는 이 계획이 주말 혼잡을 덜어 줄 것이라고 밝혔다."), at: now - 2 * 86_400_000 + 90_000), "history": []],
         ]
         phrases = [
-            ["id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "sentence_id": "s1", "article_id": "a1", "created_at": h, "sentence_text": sentences[0]["text"]!, "article_title": articles[0]["title"]!],
-            ["id": "p2", "phrase": "add ~ km of", "meaning": "~km를 늘리다", "sentence_id": "s7", "article_id": "a2", "created_at": now - 2 * 86_400_000, "sentence_text": sentences[6]["text"]!, "article_title": articles[1]["title"]!],
+            ["id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "sentence_id": "s1", "article_id": "a1", "created_at": h, "sentence_text": sentences[0]["text"]!, "article_title": articles[0]["title"]!,
+             "mastered_at": ProcessInfo.processInfo.environment["LBN_MASTERED"] == "1" ? now - 3_600_000 : NSNull()],   // LBN_MASTERED=1: p1에 습득 완료 도장
+            ["id": "p2", "phrase": "add ~ km of", "meaning": "~km를 늘리다", "sentence_id": "s7", "article_id": "a2", "created_at": now - 2 * 86_400_000, "sentence_text": sentences[6]["text"]!, "article_title": articles[1]["title"]!, "mastered_at": NSNull()],
         ]
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
@@ -149,7 +150,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -282,10 +283,16 @@ struct MockState {
             let sid = body["sentence_id"] as? String ?? ""
             let s = sentences.first { $0["id"] as? String == sid }
             let a = articles.first { $0["id"] as? String == body["article_id"] as? String }
-            let p: [String: Any] = ["id": nextId("p"), "phrase": body["phrase"] ?? "", "meaning": body["meaning"] ?? "", "sentence_id": sid, "article_id": body["article_id"] ?? "", "created_at": Date().ms, "sentence_text": s?["text"] ?? "", "article_title": a?["title"] ?? ""]
+            let p: [String: Any] = ["id": nextId("p"), "phrase": body["phrase"] ?? "", "meaning": body["meaning"] ?? "", "sentence_id": sid, "article_id": body["article_id"] ?? "", "created_at": Date().ms, "sentence_text": s?["text"] ?? "", "article_title": a?["title"] ?? "", "mastered_at": NSNull()]
             phrases.append(p); return (200, p)
         case "DELETE /api/phrases/:id":
             phrases.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
+        case "PUT /api/phrases/:id/mastered":
+            guard let i = phrases.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 표현"]) }
+            let on = (body["on"] as? Bool) ?? true
+            let at: Any = on ? Date().ms : NSNull()
+            phrases[i]["mastered_at"] = at
+            return (200, ["ok": true, "id": id, "mastered_at": at])
         case "GET /api/quiz":
             var items: [[String: Any]] = []
             var last: [String: (Bool, Int64, Int, Int)] = [:]
@@ -300,7 +307,7 @@ struct MockState {
                                   "last_correct": l.map { $0.0 } ?? NSNull(), "last_at": l.map { $0.1 } ?? NSNull(), "tries": l?.2 ?? 0, "wrong": l?.3 ?? 0])
                 }
             }
-            for p in phrases {
+            for p in phrases where p["mastered_at"] is NSNull || p["mastered_at"] == nil {   // 습득 완료는 시험지에서 뺀다
                 let key = "\(p["sentence_id"]!)|\(p["phrase"]!)"; let l = last[key]
                 let s = sentences.first { $0["id"] as? String == p["sentence_id"] as? String }
                 items.append(["key": key, "kind": "phrase", "sentence_id": p["sentence_id"]!, "article_id": p["article_id"]!, "article_title": p["article_title"]!, "sentence_idx": s?["idx"] ?? 0, "sentence_text": s?["text"] ?? "",
@@ -394,7 +401,7 @@ struct MockState {
             sessionStart = nil; return (200, ["ok": true])
         case "POST /api/drills/next":
             if let open = drills.last(where: { $0["feedback"] is NSNull }), body["phrase_id"] == nil { return (200, open) }
-            let p = phrases.first { $0["id"] as? String == body["phrase_id"] as? String } ?? phrases.randomElement()
+            let p = phrases.first { $0["id"] as? String == body["phrase_id"] as? String } ?? phrases.filter { $0["mastered_at"] is NSNull }.randomElement()   // 무작위 출제는 습득 완료를 뺀다
             guard let p else { return (400, ["error": "표현장이 비어 있습니다"]) }
             let d: [String: Any] = ["id": nextId("d"), "phrase_id": p["id"]!, "phrase": p["phrase"]!, "meaning": p["meaning"]!,
                                     "korean": "(모의) '\(p["meaning"]!)'를 써서 한 문장을 영어로 옮겨 보자.", "created_at": Date().ms,
@@ -416,7 +423,8 @@ struct MockState {
             var made = 0
             var used = Set(drills.filter { $0["feedback"] is NSNull }.compactMap { $0["phrase_id"] as? String })
             while drills.filter({ $0["feedback"] is NSNull }).count < count {
-                guard let p = phrases.first(where: { !used.contains($0["id"] as! String) }) ?? phrases.randomElement() else { break }
+                let pool = phrases.filter { $0["mastered_at"] is NSNull }
+                guard let p = pool.first(where: { !used.contains($0["id"] as! String) }) ?? pool.randomElement() else { break }
                 used.insert(p["id"] as! String)
                 drills.append(["id": nextId("d"), "phrase_id": p["id"]!, "phrase": p["phrase"]!, "meaning": p["meaning"]!,
                                "korean": "(모의) '\(p["meaning"]!)'를 써서 한 문장을 영어로 옮겨 보자.", "created_at": Date().ms,

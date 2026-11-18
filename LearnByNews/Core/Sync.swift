@@ -177,6 +177,9 @@ final class SyncManager: ObservableObject {
                 case "phrase_delete":
                     let b = try JSONDecoder.api.decode(PhraseDeleteOp.self, from: op.payload)
                     try await API.shared.deletePhrase(b.id)
+                case "phrase_mastered":
+                    let b = try JSONDecoder.api.decode(PhraseMasteredOp.self, from: op.payload)
+                    _ = try await API.shared.setMastered(b.id, on: b.on)
                 case "pass_put":
                     let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
                     try await API.shared.putPass(b.articleId, done: b.done ?? [])
@@ -445,6 +448,20 @@ final class SyncManager: ObservableObject {
         await sendOrQueue("session_start_delete", SessionStartState(startedAt: 0)) { try await API.shared.deleteSessionStart() }
     }
     struct PhraseDeleteOp: Codable { var id: String }
+    struct PhraseMasteredOp: Codable { var id: String; var on: Bool }
+    /// 습득 완료 도장 찍기/떼기: 캐시에 먼저 반영하고 온라인이면 바로, 아니면 큐 phrase_mastered. 서버가 돌려준 mastered_at을 쓴다(없으면 지금 시각)
+    func setMastered(_ id: String, on: Bool) async throws -> Int64? {
+        guard !Self.isTemp(id) else { throw APIError.server("아직 서버에 붙지 않은 표현이다 · 연결되면 다시") }
+        let local: Int64? = on ? Date().ms : nil
+        Cache.shared.setPhraseMastered(id: id, at: local)
+        if Connectivity.shared.isOnline {
+            do { let r = try await API.shared.setMastered(id, on: on); Cache.shared.setPhraseMastered(id: id, at: r.masteredAt); return r.masteredAt }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+            catch { Cache.shared.setPhraseMastered(id: id, at: on ? nil : Date().ms); throw error }   // 서버 거절(404 등): 되돌린다
+        }
+        Cache.shared.enqueue("phrase_mastered", PhraseMasteredOp(id: id, on: on)); refreshCounts()
+        return local
+    }
 
     // MARK: 화면이 쓰는 오프라인 겸용 동작
 

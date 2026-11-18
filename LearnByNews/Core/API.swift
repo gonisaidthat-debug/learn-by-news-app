@@ -136,6 +136,10 @@ final class API {
         try await send("POST", "/api/phrases", body: PhraseBody(phrase: e.phrase, meaning: e.meaning, sentenceId: sentenceId, articleId: articleId))
     }
     func deletePhrase(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/phrases/\(id)") }
+    struct MasteredBody: Encodable { var on: Bool }
+    struct Mastered: Decodable { var ok: Bool; var id: String; var masteredAt: Int64? }
+    /// 습득 완료 도장: 지우지 않고 mastered_at만 찍는다/뗀다. 찍힌 표현은 서버가 응용 무작위 출제·batch·시험지에서 뺀다
+    func setMastered(_ id: String, on: Bool) async throws -> Mastered { try await send("PUT", "/api/phrases/\(id)/mastered", body: MasteredBody(on: on)) }
 
     // MARK: quiz
     func quiz() async throws -> [QuizItem] { try await send("GET", "/api/quiz") }
