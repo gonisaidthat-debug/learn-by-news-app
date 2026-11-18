@@ -869,6 +869,10 @@ struct NotebookView: View {
                         if v.contains("\n") { m.input = v.replacingOccurrences(of: "\n", with: " "); m.submit(skip: false) }
                     }
             }
+            if m.writableBrowse, !redo {
+                // 열람 상태의 입력란 바로 아래: 쓰기 화면(다음 입력란까지만 보이는 평소 공책)으로 전환, 그 문장부터 (goni 2026-11-18, 웹 16f601b)
+                Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }.frame(height: Theme.lh)
+            }
         }
         .id(s.id)
     }
@@ -884,7 +888,7 @@ struct NotebookView: View {
                     if RedoProgress.load(articleId) != nil {
                         Tiny(title: "다시 쓰기 이어서 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }
                     } else if cur != nil, m.writableBrowse {
-                        if session.inSession { Tiny(title: "건너뛰기") { m.submit(skip: true) } }   // 입력란이 본문에 있으니 "이어서 쓰기 →"는 필요 없다
+                        if session.inSession { Tiny(title: "건너뛰기") { m.submit(skip: true) } }   // "이어서 쓰기 →"는 본문 입력란 바로 아래에 있다
                     } else if cur != nil {
                         Tiny(title: "이어서 쓰기 →\u{FE0E}", color: Theme.red) { router.shelfPath = [.notebook(id: articleId)] }
                     } else {
