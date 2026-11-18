@@ -101,6 +101,19 @@ final class SessionModel: ObservableObject {
             closed = s
             sessions.insert(s, at: 0)
             AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
+        } catch let e as APIError where e.isNetwork {
+            // 응답만 잃었을 수 있다 (2026-11-17 13:12 iPhone: POST /api/sessions "The network connection was lost."인데 서버엔 기록됨 → 로컬 시작점이 남아 "11시간 48분"으로 보였다).
+            // 목록을 다시 읽어 그 시작점의 세션이 있으면 닫힌 것으로 마무리한다. 같은 started_at으로 다시 보내면 세션이 겹치므로 재전송은 하지 않는다
+            if let list = try? await API.shared.sessions(), let s = list.first(where: { $0.startedAt == start }) {
+                sessions = list
+                SessionStore.start = nil; self.start = nil
+                await SyncManager.shared.deleteSessionStart()
+                msg = "기록했다 · \(s.line)"; closed = s
+                AppLog.shared.warn("session", "close response lost but server has the session; finishing locally", ["id": s.id])
+            } else {
+                msg = e.localizedDescription
+                AppLog.shared.warn("session", "close failed (network), start kept: \(e.localizedDescription)")
+            }
         } catch { msg = error.localizedDescription }
         busy = false
     }
