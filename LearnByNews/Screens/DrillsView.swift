@@ -309,7 +309,7 @@ struct DrillsView: View {
                 ForEach(m.recent) { d in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         if let g = d.grade { Stamp(kind: .grade(g), small: true) } else { Stamp(kind: .waiting, small: true) }
-                        Text(d.phrase).font(Theme.hand(19)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                        Text(d.phrase).font(Theme.hand(19)).foregroundStyle(Theme.ink).lineLimit(1).layoutPriority(1)   // fixedSize 금지: 긴 표현이 폭을 늘려 화면이 잘린다
                         Text(d.isFree ? "자유 작문" : d.korean).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(1)
                         if let a = d.answer, !a.isEmpty { Text(a).font(Theme.hand(18)).foregroundStyle(Theme.blueInk).lineLimit(1) }
                     }

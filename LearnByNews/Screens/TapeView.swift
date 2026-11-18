@@ -30,6 +30,7 @@ struct TapeView: View {
                     if let e = t.err { ErrorText(message: e).padding(.bottom, 8) }
                     list
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)   // 긴 표현·뜻이 폭을 늘리지 못하게: 글은 줄바꿈, 폭은 화면
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()
             }
@@ -57,14 +58,12 @@ struct TapeView: View {
             Button { t.next() } label: { Text("⏭\u{FE0E}").font(.system(size: 22)).foregroundStyle(Theme.ink) }.buttonStyle(.plain).disabled(t.items.isEmpty)
             VStack(alignment: .leading, spacing: 0) {
                 if let p = t.current {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(p.phrase).font(Theme.hand(22)).fontWeight(.bold).foregroundStyle(t.playing ? Theme.red : Theme.ink).lineLimit(1)
-                        if let n = p.seq { Text("#\(n)").font(Theme.hand(15)).foregroundStyle(Theme.pencil) }
-                    }
-                    Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(1)
+                    (Text(p.phrase).fontWeight(.bold).foregroundColor(t.playing ? Theme.red : Theme.ink) + Text(p.seq.map { "  #\($0)" } ?? "").font(Theme.hand(15)).foregroundColor(Theme.pencil))
+                        .font(Theme.hand(22)).lineLimit(3).multilineTextAlignment(.leading)
+                    Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(3).multilineTextAlignment(.leading)
                 } else { MutedText(text: t.range != nil ? "이 번호 범위에 들을 표현이 없다" : "읽을 표현이 없다") }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 4)
     }
@@ -91,34 +90,33 @@ struct TapeView: View {
         .padding(.horizontal, 4)
     }
 
-    /// 목록: 지금 읽는 줄 빨갛게, 탭하면 거기부터
+    /// 목록: 지금 읽는 줄 빨갛게, 탭하면 거기부터. 표현·뜻은 줄바꿈(긴 표현이 폭을 늘려 화면이 잘리던 일, goni 2026-11-18 아이폰 스크린샷)
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(t.items.enumerated()), id: \.element.id) { i, p in
                 let now = i == t.index
                 Button { t.jump(to: i) } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(now ? (t.playing ? "▶\u{FE0E}" : "▸") : " ").font(.system(size: 13)).foregroundStyle(Theme.red).frame(width: 14)
-                        if let n = p.seq { Text("#\(n)").font(Theme.hand(14)).foregroundStyle(Theme.pencil).frame(width: 34, alignment: .trailing) }
-                        Text(p.phrase).font(Theme.hand(20)).fontWeight(now ? .bold : .regular).foregroundStyle(now ? Theme.red : Theme.ink).lineLimit(1).fixedSize()
-                        Text(p.meaning).font(Theme.hand(18)).foregroundStyle(now ? Theme.red : Theme.pencil).lineLimit(1)
-                        Spacer(minLength: 0)
-                        if p.isMastered { Text("습득 완료").font(Theme.hand(14)).foregroundStyle(Theme.grade(.A)) }
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(now ? (t.playing ? "▶\u{FE0E}" : "▸") : " ").font(.system(size: 13)).foregroundStyle(Theme.red).frame(width: 14).padding(.top, 6)
+                        if let n = p.seq { Text("#\(n)").font(Theme.hand(14)).foregroundStyle(Theme.pencil).frame(width: 38, alignment: .trailing).padding(.top, 4) }
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(p.phrase).font(Theme.hand(20)).fontWeight(now ? .bold : .regular).foregroundStyle(now ? Theme.red : Theme.ink).multilineTextAlignment(.leading)
+                            Text(p.meaning).font(Theme.hand(17)).foregroundStyle(now ? Theme.red : Theme.pencil).multilineTextAlignment(.leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if p.isMastered { Text("습득 완료").font(Theme.hand(14)).foregroundStyle(Theme.grade(.A)).padding(.top, 4) }
                     }
-                    .padding(.horizontal, 16).frame(height: 36)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .id("tape-\(i)")
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.rule).frame(height: 1) }
             }
         }
-        .background(
-            Canvas { ctx, size in
-                ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Theme.paper))
-                var y: CGFloat = 36
-                while y < size.height { ctx.fill(Path(CGRect(x: 0, y: y - 1, width: size.width, height: 1)), with: .color(Theme.rule)); y += 36 }
-            }
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.paper)
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
         .shadow(color: .black.opacity(0.08), radius: 12, y: 8)

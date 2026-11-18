@@ -109,6 +109,7 @@ struct MockState {
             ["id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "seq": 1, "sentence_id": "s1", "article_id": "a1", "created_at": h, "sentence_text": sentences[0]["text"]!, "article_title": articles[0]["title"]!,
              "mastered_at": ProcessInfo.processInfo.environment["LBN_MASTERED"] == "1" ? now - 3_600_000 : NSNull()],   // LBN_MASTERED=1: p1에 습득 완료 도장
             ["id": "p2", "phrase": "add ~ km of", "meaning": "~km를 늘리다", "seq": 2, "sentence_id": "s7", "article_id": "a2", "created_at": now - 2 * 86_400_000, "sentence_text": sentences[6]["text"]!, "article_title": articles[1]["title"]!, "mastered_at": NSNull()],
+            ["id": "p3", "phrase": "fully guaranteed (contract) with Box Plus/Minus (BPM) upside", "meaning": "(선수 계약이) 전액 보장되는, 방출되더라도 잔여 연봉을 모두 받는 — 박스스코어 기록으로 기여도를 추정하는", "seq": 3, "sentence_id": "s7", "article_id": "a2", "created_at": now - 86_400_000, "sentence_text": sentences[6]["text"]!, "article_title": articles[1]["title"]!, "mastered_at": NSNull()],   // 긴 표현·뜻 (줄바꿈 확인용)
         ]
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
