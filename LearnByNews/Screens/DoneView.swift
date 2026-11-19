@@ -249,6 +249,7 @@ struct DoneView: View {
     var newReview: Bool = false
     @EnvironmentObject var router: Router
     @StateObject private var m: DoneModel
+    @State private var phrasesSheet: String?   // "표현장 ↗": 그 표현으로 표현장을 시트로
 
     init(articleId: String, newReview: Bool = false) {
         self.articleId = articleId; self.newReview = newReview
@@ -265,6 +266,9 @@ struct DoneView: View {
         .toolbarBackground(Theme.desk, for: .navigationBar)
         .toolbar { ToolbarItem(placement: .principal) { Text(m.data?.title ?? "").font(Theme.hand(22)).lineLimit(1) } }
         .task { await m.load() }
+        .sheet(item: Binding(get: { phrasesSheet.map { PhraseRef(id: $0) } }, set: { phrasesSheet = $0?.id })) { r in
+            PhrasesView(focusPhraseId: r.id, onClose: { phrasesSheet = nil }).environmentObject(router)
+        }
     }
 
     private func content(_ d: ArticleDetail) -> some View {
@@ -391,7 +395,8 @@ struct DoneView: View {
                                 weightOf: { e in (d.phrases.first { $0.sentenceId == s.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.stars ?? 0 },
                                 onWeight: { e, w in await m.setWeight(s.id, e, w) },
                                 noteOf: { e in (d.phrases.first { $0.sentenceId == s.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
-                                onPhraseNote: { e, t in await m.setPhraseNote(s.id, e, t) }
+                                onPhraseNote: { e, t in await m.setPhraseNote(s.id, e, t) },
+                                onOpenPhrases: { pid in phrasesSheet = pid }
                             )
                         }
                     }

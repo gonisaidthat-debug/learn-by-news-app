@@ -86,6 +86,26 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         } catch { err = error.localizedDescription }
     }
 
+    /// 한 번 읽기 (goni 2026-11-19 "갑자기 소리 듣고 싶을 때" → 정정 "소리는 영어만"): 영어 표현만 한 번(en-US). 읽는 중 다시 누르면 끊고 새로. 테이프 재생 중이면 테이프를 멈춘다
+    func speakOnce(phrase: String) {
+        if playing { pause() }
+        gapTask?.cancel(); gapTask = nil
+        synth.stopSpeaking(at: .immediate)
+        activateSession()
+        let u = AVSpeechUtterance(string: phrase); u.voice = enVoice; u.rate = AVSpeechUtteranceDefaultSpeechRate * Float(rate)
+        synth.speak(u)
+        AppLog.shared.info("tape", "speak once", ["phrase": phrase])
+    }
+    /// 표현장 포스트잇 ▶: 묶음 전체·범위 없음·최근 순으로 두고 그 표현부터 바로 재생 (goni 2026-11-19)
+    func startFrom(_ p: Phrase) {
+        stop(); bucket = .all; range = nil; order = .recent
+        if all.isEmpty, let c = Cache.shared.phrases(q: "") { all = c }
+        if !all.contains(where: { $0.id == p.id }) { all.insert(p, at: 0) }
+        rebuild()
+        if let i = items.firstIndex(where: { $0.id == p.id }) { index = i }
+        play()
+    }
+
     // MARK: 재생
     func play() {
         guard !items.isEmpty else { return }

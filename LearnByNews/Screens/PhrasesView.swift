@@ -2,6 +2,10 @@ import SwiftUI
 
 /// 표현장: 포스트잇 벽 (웹 Phrases.tsx)
 struct PhrasesView: View {
+    /// 공책에서 "표현장 ↗"로 열 때: 이 표현으로 스크롤하고 2.4초 빨간 테두리로 비춘다(습득 완료로 숨겨져 있으면 보기 켬)
+    var focusPhraseId: String? = nil
+    var onClose: (() -> Void)? = nil        // 시트로 열렸을 때 "← 공책"
+    @State private var highlightId: String?
     @State private var q = ""
     @State private var list: [Phrase] = []
     @State private var flipped: String?
@@ -18,13 +22,15 @@ struct PhrasesView: View {
     private var mastered: [Phrase] { list.filter(\.isMastered) }
     /// 벽도 번호(붙인 순서) 큰 것부터. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 순서가 임의라서
     private static func byNumber(_ xs: [Phrase]) -> [Phrase] { xs.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) } }
-    private var shown: [Phrase] { (showMastered ? list : list.filter { !$0.isMastered }).filter { !starredOnly || $0.stars > 0 } }
+    private var shown: [Phrase] { (showMastered || focusPhraseId != nil && list.first { $0.id == focusPhraseId }?.isMastered == true ? list : list.filter { !$0.isMastered }).filter { !starredOnly || $0.stars > 0 } }
     private var starredCount: Int { list.filter { $0.stars > 0 }.count }
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let onClose { Tiny(title: "←\u{FE0E} 공책", size: 19, action: onClose).padding(.top, 4) }
                     TextField("검색", text: $q)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
@@ -52,7 +58,7 @@ struct PhrasesView: View {
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 18)], alignment: .leading, spacing: 22) {
                             ForEach(Array(shown.enumerated()), id: \.element.id) { i, p in
-                                wallSticky(p, i)
+                                wallSticky(p, i).id("wall-\(p.id)")
                             }
                         }
                         .padding(.horizontal, 4).padding(.vertical, 10)
@@ -64,6 +70,12 @@ struct PhrasesView: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+            // 공책에서 왔으면 그 포스트잇으로 스크롤 + 2.4초 강조
+            .onChange(of: list.isEmpty, initial: true) { _, empty in
+                guard !empty, let f = focusPhraseId, highlightId == nil, list.contains(where: { $0.id == f }) else { return }
+                highlightId = f
+                Task { try? await Task.sleep(for: .milliseconds(300)); withAnimation { proxy.scrollTo("wall-\(f)", anchor: .center) }; try? await Task.sleep(for: .seconds(2.4)); withAnimation { highlightId = nil } }
+            }
             .navigationDestination(isPresented: $showTest) { PhraseTestView() }
             .alert("내 메모", isPresented: Binding(get: { notingId != nil }, set: { if !$0 { notingId = nil } })) {
                 TextField("예: 도약이라고 해석됨", text: $noteText)
@@ -81,6 +93,7 @@ struct PhrasesView: View {
                 await load()
             }
             .refreshable { await load() }
+            }
             .onChange(of: q) { _, _ in
                 searchTask?.cancel()
                 searchTask = Task { try? await Task.sleep(for: .milliseconds(150)); if !Task.isCancelled { await load() } }
@@ -131,11 +144,18 @@ struct PhrasesView: View {
                     .padding(EdgeInsets(top: 0, leading: 10, bottom: 8, trailing: 0))
             }
             .overlay(alignment: .bottomTrailing) { if done { MasteredStamp().padding(EdgeInsets(top: 0, leading: 0, bottom: 30, trailing: 10)) } }
-            // 오른쪽 아래 ✎: 표현 내 메모 쓰기/고치기
+            // 오른쪽 아래: 🔊 한 번 읽기 · ▶ 테이프를 여기부터 · ✎ 내 메모
             .overlay(alignment: .bottomTrailing) {
-                Button { noteText = p.note ?? ""; notingId = p.id } label: { Text("✎\u{FE0E}").font(Theme.hand(18)).foregroundStyle(Theme.pencil).padding(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)) }
-                    .buttonStyle(.plain).accessibilityLabel("내 메모")
+                HStack(spacing: 2) {
+                    Button { TapePlayer.shared.speakOnce(phrase: p.phrase) } label: { Text("🔊").font(.system(size: 14)).padding(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 4)) }
+                        .buttonStyle(.plain).accessibilityLabel("읽어 주기")
+                    Button { TapePlayer.shared.startFrom(p); showTape = true } label: { Text("▶\u{FE0E}").font(.system(size: 13)).foregroundStyle(Theme.red).padding(EdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4)) }
+                        .buttonStyle(.plain).accessibilityLabel("테이프를 여기부터")
+                    Button { noteText = p.note ?? ""; notingId = p.id } label: { Text("✎\u{FE0E}").font(Theme.hand(18)).foregroundStyle(Theme.pencil).padding(EdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 10)) }
+                        .buttonStyle(.plain).accessibilityLabel("내 메모")
+                }
             }
+            .overlay { if highlightId == p.id { Rectangle().strokeBorder(Theme.red, lineWidth: 3) } }   // 공책에서 왔을 때 2.4초 강조
             .shadow(color: .black.opacity(0.15), radius: 2, x: 1, y: 2)
             .rotationEffect(.degrees(Double((i * 7) % 5) - 2))
         }

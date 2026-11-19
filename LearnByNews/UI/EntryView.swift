@@ -132,6 +132,8 @@ struct EntryView: View {
     /// 표현 내 메모(2026-11-19): 포스트잇 아래·빨간 펜 지적 줄 "내 메모 ✎"(있으면 "메모 고치기") → 한 줄 입력. 없는 표현이면 붙이면서 쓴다
     var noteOf: ((Expression) -> String?)? = nil
     var onPhraseNote: ((Expression, String) async -> Void)? = nil
+    /// "표현장 ↗"(2026-11-19): 그 표현의 표현장 id로 표현장을 시트로 열어 스크롤·강조. 🔊는 TapePlayer.speakOnce
+    var onOpenPhrases: ((String) -> Void)? = nil
     @State private var notingPhrase: String?      // 메모 입력이 열린 표현(글자)
     @State private var tryExpr: Expression?
     @State private var linkingPhrase: String?     // "엮기"가 열린 표현(표현장 id)
@@ -149,7 +151,9 @@ struct EntryView: View {
                                onTry: onFree == nil ? nil : { tryExpr = tryExpr == he ? nil : he },
                                tryTitle: tryExpr?.phrase == h.span ? "접기" : tryTitle(h.span), tryCount: tryExpr?.phrase == h.span ? 0 : (drillCounts[h.span] ?? 0),
                                onRelated: onRelated, onAddLink: onAddLink, onRemoveLink: onRemoveLink, onOpenSentence: onOpenSentence,
-                               stars: weightOf?(he) ?? 0, onStars: onWeight == nil ? nil : { w in Task { await onWeight?(he, w) } })
+                               stars: weightOf?(he) ?? 0, onStars: onWeight == nil ? nil : { w in Task { await onWeight?(he, w) } },
+                               onOpen: onOpenPhrases == nil ? nil : phraseId(he).flatMap { pid in SyncManager.isTemp(pid) ? nil : { onOpenPhrases?(pid) } },
+                               onSpeak: { speak(he) })
                 }
             }
             if fb.grade == .skip {
@@ -215,6 +219,9 @@ struct EntryView: View {
         return n > 0 ? "써 보기 ✎\u{FE0E} · \(n)" : "써 보기 ✎\u{FE0E}"
     }
 
+    /// 표현장 ↗ 대상: 그 문장의 같은 글자 표현(없으면 공책의 같은 글자 아무 표현)
+    private func phraseId(_ e: Expression) -> String? { savedPhrases.first { $0.phrase == e.phrase }?.id }
+    private func speak(_ e: Expression) { TapePlayer.shared.speakOnce(phrase: e.phrase) }   // 영어만 (goni "소리는 영어만")
     /// 붙여 둔 표현의 "↗ 엮은 것"(풀기 ×) · "← 다시 본 곳" 줄 (형광펜과 같은 줄)
     @ViewBuilder
     private func phraseLinkLines(_ sp: Phrase) -> some View {
@@ -261,6 +268,8 @@ struct EntryView: View {
                         Tiny(title: linkingPhrase == sp.id ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id }
                     }
                     if onPhraseNote != nil, !onSticky { Tiny(title: (noteOf?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { notingPhrase = notingPhrase == src ? nil : src } }
+                    if !onSticky, let onOpenPhrases, let pid = phraseId(e), !SyncManager.isTemp(pid) { Tiny(title: "표현장 ↗\u{FE0E}", size: 17) { onOpenPhrases(pid) } }
+                    if !onSticky { Button { speak(e) } label: { Text("🔊").font(.system(size: 13)) }.buttonStyle(.plain).accessibilityLabel("읽어 주기") }
                     if let onWeight { StarRow(stars: weightOf?(e) ?? 0, size: 13) { w in Task { await onWeight(e, w) } } }   // 중요도 별
                 }
                 .frame(minHeight: Theme.lh)
@@ -304,7 +313,9 @@ struct EntryView: View {
                       stars: weightOf, onStars: onWeight == nil ? nil : { e, w in Task { await onWeight?(e, w) } },
                       note: noteOf, noting: notingPhrase,
                       onNote: onPhraseNote == nil ? nil : { e in notingPhrase = notingPhrase == e.phrase ? nil : e.phrase },
-                      onSaveNote: onPhraseNote == nil ? nil : { e, t in Task { await onPhraseNote?(e, t) }; notingPhrase = nil })
+                      onSaveNote: onPhraseNote == nil ? nil : { e, t in Task { await onPhraseNote?(e, t) }; notingPhrase = nil },
+                      onOpen: onOpenPhrases == nil ? nil : { e in if let pid = phraseId(e), !SyncManager.isTemp(pid) { onOpenPhrases?(pid) } },
+                      onSpeak: { e in speak(e) })
             // 포스트잇 쪽 "엮기"가 열려 있으면 후보 칩은 포스트잇 줄 아래에
             if let id = linkingPhrase, let sp = savedPhrases.first(where: { $0.id == id }), fb.expressions.contains(where: { $0.phrase == sp.phrase }) { phraseLinkPicker(sp) }
         }
@@ -336,6 +347,8 @@ struct StickyRow: View {
     var noting: String? = nil                         // 메모 입력이 열린 표현(글자)
     var onNote: ((Expression) -> Void)? = nil
     var onSaveNote: ((Expression, String) -> Void)? = nil
+    var onOpen: ((Expression) -> Void)? = nil         // "표현장 ↗" (붙은 포스트잇만)
+    var onSpeak: ((Expression) -> Void)? = nil        // 🔊 한 번 읽기
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
@@ -348,6 +361,8 @@ struct StickyRow: View {
                             if let onTry { TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) } }
                             if saved, let onLink { Tiny(title: linkLabel?(e) ?? "엮기 ↗\u{FE0E}", size: 17) { onLink(e) } }
                             if let onNote { Tiny(title: (note?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { onNote(e) } }
+                            if saved, let onOpen { Tiny(title: "표현장 ↗\u{FE0E}", size: 17) { onOpen(e) } }
+                            if let onSpeak { Button { onSpeak(e) } label: { Text("🔊").font(.system(size: 13)) }.buttonStyle(.plain).accessibilityLabel("읽어 주기") }
                             if let onStars { StarRow(stars: stars?(e) ?? 0, size: 13) { w in onStars(e, w) } }
                         }
                         .padding(.leading, 6)
@@ -942,6 +957,8 @@ struct MarkerMemo: View {
     var onOpenSentence: ((String, String) -> Void)? = nil
     var stars: Int = 0                         // 중요도 별 (같은 글자 표현의 weight, 없으면 누르면 붙이고 별)
     var onStars: ((Int) -> Void)? = nil
+    var onOpen: (() -> Void)? = nil            // "표현장 ↗" (표현장에 있을 때만)
+    var onSpeak: (() -> Void)? = nil           // 🔊 구절만 한 번 (영어)
     @State private var linking = false
     @State private var editing = false
     @State private var text = ""
@@ -980,6 +997,8 @@ struct MarkerMemo: View {
                     }
                     if let onTry { TryButton(title: tryTitle, count: tryCount, action: onTry) }
                     if onRelated != nil, onAddLink != nil { Tiny(title: linking ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linking.toggle() } }
+                    if let onOpen { Tiny(title: "표현장 ↗\u{FE0E}", size: 17, action: onOpen) }
+                    if let onSpeak { Button(action: onSpeak) { Text("🔊").font(.system(size: 13)) }.buttonStyle(.plain).accessibilityLabel("읽어 주기") }
                     if let onStars { StarRow(stars: stars, size: 13, onSet: onStars) }
                 }
             }

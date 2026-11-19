@@ -661,6 +661,7 @@ struct NotebookView: View {
     var round: Int? = nil
     @EnvironmentObject var router: Router
     @Environment(\.scenePhase) private var phase
+    @State private var phrasesSheet: String?   // "표현장 ↗": 그 표현으로 표현장을 시트로 (공책은 그대로)
     @ObservedObject private var session = SessionModel.shared
     @StateObject private var m: NotebookModel
     @FocusState private var focused: Bool
@@ -718,6 +719,8 @@ struct NotebookView: View {
                 if ProcessInfo.processInfo.environment["LBN_AUTOPIN2"] == "1" { await m.togglePhrase(sid, Expression(phrase: i.source.trimmingCharacters(in: .whitespacesAndNewlines), meaning: i.meaning)) }
             }
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
+            // 화면 확인용: LBN_AUTOPHRASES=<표현 id> 이면 그 표현으로 표현장 시트를 연다("표현장 ↗" 확인용)
+            if let pid = ProcessInfo.processInfo.environment["LBN_AUTOPHRASES"] { Task { try? await Task.sleep(for: .seconds(1)); phrasesSheet = pid } }
             // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 써 보기 상자(EntryView가 연다)가 보이도록 잠시 뒤 맨 아래로 스크롤
             if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil || ProcessInfo.processInfo.environment["LBN_AUTOLINK"] != nil { Task { try? await Task.sleep(for: .seconds(3.5)); m.requestScroll("bottom") } }
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
@@ -736,6 +739,9 @@ struct NotebookView: View {
         }
         .onChange(of: m.allDone) { _, _ in checkFinish() }
         .onChange(of: phase) { _, p in if p == .active { m.recoverInflight() } }   // 백그라운드에서 돌아왔을 때 안전망
+        .sheet(item: Binding(get: { phrasesSheet.map { PhraseRef(id: $0) } }, set: { phrasesSheet = $0?.id })) { r in
+            PhrasesView(focusPhraseId: r.id, onClose: { phrasesSheet = nil }).environmentObject(router)
+        }
         .onChange(of: m.inflight.isEmpty) { _, _ in checkFinish() }
         .onChange(of: m.finishingPass) { _, _ in checkFinish() }
         .onChange(of: m.focusRequest) { _, _ in focused = true }
@@ -946,7 +952,8 @@ struct NotebookView: View {
                 weightOf: { e in (d.phrases.first { $0.sentenceId == x.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.stars ?? 0 },
                 onWeight: { e, w in await m.setWeight(x.id, e, w) },
                 noteOf: { e in (d.phrases.first { $0.sentenceId == x.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
-                onPhraseNote: { e, t in await m.setPhraseNote(x.id, e, t) }
+                onPhraseNote: { e, t in await m.setPhraseNote(x.id, e, t) },
+                onOpenPhrases: { pid in phrasesSheet = pid }
             )
             .id(x.id)
         } else {
@@ -1026,6 +1033,9 @@ struct NotebookView: View {
         .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
     }
 }
+
+/// 시트로 열 표현 id (Identifiable 포장)
+struct PhraseRef: Identifiable { var id: String }
 
 /// "✂\u{FE0E} 여기까지 · 11/6 14:03–14:40 · 37분 · 12문장" 점선
 struct SessionMark: View {
