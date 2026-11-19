@@ -26,6 +26,13 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     /// 번호 범위(붙인 순서 seq, goni 2026-11-18): nil이면 전부. 범위 안은 번호 순이 기본, 섞음이면 그 안에서
     @Published var range: ClosedRange<Int>? = RangePick.load("lbn_tape_range") { didSet { RangePick.save(range, "lbn_tape_range") } }
     var maxSeq: Int { all.compactMap(\.seq).max() ?? 0 }
+    /// 별 개수 필터(goni 2026-11-19): 0 = 전부, 1~3 = 그 개수 이상. 묶음·범위와 ∩. 기억
+    @Published var minStars: Int = UserDefaults.standard.integer(forKey: "lbn_tape_stars") { didSet { UserDefaults.standard.set(minStars, forKey: "lbn_tape_stars") } }
+    func starCount(_ n: Int) -> Int { basePool().filter { $0.stars >= n }.count }
+    private func basePool() -> [Phrase] {
+        all.filter { bucket == .all || ($0.isMastered == (bucket == .mastered)) }
+            .filter { p in range.map { r in p.seq.map(r.contains) ?? false } ?? true }
+    }
 
     private let synth = AVSpeechSynthesizer()
     private var all: [Phrase] = []
@@ -50,8 +57,7 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         rebuild()
     }
     func rebuild() {
-        let pool = all.filter { bucket == .all || ($0.isMastered == (bucket == .mastered)) }
-            .filter { p in range.map { r in p.seq.map(r.contains) ?? false } ?? true }
+        let pool = basePool().filter { $0.stars >= minStars }
         // 번호(seq)가 붙인 순서의 진실. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 시각이 같아 그 안에서 뒤집힌다(goni 2026-11-18 "#124 #125 #122 #123").
         // "최근 순"은 범위가 있어도 번호 큰 것부터(goni "500–720이면 720부터 나와야"), 작은 것부터 듣고 싶으면 "번호 순 ↑"
         let desc = pool.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) }
@@ -65,6 +71,7 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     func set(bucket b: Bucket) { stop(); bucket = b; rebuild() }
     func set(order o: Order) { stop(); order = o; rebuild() }
     func set(range r: ClosedRange<Int>?) { stop(); range = r; rebuild() }
+    func set(minStars n: Int) { stop(); minStars = n; rebuild() }
 
     /// 듣다가 중요도 별
     func setWeight(_ p: Phrase, _ w: Int) async {
@@ -98,7 +105,7 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     }
     /// 표현장 포스트잇 ▶: 묶음 전체·범위 없음·최근 순으로 두고 그 표현부터 바로 재생 (goni 2026-11-19)
     func startFrom(_ p: Phrase) {
-        stop(); bucket = .all; range = nil; order = .recent
+        stop(); bucket = .all; range = nil; order = .recent; minStars = 0
         if all.isEmpty, let c = Cache.shared.phrases(q: "") { all = c }
         if !all.contains(where: { $0.id == p.id }) { all.insert(p, at: 0) }
         rebuild()

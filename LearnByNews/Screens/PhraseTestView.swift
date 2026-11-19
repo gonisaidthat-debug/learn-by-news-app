@@ -21,6 +21,14 @@ final class PhraseTestModel: ObservableObject {
     /// 번호 범위(붙인 순서 seq). nil이면 전부. 묶음 필터와 겹쳐 적용 (goni 2026-11-18)
     @Published var range: ClosedRange<Int>? = RangePick.load("lbn_phrase_test_range") { didSet { RangePick.save(range, "lbn_phrase_test_range") } }
     var maxSeq: Int { (all ?? []).compactMap(\.seq).max() ?? 0 }
+    /// 별 개수 필터(goni 2026-11-19 "별 갯수 필터링도"): 0 = 전부, 1~3 = 그 개수 이상. 묶음·범위와 ∩. 기억
+    @Published var minStars: Int = UserDefaults.standard.integer(forKey: "lbn_phrase_test_stars") { didSet { UserDefaults.standard.set(minStars, forKey: "lbn_phrase_test_stars") } }
+    /// 묶음·범위 안에서 별이 n개 이상인 수 (필터 버튼의 n)
+    func starCount(_ n: Int) -> Int { basePool().filter { $0.stars >= n }.count }
+    private func basePool() -> [PhraseTestItem] {
+        (all ?? []).filter { self.bucket == .all || ($0.isMastered == (self.bucket == .mastered)) }
+            .filter { it in range.map { r in it.seq.map(r.contains) ?? false } ?? true }
+    }
     @Published var revokedPrev: String?   // 바로 앞 카드에서 몰랐다고 해 습득 완료가 취소된 표현 → 다음 카드 위 한 줄
     @Published var items: [PhraseTestItem] = []
     @Published var i = 0
@@ -58,8 +66,7 @@ final class PhraseTestModel: ObservableObject {
     /// 안 본 것 → 틀린 것 → 맞힌 것(오래된 순). 같은 묶음 안에서는 섞는다 (시험지와 같은 규칙). 뜻 쓰기는 m_* 기록으로
     private func rebuild() {
         func rank(_ it: PhraseTestItem) -> Int { lastCorrect(it) == nil ? 0 : (lastCorrect(it)! ? 2 : 1) }
-        let pool = (all ?? []).filter { self.bucket == .all || ($0.isMastered == (self.bucket == .mastered)) }
-            .filter { it in range.map { r in it.seq.map(r.contains) ?? false } ?? true }
+        let pool = basePool().filter { $0.stars >= minStars }
         // 같은 묶음 안에서는 별 많은 것부터, 그다음 오래된 순 (중요도 별, 2026-11-19)
         items = pool.shuffled().sorted { a, b in
             let (ra, rb) = (rank(a), rank(b))
@@ -72,6 +79,7 @@ final class PhraseTestModel: ObservableObject {
     /// 습득 완료 묶음을 고르면 고급이 기본 ("습득 완료는 더 고급 시험으로 자유자재로 쓸 수 있는지"). 다른 묶음에서도 켤 수 있다
     func restart(_ b: Bucket) { bucket = b; if b == .mastered { mode = .advanced }; restart() }
     func restart(_ m: Mode) { mode = m; restart() }
+    func restart(stars n: Int) { minStars = n; restart() }
     func next() { i += 1; resetCard() }
     private func resetCard() { answer = ""; hint = false; revealed = nil; drill = nil; drillQueued = false; grading = false; gradingTask = nil; drillId = nil }
 
@@ -189,6 +197,13 @@ struct PhraseTestView: View {
                             }
                         }
                         RangePick(range: $m.range, max: m.maxSeq).onChange(of: m.range) { _, _ in m.restart(); focused = true }
+                        HStack(spacing: 10) {   // 별 개수 이상 필터
+                            ForEach(0...3, id: \.self) { n in
+                                let label = n == 0 ? "별 전부" : String(repeating: "★", count: n) + (n < 3 ? "+" : "") + " \(m.starCount(n))"
+                                Tiny(title: label, color: m.minStars == n ? (n > 0 ? StarRow.yellow : Theme.ink) : Theme.pencil, size: 18) { m.restart(stars: n); focused = true }
+                                    .overlay(alignment: .bottom) { if m.minStars == n { Rectangle().fill(Theme.red).frame(height: 2) } }
+                            }
+                        }
                         HStack(spacing: 10) {
                             ForEach(PhraseTestModel.Mode.allCases, id: \.self) { md in
                                 let label = md == .write ? "표현 쓰기" : md == .meaning ? "뜻 쓰기" : "고급 ✎\u{FE0E}"
@@ -244,7 +259,7 @@ struct PhraseTestView: View {
         } else if m.items.isEmpty {
             Entry {
                 Text("시험 볼 표현이 없다").font(Theme.print(16)).italic().foregroundStyle(Theme.pencil).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
-                Text(m.range != nil ? "이 번호 범위에 시험 볼 표현이 없다." : m.bucket == .mastered ? "습득 완료 도장이 찍힌 표현이 없다." : "표현장에 붙은 표현이 문제가 된다.").pencil()
+                Text(m.minStars > 0 ? "이 별 개수 이상인 표현이 이 묶음·범위에 없다." : m.range != nil ? "이 번호 범위에 시험 볼 표현이 없다." : m.bucket == .mastered ? "습득 완료 도장이 찍힌 표현이 없다." : "표현장에 붙은 표현이 문제가 된다.").pencil()
             }
         } else if m.done {
             Entry {

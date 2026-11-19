@@ -24,7 +24,15 @@ struct TapeView: View {
                             }
                         }
                     }
-                    RangePick(range: Binding(get: { t.range }, set: { t.set(range: $0) }), max: t.maxSeq).padding(.horizontal, 4).padding(.bottom, 8)
+                    RangePick(range: Binding(get: { t.range }, set: { t.set(range: $0) }), max: t.maxSeq).padding(.horizontal, 4).padding(.bottom, 6)
+                    HStack(spacing: 10) {   // 별 개수 이상 필터
+                        ForEach(0...3, id: \.self) { n in
+                            let label = n == 0 ? "별 전부" : String(repeating: "★", count: n) + (n < 3 ? "+" : "") + " \(t.starCount(n))"
+                            Tiny(title: label, color: t.minStars == n ? (n > 0 ? StarRow.yellow : Theme.ink) : Theme.pencil, size: 18) { t.set(minStars: n) }
+                                .overlay(alignment: .bottom) { if t.minStars == n { Rectangle().fill(Theme.red).frame(height: 2) } }
+                        }
+                    }
+                    .padding(.horizontal, 4).padding(.bottom, 8)
                     controls.padding(.bottom, 6)
                     if let p = t.current {
                         // 듣다가 습득 완료 찍기/떼기 (목록 순서는 그대로, 표시만 바뀐다)
@@ -76,7 +84,7 @@ struct TapeView: View {
                     Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(3).multilineTextAlignment(.leading)
                         .opacity(p.isMastered ? 0.62 : 1)
                     if let n = p.note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(16)).foregroundStyle(Color(hex: 0x6B5D2A)).lineLimit(2) }   // 표현 내 메모
-                } else { MutedText(text: t.range != nil ? "이 번호 범위에 들을 표현이 없다" : "읽을 표현이 없다") }
+                } else { MutedText(text: t.minStars > 0 ? "이 별 개수 이상인 표현이 이 묶음·범위에 없다" : t.range != nil ? "이 번호 범위에 들을 표현이 없다" : "읽을 표현이 없다") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
