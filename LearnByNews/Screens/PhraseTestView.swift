@@ -60,9 +60,12 @@ final class PhraseTestModel: ObservableObject {
         func rank(_ it: PhraseTestItem) -> Int { lastCorrect(it) == nil ? 0 : (lastCorrect(it)! ? 2 : 1) }
         let pool = (all ?? []).filter { self.bucket == .all || ($0.isMastered == (self.bucket == .mastered)) }
             .filter { it in range.map { r in it.seq.map(r.contains) ?? false } ?? true }
+        // 같은 묶음 안에서는 별 많은 것부터, 그다음 오래된 순 (중요도 별, 2026-11-19)
         items = pool.shuffled().sorted { a, b in
             let (ra, rb) = (rank(a), rank(b))
-            return ra != rb ? ra < rb : (lastAt(a) ?? 0) < (lastAt(b) ?? 0)
+            if ra != rb { return ra < rb }
+            if a.stars != b.stars { return a.stars > b.stars }
+            return (lastAt(a) ?? 0) < (lastAt(b) ?? 0)
         }
     }
     func restart() { i = 0; right = 0; wrong = 0; revokedPrev = nil; resetCard(); rebuild() }
@@ -146,6 +149,15 @@ final class PhraseTestModel: ObservableObject {
         drillId = nil; gradingTask?.cancel(); gradingTask = nil; grading = false
         AppLog.shared.info("phrasetest", "stop", ["id": did])
         Task { await SyncManager.shared.stopDrillGrading(id: did) }
+    }
+    /// 카드에서 중요도 별
+    func setWeight(_ w: Int) async {
+        guard let it = current else { return }
+        do {
+            let saved = try await SyncManager.shared.setWeight(it.id, weight: w)
+            if let j = all?.firstIndex(where: { $0.id == it.id }) { all?[j].weight = saved }
+            if let j = items.firstIndex(where: { $0.id == it.id }) { items[j].weight = saved }
+        } catch { err = error.localizedDescription }
     }
     /// 맞힌 김에 습득 완료 (표현장에 남고 응용·시험에서 빠진다)
     func master() async {
@@ -249,7 +261,12 @@ struct PhraseTestView: View {
         } else if let it = m.current {
             Entry(stamp: AnyView(m.drill?.feedback.map { AnyView(Stamp(kind: .grade($0.grade))) } ?? AnyView(Stamp(kind: .pin)))) {
                 if let rp = m.revokedPrev { Text("⟲\u{FE0E} 앞 표현(\(rp))의 습득 완료를 취소했다").font(Theme.hand(18)).foregroundStyle(Theme.red) }
-                if let n = it.seq { Text("#\(n)").font(Theme.hand(15)).foregroundStyle(Theme.pencil).frame(maxWidth: .infinity, alignment: .trailing).frame(height: 14) }   // 붙인 순서 번호 (오른쪽 위)
+                HStack(spacing: 8) {   // 오른쪽 위: 중요도 별 + 붙인 순서 번호
+                    Spacer(minLength: 0)
+                    StarRow(stars: it.stars, size: 14) { w in Task { await m.setWeight(w) } }
+                    if let n = it.seq { Text("#\(n)").font(Theme.hand(15)).foregroundStyle(Theme.pencil) }
+                }
+                .frame(height: 18)
                 // 문제
                 switch m.mode {
                 case .write:

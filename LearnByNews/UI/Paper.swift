@@ -163,6 +163,26 @@ struct MasteredStamp: View {
     }
 }
 
+/// 중요도 별 ★★★ (goni 2026-11-19 "여러 번 틀릴 때 내가 직접 가중치"): 회색, 누르면 그 수까지 노랑, 같은 수를 다시 누르면 0
+struct StarRow: View {
+    var stars: Int
+    var size: CGFloat = 15
+    var onSet: ((Int) -> Void)? = nil
+    static let yellow = Color(hex: 0xE0A800)
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(1...3, id: \.self) { i in
+                Button { onSet?(i == stars ? 0 : i) } label: {
+                    Text("★").font(.system(size: size)).foregroundStyle(i <= stars ? Self.yellow : Theme.pencil.opacity(0.35))
+                        .frame(width: size + 6, height: size + 8).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(onSet == nil)
+                .accessibilityLabel("중요도 \(i)")
+            }
+        }
+    }
+}
+
 struct Pin: View {
     var body: some View {
         Circle()

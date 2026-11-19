@@ -180,12 +180,16 @@ final class SyncManager: ObservableObject {
                     let b = try JSONDecoder.api.decode(PhraseSaveOp.self, from: op.payload)
                     let p = try await API.shared.savePhrase(Expression(phrase: b.phrase, meaning: b.meaning), sentenceId: b.sentenceId, articleId: b.articleId)
                     Cache.shared.renamePhrase(from: b.tempId, to: p)
+                    var map = idMap; map[b.tempId] = p.id; idMap = map   // 뒤에 큐된 phrase_weight 등이 임시 id를 실제 id로 바꿔 보내도록
                 case "phrase_delete":
                     let b = try JSONDecoder.api.decode(PhraseDeleteOp.self, from: op.payload)
                     try await API.shared.deletePhrase(b.id)
                 case "phrase_mastered":
                     let b = try JSONDecoder.api.decode(PhraseMasteredOp.self, from: op.payload)
                     _ = try await API.shared.setMastered(b.id, on: b.on)
+                case "phrase_weight":
+                    let b = try JSONDecoder.api.decode(PhraseWeightOp.self, from: op.payload)
+                    _ = try await API.shared.setWeight(real(b.id), weight: b.weight)
                 case "pass_put":
                     let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
                     try await API.shared.putPass(b.articleId, done: b.done ?? [])
@@ -483,6 +487,19 @@ final class SyncManager: ObservableObject {
     }
     struct PhraseDeleteOp: Codable { var id: String }
     struct PhraseMasteredOp: Codable { var id: String; var on: Bool }
+    struct PhraseWeightOp: Codable { var id: String; var weight: Int }
+    /// 중요도 별: 캐시에 먼저, 온라인이면 바로, 아니면 큐 phrase_weight. 돌려주는 값은 저장된 별 수
+    func setWeight(_ id: String, weight: Int) async throws -> Int {
+        let w = max(0, min(3, weight))
+        Cache.shared.setPhraseWeight(id: id, weight: w)
+        // 아직 서버에 안 붙은 임시 표현(오프라인에서 붙임): 큐에 넣어 두면 phrase_save 다음에 실제 id로 보내진다
+        if Connectivity.shared.isOnline, !Self.isTemp(id) {
+            do { let r = try await API.shared.setWeight(id, weight: w); Cache.shared.setPhraseWeight(id: id, weight: r.weight); return r.weight }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        }
+        Cache.shared.enqueue("phrase_weight", PhraseWeightOp(id: id, weight: w)); refreshCounts()
+        return w
+    }
     /// 습득 완료 도장 찍기/떼기: 캐시에 먼저 반영하고 온라인이면 바로, 아니면 큐 phrase_mastered. 서버가 돌려준 mastered_at을 쓴다(없으면 지금 시각)
     func setMastered(_ id: String, on: Bool) async throws -> Int64? {
         guard !Self.isTemp(id) else { throw APIError.server("아직 서버에 붙지 않은 표현이다 · 연결되면 다시") }

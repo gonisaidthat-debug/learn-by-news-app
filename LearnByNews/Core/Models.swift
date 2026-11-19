@@ -104,10 +104,12 @@ struct Phrase: Codable, Identifiable, Hashable {
     var masteredAt: Int64?      // 습득 완료 도장 (null = 아직). 기본 숨김, 응용 출제·시험지에서 빠진다 (2026-11-18)
     var masteryLog: [MasteryLogEntry]?   // 찍기/떼기/자동 취소 기록(최신순, GET /api/phrases)
     var seq: Int?               // 붙인 순서 번호(1부터, 2026-11-18). 범위 재생·시험에 쓴다. 지워도 뒤 번호는 안 당겨진다
+    var weight: Int?            // 중요도 별 0~3 (2026-11-19): 응용 출제에서 별 하나당 이틀 먼저, 시험은 같은 묶음 안에서 별 많은 것부터
+    var stars: Int { max(0, min(3, weight ?? 0)) }
     var isMastered: Bool { masteredAt != nil }
 
-    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil, seq: Int? = nil) {
-        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt; self.seq = seq
+    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil, seq: Int? = nil, weight: Int? = nil) {
+        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt; self.seq = seq; self.weight = weight
     }
 }
 
@@ -270,6 +272,7 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var phrase: String
     var meaning: String
     var seq: Int?               // 붙인 순서 번호 (범위 시험용)
+    var weight: Int?            // 중요도 별 0~3
     var masteredAt: Int64?      // 묶음(아직/습득 완료/전체)은 클라가 거른다 (2026-11-18)
     var sentenceId: String?
     var articleId: String?
@@ -287,6 +290,7 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var mTries: Int?
     var mWrong: Int?
     var isMastered: Bool { masteredAt != nil }
+    var stars: Int { max(0, min(3, weight ?? 0)) }
     var meaningKey: String { mKey ?? "pm|\(id)" }
 }
 

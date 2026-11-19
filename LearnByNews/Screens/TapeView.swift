@@ -32,6 +32,8 @@ struct TapeView: View {
                             Tiny(title: p.isMastered ? "다시 보기 ↻\u{FE0E}" : "습득 완료 ✓\u{FE0E}", color: p.isMastered ? Theme.pencil : Theme.grade(.A), size: 18) { Task { await t.toggleMastered(p) } }
                                 .keyboardShortcut("m", modifiers: [])
                             if p.isMastered { MasteredStamp().scaleEffect(0.85) }
+                            Spacer(minLength: 0)
+                            StarRow(stars: p.stars, size: 16) { w in Task { await t.setWeight(p, w) } }   // 중요도 별
                         }
                         .padding(.horizontal, 4).padding(.bottom, 10)
                     }

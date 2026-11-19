@@ -11,11 +11,13 @@ struct PhrasesView: View {
     @AppStorage("lbn_phrases_show_mastered") private var showMastered = false
     @State private var showTest = false     // 표현장 시험 (뜻 → 영어 표현)
     @State private var showTape = false     // 표현장 테이프 (읽어 주기)
+    @State private var starredOnly = false  // "★ n": 별 붙은 것만
 
     private var mastered: [Phrase] { list.filter(\.isMastered) }
     /// 벽도 번호(붙인 순서) 큰 것부터. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 순서가 임의라서
     private static func byNumber(_ xs: [Phrase]) -> [Phrase] { xs.sorted { ($0.seq ?? 0, $0.createdAt) > ($1.seq ?? 0, $1.createdAt) } }
-    private var shown: [Phrase] { showMastered ? list : list.filter { !$0.isMastered } }
+    private var shown: [Phrase] { (showMastered ? list : list.filter { !$0.isMastered }).filter { !starredOnly || $0.stars > 0 } }
+    private var starredCount: Int { list.filter { $0.stars > 0 }.count }
 
     var body: some View {
         NavigationStack {
@@ -32,6 +34,10 @@ struct PhrasesView: View {
                         if !list.isEmpty || !mastered.isEmpty {
                             Tiny(title: "시험 보기 ✎\u{FE0E}", color: Theme.red, size: 19) { showTest = true }
                             Tiny(title: "테이프 ▶\u{FE0E}", color: Theme.red, size: 19) { showTape = true }
+                            if starredCount > 0 || starredOnly {
+                                Tiny(title: "★ \(starredCount)", color: starredOnly ? StarRow.yellow : Theme.pencil, size: 19) { withAnimation(.easeInOut(duration: 0.15)) { starredOnly.toggle() } }
+                                    .help("별 붙은 표현만 보기")
+                            }
                         }
                         if !mastered.isEmpty {
                             Text("\(list.count - mastered.count)개 · 습득 완료 \(mastered.count)개").font(Theme.hand(19)).foregroundStyle(Theme.pencil)
@@ -98,15 +104,18 @@ struct PhrasesView: View {
                 }
             }
             .multilineTextAlignment(.leading)
-            .padding(EdgeInsets(top: 18, leading: 16, bottom: 34, trailing: 16))   // 아래쪽은 "습득 완료 ✓" 버튼 자리
+            .padding(EdgeInsets(top: 30, leading: 16, bottom: 34, trailing: 16))   // 위쪽은 "#n·★★★·×" 줄, 아래쪽은 "습득 완료 ✓" 버튼 자리
             .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
             .background(back ? Theme.stickyBack : Theme.stickyColors[i % 3])
             .opacity(done ? 0.62 : 1)
             .overlay(alignment: .top) { Pin().offset(y: -6) }
             .overlay(alignment: .topLeading) { if let n = p.seq { Text("#\(n)").font(Theme.hand(14)).foregroundStyle(Theme.pencil).padding(EdgeInsets(top: 5, leading: 8, bottom: 0, trailing: 0)) } }   // 붙인 순서 번호
             .overlay(alignment: .topTrailing) {
-                Button { Task { await remove(p) } } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(8) }
-                    .buttonStyle(.plain)
+                HStack(spacing: 0) {
+                    StarRow(stars: p.stars, size: 14) { w in Task { await weight(p, w) } }
+                    Button { Task { await remove(p) } } label: { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(8) }
+                        .buttonStyle(.plain)
+                }
             }
             // 아래 왼쪽: 습득 완료 ✓ / 다시 보기 ↻ (지우지 않고 도장만). 아래 오른쪽: 도장
             .overlay(alignment: .bottomLeading) {
@@ -133,6 +142,14 @@ struct PhrasesView: View {
         case "unmastered": return "↻\u{FE0E} 도장 뗌 · \(d)"
         default: return "⟲\u{FE0E} 취소 · \((e.note ?? "").isEmpty ? "" : (e.note! + " · "))\(d)"
         }
+    }
+    /// 중요도 별 0~3
+    private func weight(_ p: Phrase, _ w: Int) async {
+        do {
+            let saved = try await SyncManager.shared.setWeight(p.id, weight: w)
+            if let i = list.firstIndex(where: { $0.id == p.id }) { list[i].weight = saved }
+            AppLog.shared.info("phrases", "weight", ["id": p.id, "weight": "\(saved)"])
+        } catch { err = error.localizedDescription }
     }
     /// 습득 완료 도장: 지우지 않고 표시만. 기본 보기·응용 출제·시험지에서 빠진다
     private func master(_ p: Phrase, _ on: Bool) async {

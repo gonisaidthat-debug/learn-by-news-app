@@ -86,6 +86,22 @@ final class DoneModel: ObservableObject {
         reviewing = false
     }
 
+    /// 중요도 별 (goni 2026-11-19 "여기서 바로 중요도를 더해 줄 수 있게"): 그 문장의 같은 글자 표현(없으면 같은 글자 아무 표현)에. 표현장에 없으면 붙이고 나서 별
+    func setWeight(_ sid: String, _ e: Expression, _ w: Int) async {
+        guard var d = data else { return }
+        var p = d.phrases.first { $0.sentenceId == sid && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase }
+        if p == nil {
+            do { let np = try await SyncManager.shared.savePhrase(e, sentenceId: sid, articleId: d.id, articleTitle: d.title, sentenceText: d.sentences.first { $0.id == sid }?.text); d.phrases.append(np); p = np }
+            catch { err = error.localizedDescription; return }
+        }
+        guard let pid = p?.id else { return }
+        do {
+            let saved = try await SyncManager.shared.setWeight(pid, weight: w)
+            if let i = d.phrases.firstIndex(where: { $0.id == pid }) { d.phrases[i].weight = saved }
+            data = d
+            AppLog.shared.info("notebook", "weight", ["phrase": pid, "weight": "\(saved)"])
+        } catch { data = d; err = error.localizedDescription }
+    }
     func togglePhrase(_ sid: String, _ e: Expression) async {
         guard var d = data else { return }
         do {
@@ -355,7 +371,9 @@ struct DoneView: View {
                                 onDrillFor: { e in try await m.drillFor(s.id, e) },
                                 onAnswerDrill: { d, a in try await m.answerDrill(d, a) },
                                 drillCounts: d.drillCounts,
-                                onDrillGraded: { ph in m.bumpDrillCount(ph) }
+                                onDrillGraded: { ph in m.bumpDrillCount(ph) },
+                                weightOf: { e in (d.phrases.first { $0.sentenceId == s.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.stars ?? 0 },
+                                onWeight: { e, w in await m.setWeight(s.id, e, w) }
                             )
                         }
                     }
