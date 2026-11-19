@@ -594,6 +594,11 @@ struct TryBox: View {
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background(Theme.tab.opacity(0.25))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.tab).frame(width: 3) }
+        // 오른쪽 위 × 닫기 (goni 2026-11-19 "닫기가 아래 줄에만 있어 찾기 불편"). 채점 중엔 비활성
+        .overlay(alignment: .topTrailing) {
+            Button(action: onClose) { Text("×").font(.system(size: 18)).foregroundStyle(Theme.pencil).padding(8) }
+                .buttonStyle(.plain).disabled(busy).opacity(busy ? 0.4 : 1).accessibilityLabel("써 보기 닫기")
+        }
         .padding(.vertical, 6)
         .onAppear { focused = true }
         .task {
