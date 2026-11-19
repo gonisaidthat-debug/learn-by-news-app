@@ -75,6 +75,7 @@ struct TapeView: View {
                         .opacity(p.isMastered ? 0.62 : 1)   // 습득 완료면 흐리게
                     Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Theme.pencil).lineLimit(3).multilineTextAlignment(.leading)
                         .opacity(p.isMastered ? 0.62 : 1)
+                    if let n = p.note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(16)).foregroundStyle(Color(hex: 0x6B5D2A)).lineLimit(2) }   // 표현 내 메모
                 } else { MutedText(text: t.range != nil ? "이 번호 범위에 들을 표현이 없다" : "읽을 표현이 없다") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

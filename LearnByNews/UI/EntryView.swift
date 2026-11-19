@@ -129,6 +129,10 @@ struct EntryView: View {
     /// 중요도 별(2026-11-19): 형광펜 메모 줄·포스트잇 아래·빨간 펜 지적 줄. 값은 그 문장의 같은 글자 표현(없으면 같은 글자 아무 표현)의 weight, 없는 표현이면 누르는 순간 붙이고 별
     var weightOf: ((Expression) -> Int)? = nil
     var onWeight: ((Expression, Int) async -> Void)? = nil
+    /// 표현 내 메모(2026-11-19): 포스트잇 아래·빨간 펜 지적 줄 "내 메모 ✎"(있으면 "메모 고치기") → 한 줄 입력. 없는 표현이면 붙이면서 쓴다
+    var noteOf: ((Expression) -> String?)? = nil
+    var onPhraseNote: ((Expression, String) async -> Void)? = nil
+    @State private var notingPhrase: String?      // 메모 입력이 열린 표현(글자)
     @State private var tryExpr: Expression?
     @State private var linkingPhrase: String?     // "엮기"가 열린 표현(표현장 id)
 
@@ -245,9 +249,8 @@ struct EntryView: View {
             (Text(i.source).underline(true, color: Theme.red) + Text(" →\u{FE0E} \(i.meaning)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A)))
                 .redpen()
             if !src.isEmpty {
-                // 버튼은 지적 글 아래 오른쪽에 (글 옆에 두면 글이 좁아져 줄이 늘어난다)
-                HStack(spacing: 14) {
-                    Spacer(minLength: 0)
+                // 버튼은 지적 글 아래에 (글 옆에 두면 글이 좁아져 줄이 늘어난다). 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
+                FlowLayout(spacing: 14) {
                     // 붙은 뒤 다시 누르면 습득 완료 토글(떼는 게 아니다, goni 2026-11-18). 찍히면 "습득 완료 ✓"
                     Tiny(title: sp?.isMastered == true ? "습득 완료 ✓\u{FE0E}" : saved ? "붙여 둠 ✓\u{FE0E}" : "표현장에 ＋", color: saved ? Theme.grade(.A) : Theme.pencil, size: 17) { onTogglePhrase(e) }
                         .help(sp?.isMastered == true ? "습득 완료. 누르면 도장을 떼고 다시 본다" : saved ? "붙여 둠. 누르면 습득 완료(표현장에 남고 응용·시험지에서 빠짐). 떼려면 표현장에서 ×" : "이 표현을 표현장에 붙인다 → 응용에서 연습할 수 있다")
@@ -257,9 +260,12 @@ struct EntryView: View {
                     if let sp, !onSticky, onAddPhraseLink != nil, onRelated != nil {
                         Tiny(title: linkingPhrase == sp.id ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id }
                     }
+                    if onPhraseNote != nil, !onSticky { Tiny(title: (noteOf?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { notingPhrase = notingPhrase == src ? nil : src } }
                     if let onWeight { StarRow(stars: weightOf?(e) ?? 0, size: 13) { w in Task { await onWeight(e, w) } } }   // 중요도 별
                 }
-                .frame(height: Theme.lh)
+                .frame(minHeight: Theme.lh)
+                if !onSticky, let n = noteOf?(e), !n.isEmpty, notingPhrase != src { Text("✎\u{FE0E} \(n)").font(Theme.hand(19)).foregroundStyle(Theme.blueInk) }
+                if notingPhrase == src, let onPhraseNote { NoteEditor(initial: noteOf?(e) ?? "", onSave: { t in Task { await onPhraseNote(e, t) }; notingPhrase = nil }, onCancel: { notingPhrase = nil }) }
                 if let sp, !onSticky {
                     phraseLinkLines(sp)
                     if linkingPhrase == sp.id { phraseLinkPicker(sp) }
@@ -295,7 +301,10 @@ struct EntryView: View {
                       onLink: onAddPhraseLink == nil || onRelated == nil ? nil : { e in if let sp = savedPhrases.first(where: { $0.phrase == e.phrase }) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id } },
                       linkLabel: { e in savedPhrases.first { $0.phrase == e.phrase }.map { linkingPhrase == $0.id ? "접기" : "엮기 ↗\u{FE0E}" } ?? "엮기 ↗\u{FE0E}" },
                       onRemoveLink: onRemovePhraseLink == nil ? nil : { e, l in if let sp = savedPhrases.first(where: { $0.phrase == e.phrase }) { Task { await onRemovePhraseLink?(sp, l) } } },
-                      stars: weightOf, onStars: onWeight == nil ? nil : { e, w in Task { await onWeight?(e, w) } })
+                      stars: weightOf, onStars: onWeight == nil ? nil : { e, w in Task { await onWeight?(e, w) } },
+                      note: noteOf, noting: notingPhrase,
+                      onNote: onPhraseNote == nil ? nil : { e in notingPhrase = notingPhrase == e.phrase ? nil : e.phrase },
+                      onSaveNote: onPhraseNote == nil ? nil : { e, t in Task { await onPhraseNote?(e, t) }; notingPhrase = nil })
             // 포스트잇 쪽 "엮기"가 열려 있으면 후보 칩은 포스트잇 줄 아래에
             if let id = linkingPhrase, let sp = savedPhrases.first(where: { $0.id == id }), fb.expressions.contains(where: { $0.phrase == sp.phrase }) { phraseLinkPicker(sp) }
         }
@@ -323,20 +332,28 @@ struct StickyRow: View {
     var onRemoveLink: ((Expression, HighlightLink) -> Void)? = nil
     var stars: ((Expression) -> Int)? = nil           // 중요도 별 (안 붙은 포스트잇도 누르면 붙이고 별)
     var onStars: ((Expression, Int) -> Void)? = nil
+    var note: ((Expression) -> String?)? = nil        // 표현 내 메모: 포스트잇 안 "✎ 메모" + 아래 "내 메모 ✎/메모 고치기"
+    var noting: String? = nil                         // 메모 입력이 열린 표현(글자)
+    var onNote: ((Expression) -> Void)? = nil
+    var onSaveNote: ((Expression, String) -> Void)? = nil
     var body: some View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
                 VStack(alignment: .leading, spacing: 2) {
-                    Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false)) }
+                    Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false), note: note?(e)) }
                         .buttonStyle(.plain)
                         .help(saved ? "붙여 둠. 누르면 습득 완료(표현장에 남고 응용·시험지에서 빠짐). 떼려면 표현장에서 ×" : "누르면 표현장에 붙인다")
-                    if onTry != nil || (saved && onLink != nil) || onStars != nil {
-                        HStack(spacing: 12) {
+                    if onTry != nil || (saved && onLink != nil) || onStars != nil || onNote != nil {
+                        FlowLayout(spacing: 12) {
                             if let onTry { TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) } }
                             if saved, let onLink { Tiny(title: linkLabel?(e) ?? "엮기 ↗\u{FE0E}", size: 17) { onLink(e) } }
+                            if let onNote { Tiny(title: (note?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { onNote(e) } }
                             if let onStars { StarRow(stars: stars?(e) ?? 0, size: 13) { w in onStars(e, w) } }
                         }
                         .padding(.leading, 6)
+                    }
+                    if noting == e.phrase, let onSaveNote {
+                        NoteEditor(initial: note?(e) ?? "", onSave: { t in onSaveNote(e, t) }, onCancel: { onNote?(e) }).padding(.leading, 6)
                     }
                     // 엮은 것 (풀기 ×)
                     ForEach(links?(e) ?? []) { l in

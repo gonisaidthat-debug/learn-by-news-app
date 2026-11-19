@@ -131,11 +131,13 @@ struct Sticky: View {
     var pinned = true
     var big = false
     var mastered = false      // 습득 완료 도장: 흐려지고 오른쪽 아래 초록 테두리 "습득 완료"
+    var note: String? = nil   // 표현 내 메모: 뜻 아래 "✎ 메모" (연필색, 작게)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(phrase).font(Theme.hand(big ? 24 : 22)).foregroundStyle(Color(hex: 0x2A2412)).fontWeight(.bold)
             Text(meaning).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x5B5440))
+            if let n = note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(16)).foregroundStyle(Color(hex: 0x6B5D2A)) }
         }
         .multilineTextAlignment(.leading)
         .padding(EdgeInsets(top: 12, leading: 14, bottom: mastered ? 30 : 12, trailing: 14))
@@ -160,6 +162,25 @@ struct MasteredStamp: View {
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.grade(.A), lineWidth: 2))
             .opacity(0.9)
             .rotationEffect(.degrees(-12))
+    }
+}
+
+/// 한 줄 메모 입력 (형광펜 내 메모와 같은 모양): 저장·취소, Enter로 저장, 비우면 지움
+struct NoteEditor: View {
+    var initial: String
+    var onSave: (String) -> Void
+    var onCancel: () -> Void
+    @State private var text = ""
+    @FocusState private var focused: Bool
+    var body: some View {
+        HStack(spacing: 10) {
+            TextField("내 메모", text: $text).font(Theme.hand(20)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                .focused($focused).submitLabel(.done).autocorrectionDisabled()
+                .onSubmit { onSave(text) }
+            Tiny(title: "저장", size: 18) { onSave(text) }
+            Tiny(title: "취소", size: 18, action: onCancel).keyboardShortcut(.escape, modifiers: [])
+        }
+        .onAppear { text = initial; focused = true }
     }
 }
 

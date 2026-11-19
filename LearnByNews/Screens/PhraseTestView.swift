@@ -315,7 +315,7 @@ struct PhraseTestView: View {
                         else if m.revealed == .shown { Text(m.answer).koLine() }
                         else { (Text("✗\u{FE0E} ") + Text(m.answer).strikethrough(true, color: Theme.red)).handLine(size: 22, color: Theme.red) }
                     }
-                    Sticky(phrase: it.phrase, meaning: it.meaning, index: 0, mastered: m.mastered.contains(it.id)).padding(.vertical, 10)
+                    Sticky(phrase: it.phrase, meaning: it.meaning, index: 0, mastered: m.mastered.contains(it.id), note: it.note).padding(.vertical, 10)
                     if let aid = it.articleId, !aid.isEmpty {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             (Text("출처 ").font(Theme.hand(17)) + Text("\(it.articleTitle ?? "")" + (it.sentenceIdx.map { " · \($0 + 1)번째 문장" } ?? ""))).pencil()

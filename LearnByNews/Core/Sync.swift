@@ -190,6 +190,9 @@ final class SyncManager: ObservableObject {
                 case "phrase_weight":
                     let b = try JSONDecoder.api.decode(PhraseWeightOp.self, from: op.payload)
                     _ = try await API.shared.setWeight(real(b.id), weight: b.weight)
+                case "phrase_note":
+                    let b = try JSONDecoder.api.decode(PhraseNoteOp.self, from: op.payload)
+                    _ = try await API.shared.setPhraseNote(real(b.id), note: b.note)
                 case "pass_put":
                     let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
                     try await API.shared.putPass(b.articleId, done: b.done ?? [])
@@ -488,6 +491,18 @@ final class SyncManager: ObservableObject {
     struct PhraseDeleteOp: Codable { var id: String }
     struct PhraseMasteredOp: Codable { var id: String; var on: Bool }
     struct PhraseWeightOp: Codable { var id: String; var weight: Int }
+    struct PhraseNoteOp: Codable { var id: String; var note: String }
+    /// 표현 내 메모: 캐시에 먼저, 온라인이면 바로, 아니면 큐 phrase_note(임시 id는 phrase_save 재생 뒤 실제 id로). 돌려주는 값은 저장된 메모(nil = 지움)
+    func setPhraseNote(_ id: String, note: String) async throws -> String? {
+        let n = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        Cache.shared.setPhraseNote(id: id, note: n)
+        if Connectivity.shared.isOnline, !Self.isTemp(id) {
+            do { let r = try await API.shared.setPhraseNote(id, note: n); Cache.shared.setPhraseNote(id: id, note: r.note); return r.note }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        }
+        Cache.shared.enqueue("phrase_note", PhraseNoteOp(id: id, note: n)); refreshCounts()
+        return n.isEmpty ? nil : n
+    }
     /// 중요도 별: 캐시에 먼저, 온라인이면 바로, 아니면 큐 phrase_weight. 돌려주는 값은 저장된 별 수
     func setWeight(_ id: String, weight: Int) async throws -> Int {
         let w = max(0, min(3, weight))

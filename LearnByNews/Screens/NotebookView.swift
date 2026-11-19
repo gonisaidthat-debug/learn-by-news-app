@@ -502,6 +502,22 @@ final class NotebookModel: ObservableObject {
             AppLog.shared.info("notebook", "weight", ["phrase": pid, "weight": "\(saved)"])
         } catch { data = d; err = error.localizedDescription }
     }
+    /// 표현 내 메모 (goni 2026-11-19 "breakout 도약이라고 해석됨"): 그 문장의 같은 글자 표현(없으면 같은 글자 아무 표현)에. 표현장에 없으면 붙이면서 쓴다
+    func setPhraseNote(_ sid: String, _ e: Expression, _ note: String) async {
+        guard var d = data else { return }
+        var p = d.phrases.first { $0.sentenceId == sid && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase }
+        if p == nil {
+            guard !note.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            do { let np = try await SyncManager.shared.savePhrase(e, sentenceId: sid, articleId: d.id, articleTitle: d.title, sentenceText: d.sentences.first { $0.id == sid }?.text); d.phrases.append(np); p = np }
+            catch { err = error.localizedDescription; return }
+        }
+        guard let pid = p?.id else { return }
+        do {
+            let saved = try await SyncManager.shared.setPhraseNote(pid, note: note)
+            if let i = d.phrases.firstIndex(where: { $0.id == pid }) { d.phrases[i].note = saved }
+            data = d
+        } catch { data = d; err = error.localizedDescription }
+    }
     func togglePhrase(_ sid: String, _ e: Expression) async {
         guard var d = data else { return }
         do {
@@ -928,7 +944,9 @@ struct NotebookView: View {
                 onDrillGraded: { ph in m.bumpDrillCount(ph) },
                 revoked: m.revokedNotes[x.id] ?? [],
                 weightOf: { e in (d.phrases.first { $0.sentenceId == x.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.stars ?? 0 },
-                onWeight: { e, w in await m.setWeight(x.id, e, w) }
+                onWeight: { e, w in await m.setWeight(x.id, e, w) },
+                noteOf: { e in (d.phrases.first { $0.sentenceId == x.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
+                onPhraseNote: { e, t in await m.setPhraseNote(x.id, e, t) }
             )
             .id(x.id)
         } else {

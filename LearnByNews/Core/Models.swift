@@ -105,11 +105,12 @@ struct Phrase: Codable, Identifiable, Hashable {
     var masteryLog: [MasteryLogEntry]?   // 찍기/떼기/자동 취소 기록(최신순, GET /api/phrases)
     var seq: Int?               // 붙인 순서 번호(1부터, 2026-11-18). 범위 재생·시험에 쓴다. 지워도 뒤 번호는 안 당겨진다
     var weight: Int?            // 중요도 별 0~3 (2026-11-19): 응용 출제에서 별 하나당 이틀 먼저, 시험은 같은 묶음 안에서 별 많은 것부터
+    var note: String?           // 표현 내 메모 (2026-11-19 "breakout 도약이라고 해석됨")
     var stars: Int { max(0, min(3, weight ?? 0)) }
     var isMastered: Bool { masteredAt != nil }
 
-    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil, seq: Int? = nil, weight: Int? = nil) {
-        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt; self.seq = seq; self.weight = weight
+    init(id: String, phrase: String, meaning: String, sentenceId: String, articleId: String, createdAt: Int64, sentenceText: String? = nil, articleTitle: String? = nil, backlinks: [Backlink]? = nil, masteredAt: Int64? = nil, seq: Int? = nil, weight: Int? = nil, note: String? = nil) {
+        self.id = id; self.phrase = phrase; self.meaning = meaning; self.sentenceId = sentenceId; self.articleId = articleId; self.createdAt = createdAt; self.sentenceText = sentenceText; self.articleTitle = articleTitle; self.backlinks = backlinks; self.masteredAt = masteredAt; self.seq = seq; self.weight = weight; self.note = note
     }
 }
 
@@ -273,6 +274,7 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
     var meaning: String
     var seq: Int?               // 붙인 순서 번호 (범위 시험용)
     var weight: Int?            // 중요도 별 0~3
+    var note: String?           // 표현 내 메모
     var masteredAt: Int64?      // 묶음(아직/습득 완료/전체)은 클라가 거른다 (2026-11-18)
     var sentenceId: String?
     var articleId: String?

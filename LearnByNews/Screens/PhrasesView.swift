@@ -12,6 +12,8 @@ struct PhrasesView: View {
     @State private var showTest = false     // 표현장 시험 (뜻 → 영어 표현)
     @State private var showTape = false     // 표현장 테이프 (읽어 주기)
     @State private var starredOnly = false  // "★ n": 별 붙은 것만
+    @State private var notingId: String?    // 메모 입력 중인 표현
+    @State private var noteText = ""
 
     private var mastered: [Phrase] { list.filter(\.isMastered) }
     /// 벽도 번호(붙인 순서) 큰 것부터. 서버의 created_at 최신순은 같은 채점에서 함께 붙은 표현들의 순서가 임의라서
@@ -63,6 +65,11 @@ struct PhrasesView: View {
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showTest) { PhraseTestView() }
+            .alert("내 메모", isPresented: Binding(get: { notingId != nil }, set: { if !$0 { notingId = nil } })) {
+                TextField("예: 도약이라고 해석됨", text: $noteText)
+                Button("저장") { if let id = notingId { Task { await note(id, noteText) } }; notingId = nil }
+                Button("취소", role: .cancel) { notingId = nil }
+            } message: { Text("비우고 저장하면 지운다") }
             .navigationDestination(isPresented: $showTape) { TapeView() }
             .task {
                 #if DEBUG
@@ -100,6 +107,7 @@ struct PhrasesView: View {
                 } else {
                     Text(p.phrase).font(Theme.hand(24)).fontWeight(.bold).foregroundStyle(Color(hex: 0x2A2412))
                     Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x5B5440))
+                    if let n = p.note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(16)).foregroundStyle(Color(hex: 0x6B5D2A)) }   // 표현 내 메모
                     Spacer(minLength: 0)
                 }
             }
@@ -123,6 +131,11 @@ struct PhrasesView: View {
                     .padding(EdgeInsets(top: 0, leading: 10, bottom: 8, trailing: 0))
             }
             .overlay(alignment: .bottomTrailing) { if done { MasteredStamp().padding(EdgeInsets(top: 0, leading: 0, bottom: 30, trailing: 10)) } }
+            // 오른쪽 아래 ✎: 표현 내 메모 쓰기/고치기
+            .overlay(alignment: .bottomTrailing) {
+                Button { noteText = p.note ?? ""; notingId = p.id } label: { Text("✎\u{FE0E}").font(Theme.hand(18)).foregroundStyle(Theme.pencil).padding(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)) }
+                    .buttonStyle(.plain).accessibilityLabel("내 메모")
+            }
             .shadow(color: .black.opacity(0.15), radius: 2, x: 1, y: 2)
             .rotationEffect(.degrees(Double((i * 7) % 5) - 2))
         }
@@ -142,6 +155,13 @@ struct PhrasesView: View {
         case "unmastered": return "↻\u{FE0E} 도장 뗌 · \(d)"
         default: return "⟲\u{FE0E} 취소 · \((e.note ?? "").isEmpty ? "" : (e.note! + " · "))\(d)"
         }
+    }
+    /// 표현 내 메모 (빈 값 = 지움)
+    private func note(_ id: String, _ text: String) async {
+        do {
+            let saved = try await SyncManager.shared.setPhraseNote(id, note: text)
+            if let i = list.firstIndex(where: { $0.id == id }) { list[i].note = saved }
+        } catch { err = error.localizedDescription }
     }
     /// 중요도 별 0~3
     private func weight(_ p: Phrase, _ w: Int) async {

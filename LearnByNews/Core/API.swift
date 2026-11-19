@@ -158,6 +158,10 @@ final class API {
     func deletePhrase(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/phrases/\(id)") }
     /// 표현장 시험 카드: 습득 완료 아닌 표현 전부 + 기록(last_correct·tries·wrong)
     func phraseTest() async throws -> [PhraseTestItem] { try await send("GET", "/api/phrases/test") }
+    struct PhraseNoteBody: Encodable { var note: String }
+    struct PhraseNoted: Decodable { var ok: Bool; var id: String; var note: String? }
+    /// 표현 내 메모 (빈 문자열 → null)
+    func setPhraseNote(_ id: String, note: String) async throws -> PhraseNoted { try await send("PUT", "/api/phrases/\(id)/note", body: PhraseNoteBody(note: note)) }
     struct WeightBody: Encodable { var weight: Int }
     struct Weighted: Decodable { var ok: Bool; var id: String; var weight: Int }
     /// 중요도 별 0~3 (범위 밖은 서버가 잘라 저장). 응용 출제에서 별 하나당 이틀 먼저 돌아온다
