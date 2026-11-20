@@ -713,6 +713,7 @@ struct TryBox: View {
     var onAnswerDrill: ((Drill, String) async throws -> Drill?)?   // nil = 큐에 들어감(연결되면 채점)
     var onClose: () -> Void
     var onGraded: (() -> Void)? = nil
+    @ObservedObject private var session = SessionModel.shared   // 공부 시작 전엔 입력란 대신 StartGate
     @State private var answer = ""
     @State private var result: Drill?
     @State private var prompt: Drill?       // "문제 내줘"로 받은 한국어 문장
@@ -750,6 +751,8 @@ struct TryBox: View {
             } else if queued {
                 HStack(spacing: 10) { Stamp(kind: .waiting, small: true); Text(answer).koLine() }
                 Text("연결되면 채점").pencil(size: 20)
+            } else if !session.inSession {
+                StartGate { focused = true }
             } else {
                 TextField("영어로 쓴다", text: $answer, axis: .vertical)
                     .font(Theme.hand(22)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
@@ -821,7 +824,7 @@ struct TryBox: View {
             await loadPast()
             #if DEBUG
             // 화면 확인용: LBN_AUTOTRY=<문장 id>로 상자가 열렸으면 문장을 넣고 바로 제출한다 (채점 중·멈추기 확인용)
-            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil, result == nil, !busy {
+            if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil, result == nil, !busy, session.inSession {   // 공부 시작 전(StartGate)이면 상자만 연다
                 answer = "She will set out a plan for the new policy."
                 if ProcessInfo.processInfo.environment["LBN_AUTOSTOP"] == "1" { Task { try? await Task.sleep(for: .seconds(2)); stop() } }   // 2초 뒤 멈추기까지
                 await submit()

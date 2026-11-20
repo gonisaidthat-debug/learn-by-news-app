@@ -178,6 +178,7 @@ struct PhraseTestView: View {
     @EnvironmentObject var router: Router
     @Environment(\.dismiss) private var dismiss
     @StateObject private var m = PhraseTestModel()
+    @ObservedObject private var session = SessionModel.shared   // 고급(문장 쓰기, 세션에 셈)은 공부 시작 전엔 StartGate
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -300,7 +301,9 @@ struct PhraseTestView: View {
                     if m.hint, m.revealed == nil { (Text("표현 ").font(Theme.hand(17)) + Text(it.phrase).fontWeight(.bold)).pencil() }
                 }
                 // 입력 / 결과
-                if m.revealed == nil {
+                if m.revealed == nil, m.mode == .advanced, !session.inSession {
+                    StartGate { focused = true }
+                } else if m.revealed == nil {
                     TextField(m.mode == .meaning ? "한국어로 쓰고 Enter" : m.grading ? "채점 중…" : "영어로 쓰고 Enter", text: $m.answer, axis: .vertical)
                         .font(Theme.hand(22)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
                         .modifier(RuledText(uiFont: Theme.handUI(22), lh: Theme.lh))

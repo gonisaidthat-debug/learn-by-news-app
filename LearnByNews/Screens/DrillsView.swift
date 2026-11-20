@@ -143,6 +143,7 @@ struct DrillsView: View {
     @StateObject private var m = DrillsModel()
     @ObservedObject private var store = DrillStore.shared
     @ObservedObject private var net = Connectivity.shared
+    @ObservedObject private var session = SessionModel.shared   // 공부 시작 전엔 답 입력란 대신 StartGate
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -245,6 +246,8 @@ struct DrillsView: View {
                 if m.pendingCurrent {
                     Text(d.answer ?? "").koLine()
                     Text("연결되면 채점 · 큐에 저장됨").pencil(size: 20)
+                } else if fb == nil, !session.inSession {
+                    StartGate { focused = true }
                 } else if fb == nil {
                     TextField(m.grading ? "채점 중…" : "영어로 쓴다", text: $m.answer, axis: .vertical)
                         .font(Theme.hand(22)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)

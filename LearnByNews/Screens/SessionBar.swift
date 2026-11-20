@@ -221,6 +221,18 @@ extension View {
 }
 
 /// 세션 총평 세 줄: summary(빨간 펜) · "✓ keep"(초록) · "→ next"(연필). 없으면 실패 이유 + 다시 시도 / 연결되면 받는다
+/// 공부 시작 전 입력란 자리 (goni 2026-11-20 "응용 문장 덧붙였는데 원래 공부 시작돼야 가능한 거 아니었나"):
+/// 세션에 세는 쓰기(번역·써 보기 상자·응용 탭 답·표현장 시험 고급)는 시작 전엔 이 줄. 누르면 바로 시작하고 입력란으로 바뀐다.
+/// 시험지·표현장 시험 기본/뜻 쓰기(스스로 채점, 세션에 안 셈)는 막지 않는다
+struct StartGate: View {
+    var onStart: (() -> Void)? = nil
+    var body: some View {
+        Button { SessionModel.shared.begin(); onStart?() } label: {
+            Text("공부 시작 ▶\u{FE0E} 을 누르면 여기에 쓸 수 있다").redpen()
+        }.buttonStyle(.plain)
+    }
+}
+
 /// 세션 총평 줄. articleTitle이 있으면(공책 ✂ 줄) 그 기사 몫(by_article)을 빨간 펜으로 앞세우고 전체는 "이 시간 전체: …" 한 줄로 접는다.
 /// 없으면(홈 기록·기록 탭·StudyDot 패널) 전체 summary → 기사별 줄(제목 점선 밑줄 + summary + → next) → ✓ keep → → next (goni 2026-11-20)
 struct SessionReviewLines: View {
