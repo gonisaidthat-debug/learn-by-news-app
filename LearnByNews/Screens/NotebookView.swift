@@ -1052,12 +1052,16 @@ struct PhraseRef: Identifiable { var id: String }
 struct SessionMark: View {
     var session: StudySession
     var compact = false     // 응용 탭 최근 응용 목록용: 공책 여백 없이, 조금 작게
+    var onLog: (() -> Void)? = nil   // 있으면 줄 끝에 "기록 ↗"(기록 탭으로; 총평은 거기서) — 웹 70ff71a와 같음
     var body: some View {
         ZStack(alignment: .trailing) {
             Line().stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4])).foregroundStyle(Theme.red.opacity(0.55)).frame(height: 2)
-            Text("✂\u{FE0E} 여기까지 · \(session.line)")
-                .font(Theme.hand(compact ? 17 : 19)).foregroundStyle(Theme.red).lineLimit(1)
-                .padding(.horizontal, 8).background(Theme.paper)
+            HStack(spacing: 8) {
+                Text("✂\u{FE0E} 여기까지 · \(session.line)")
+                    .font(Theme.hand(compact ? 17 : 19)).foregroundStyle(Theme.red).lineLimit(1).minimumScaleFactor(onLog == nil ? 1 : 0.7)   // "기록 ↗" 자리만큼 줄여 점수까지 한 줄에
+                if let onLog { Tiny(title: "기록 ↗\u{FE0E}", size: compact ? 16 : 18, action: onLog) }
+            }
+            .padding(.horizontal, 8).background(Theme.paper)
         }
         .frame(height: compact ? 28 : Theme.lh)
         .padding(.leading, compact ? 0 : Theme.paperLeft).padding(.trailing, compact ? 0 : Theme.paperRight)

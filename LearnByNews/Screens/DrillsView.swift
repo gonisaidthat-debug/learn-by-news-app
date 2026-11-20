@@ -144,6 +144,7 @@ struct DrillsView: View {
     @ObservedObject private var store = DrillStore.shared
     @ObservedObject private var net = Connectivity.shared
     @ObservedObject private var session = SessionModel.shared   // 공부 시작 전엔 답 입력란 대신 StartGate
+    @EnvironmentObject private var router: Router               // ✂ 줄 "기록 ↗" → 기록 탭
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -315,7 +316,7 @@ struct DrillsView: View {
         }
         return out
     }
-    /// 최근 응용 20개: 작은 도장 · 표현 · 한국어 · 내 영작. 세션의 마지막 응용 위에 "✂ 여기까지" + 총평(compact)
+    /// 최근 응용 20개: 작은 도장 · 표현 · 한국어 · 내 영작. 세션의 마지막 응용 위에 "✂ 여기까지" 경계 줄만(총평은 기록 탭에 — goni 2026-11-20 "응용 탭에는 총평이 필요 없지 않을까", 줄 끝 "기록 ↗")
     private var recentList: some View {
         let marks = recentMarks
         return VStack(alignment: .leading, spacing: 6) {
@@ -323,9 +324,9 @@ struct DrillsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(m.recent) { d in
                     if let s = marks[d.id] {
-                        VStack(alignment: .leading, spacing: 2) {
-                            SessionMark(session: s, compact: true)
-                            if s.review != nil || s.id.hasPrefix("local-") { SessionReviewLines(session: s, size: 15, retrying: session.retrying) { Task { await session.retryReview(s) } } }
+                        SessionMark(session: s, compact: true) {
+                            UserDefaults.standard.set(false, forKey: "lbn_log_structures")   // 날짜 보기로
+                            router.tab = .log
                         }
                         .padding(.horizontal, 16).padding(.vertical, 4)
                         .background(Theme.paper)   // 괘선 위에 덮어 글이 줄에 안 겹치게
@@ -359,7 +360,7 @@ private extension View {
         ScrollViewReader { proxy in
             self.task {
                 #if DEBUG
-                if ProcessInfo.processInfo.environment["LBN_AUTOSCROLL"] == "1" { try? await Task.sleep(for: .seconds(12)); proxy.scrollTo("recent-end", anchor: .bottom) }
+                if ProcessInfo.processInfo.environment["LBN_AUTOSCROLL"] == "1" { try? await Task.sleep(for: .seconds(12)); SessionModel.shared.msg = nil; try? await Task.sleep(for: .seconds(1)); proxy.scrollTo("recent-end", anchor: .bottom) }   // 패널 닫고(목록을 가림) 스크롤
                 #endif
             }
         }
