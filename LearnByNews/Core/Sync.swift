@@ -193,6 +193,10 @@ final class SyncManager: ObservableObject {
                 case "phrase_note":
                     let b = try JSONDecoder.api.decode(PhraseNoteOp.self, from: op.payload)
                     _ = try await API.shared.setPhraseNote(real(b.id), note: b.note)
+                case "qa_marks":
+                    let b = try JSONDecoder.api.decode(QAMarksOp.self, from: op.payload)
+                    let r = try await API.shared.setQAMarks(b.sentenceId, qid: b.qid, marks: b.marks)
+                    StructureStore.shared.setMarks(b.sentenceId, b.qid, r)
                 case "pass_put":
                     let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
                     try await API.shared.putPass(b.articleId, done: b.done ?? [])
@@ -509,6 +513,19 @@ final class SyncManager: ObservableObject {
         StructureStore.shared.addQA(sentenceId, q)
         AppLog.shared.info("structure", "asked", ["sentence": sentenceId, "id": q.id])
         return q
+    }
+    struct QAMarksOp: Codable { var sentenceId: String; var qid: String; var marks: [String] }
+    /// 답에 밑줄: 기기 저장본에 먼저, 온라인이면 PUT, 아니면 큐 qa_marks(목록 통째라 마지막 것만 남겨도 된다)
+    func setQAMarks(sentenceId: String, qid: String, marks: [String]) async throws -> [String] {
+        let m = Array(marks.prefix(50))
+        StructureStore.shared.setMarks(sentenceId, qid, m)
+        if Connectivity.shared.isOnline {
+            do { let r = try await API.shared.setQAMarks(sentenceId, qid: qid, marks: m); StructureStore.shared.setMarks(sentenceId, qid, r); return r }
+            catch let e as APIError where e.isNetwork { /* 큐로 */ }
+        }
+        for op in Cache.shared.pending(kind: "qa_marks") { if let b = try? JSONDecoder.api.decode(QAMarksOp.self, from: op.payload), b.qid == qid { Cache.shared.removePending(id: op.id) } }
+        Cache.shared.enqueue("qa_marks", QAMarksOp(sentenceId: sentenceId, qid: qid, marks: m)); refreshCounts()
+        return m
     }
     func deleteSentenceQA(sentenceId: String, qid: String) async throws {
         guard Connectivity.shared.isOnline else { throw APIError.network("연결되면 지울 수 있다") }

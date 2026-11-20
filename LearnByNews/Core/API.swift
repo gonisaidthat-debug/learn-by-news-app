@@ -166,6 +166,10 @@ final class API {
     struct QuestionBody: Encodable { var question: String }
     /// 구조 상자 안 질문(2026-11-20): 서버가 문장·분석·최신 번역·첨삭·이전 문답을 맥락으로 Claude 5~10초(하루 상한에 셈). 400 빈 질문, 404, 429
     func askSentence(_ sentenceId: String, question: String) async throws -> SentenceQA { try await send("POST", "/api/sentences/\(sentenceId)/qa", body: QuestionBody(question: question)) }
+    struct MarksBody: Encodable { var marks: [String] }
+    struct Marked: Decodable { var ok: Bool; var marks: [String] }
+    /// 답에 밑줄(2026-11-20): 고른 글자 목록을 통째로(최대 50). 404 없는 문답
+    func setQAMarks(_ sentenceId: String, qid: String, marks: [String]) async throws -> [String] { let r: Marked = try await send("PUT", "/api/sentences/\(sentenceId)/qa/\(qid)/marks", body: MarksBody(marks: marks)); return r.marks }
     func deleteSentenceQA(_ sentenceId: String, qid: String) async throws { let _: OK = try await send("DELETE", "/api/sentences/\(sentenceId)/qa/\(qid)") }
     struct PhraseNoteBody: Encodable { var note: String }
     struct PhraseNoted: Decodable { var ok: Bool; var id: String; var note: String? }

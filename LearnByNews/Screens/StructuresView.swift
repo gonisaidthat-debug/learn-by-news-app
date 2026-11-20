@@ -53,6 +53,10 @@ final class StructuresModel: ObservableObject {
         full[sid]?.qa = (full[sid]?.qa ?? []) + [r]
         if let i = list?.firstIndex(where: { $0.sentenceId == sid }) { list?[i].qaCount += 1 }
     }
+    func setMarks(_ sid: String, _ qid: String, _ marks: [String]) async throws {
+        let r = try await SyncManager.shared.setQAMarks(sentenceId: sid, qid: qid, marks: marks)
+        if let i = full[sid]?.qa?.firstIndex(where: { $0.id == qid }) { full[sid]?.qa?[i].marks = r }
+    }
     func deleteQA(_ sid: String, _ qid: String) async throws {
         try await SyncManager.shared.deleteSentenceQA(sentenceId: sid, qid: qid)
         full[sid]?.qa = (full[sid]?.qa ?? []).filter { $0.id != qid }
@@ -119,7 +123,8 @@ struct StructuresSection: View {
             }
             if isOpen, let st = m.full[it.sentenceId] {
                 StructureView(st: st, busy: m.busy == it.sentenceId, onAgain: { Task { await m.toggle(it, force: true) } }, onClose: { m.open = nil },
-                              onAsk: { q in try await m.ask(it.sentenceId, q) }, onDeleteQA: { qid in try await m.deleteQA(it.sentenceId, qid) })
+                              onAsk: { q in try await m.ask(it.sentenceId, q) }, onDeleteQA: { qid in try await m.deleteQA(it.sentenceId, qid) },
+                              onMarks: { qid, ms in try await m.setMarks(it.sentenceId, qid, ms) })
                     .padding(.vertical, 4)
             }
         }

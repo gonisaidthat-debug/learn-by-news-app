@@ -26,7 +26,7 @@ struct Structure: Codable, Equatable {
 }
 
 /// 구조 상자 안 질문·답 (goni 2026-11-20 "그 컨텍스트에 대해 추가로 질문하고 답변도 볼 수 있게"). `POST /api/sentences/:id/ask {question}` 응답
-struct SentenceQA: Codable, Equatable, Identifiable { var id: String; var question: String; var answer: String; var createdAt: Int64? }
+struct SentenceQA: Codable, Equatable, Identifiable { var id: String; var question: String; var answer: String; var createdAt: Int64?; var marks: [String]? }
 
 /// 받은 분석의 기기 저장본(문장 id별, UserDefaults). 오프라인에서는 이것만 보여 주고, 없으면 "연결되면 분석" —
 /// 큐에 넣지 않는다(결과를 바로 봐야 의미가 있다, goni 2026-11-20)
@@ -43,6 +43,7 @@ final class StructureStore {
     func remove(_ sentenceId: String) { map[sentenceId] = nil; save() }
     /// 문답을 저장본에 더하기 / 빼기 (서버가 받아 준 뒤)
     func addQA(_ sentenceId: String, _ q: SentenceQA) { guard var s = map[sentenceId] else { return }; s.qa = (s.qa ?? []) + [q]; map[sentenceId] = s; save() }
+    func setMarks(_ sentenceId: String, _ qid: String, _ marks: [String]) { guard var s = map[sentenceId], let i = s.qa?.firstIndex(where: { $0.id == qid }) else { return }; s.qa?[i].marks = marks; map[sentenceId] = s; save() }
     func removeQA(_ sentenceId: String, _ qid: String) { guard var s = map[sentenceId] else { return }; s.qa = (s.qa ?? []).filter { $0.id != qid }; map[sentenceId] = s; save() }
     private func save() { UserDefaults.standard.set(try? JSONEncoder.api.encode(map), forKey: Self.key) }
 }

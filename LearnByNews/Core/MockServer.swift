@@ -167,7 +167,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test", "weight", "note", "structure", "qa", "structures"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test", "weight", "note", "structure", "qa", "structures", "marks"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -319,7 +319,7 @@ struct MockState {
                     let t = sentences.first { $0["id"] as? String == sid }?["text"] as? String ?? ""
                     structures[sid] = ["skeleton": "주어(\(t.split(separator: " ").prefix(2).joined(separator: " "))) + 동사 + 목적어 — 뒤에 때를 나타내는 전치사구", "chunks": [], "reading": "주어와 동사를 먼저 잡는다.", "pitfalls": [], "mine": "", "created_at": Date().ms - Int64(i) * 86_400_000, "cached": true]
                 }
-                sentenceQA.append(["id": nextId("q"), "sentence_id": "s1", "question": "왜 on인가?", "answer": "(모의) 요일 앞에는 on을 쓴다.", "created_at": Date().ms])
+                sentenceQA.append(["id": nextId("q"), "sentence_id": "s1", "question": "왜 on인가?", "answer": "(모의) 요일 앞에는 **on**을 쓴다.", "created_at": Date().ms, "marks": ["요일 앞에는"]])
             }
             let rows: [[String: Any]] = structures.compactMap { (sid, st) in
                 guard let s = sentences.first(where: { $0["id"] as? String == sid }) else { return nil }
@@ -377,6 +377,12 @@ struct MockState {
             ]
             structures[id] = o
             return (200, qaOf(o))
+        case "PUT /api/sentences/:id/qa/:id/marks":
+            let qid = parts.count > 4 ? parts[4] : ""
+            guard let i = sentenceQA.firstIndex(where: { $0["id"] as? String == qid && $0["sentence_id"] as? String == id }) else { return (404, ["error": "없는 문답"]) }
+            let ms = Array(((body["marks"] as? [String]) ?? []).prefix(50))
+            sentenceQA[i]["marks"] = ms
+            return (200, ["ok": true, "marks": ms])
         case "DELETE /api/sentences/:id/qa/:id":
             let qid = parts.last ?? ""
             sentenceQA.removeAll { $0["id"] as? String == qid && $0["sentence_id"] as? String == id }
@@ -575,7 +581,7 @@ struct MockState {
             guard sentences.contains(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
             let q = (body["question"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !q.isEmpty else { return (400, ["error": "질문을 입력하세요"]) }
-            let row: [String: Any] = ["id": nextId("q"), "sentence_id": id, "question": q, "answer": "(모의) \(q)\n이 문장에서는 주어 뒤 동사구가 핵심이고, 마지막 전치사구는 때를 나타낸다.", "created_at": Date().ms]
+            let row: [String: Any] = ["id": nextId("q"), "sentence_id": id, "question": q, "answer": "(모의) \(q)\n이 문장에서는 **주어 뒤 동사구**가 핵심이고, 마지막 전치사구는 때를 나타낸다.", "created_at": Date().ms, "marks": ["마지막 전치사구는"]]   // 화면 확인용 밑줄 하나
             sentenceQA.append(row)
             return (200, row)
         case "POST /api/sentences/:id/ask":

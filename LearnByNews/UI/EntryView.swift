@@ -338,7 +338,11 @@ struct EntryView: View {
             if structOpen, let st = structure {
                 StructureView(st: st, busy: structBusy, onAgain: { loadStructure(force: true) }, onClose: { structOpen = false },
                               onAsk: onAskSentence == nil ? nil : { q in let r = try await onAskSentence!(q); structure?.qa = (structure?.qa ?? []) + [r] },
-                              onDeleteQA: onDeleteQA == nil ? nil : { qid in try await onDeleteQA!(qid); structure?.qa = (structure?.qa ?? []).filter { $0.id != qid } })
+                              onDeleteQA: onDeleteQA == nil ? nil : { qid in try await onDeleteQA!(qid); structure?.qa = (structure?.qa ?? []).filter { $0.id != qid } },
+                              onMarks: { qid, ms in
+                                  let r = try await SyncManager.shared.setQAMarks(sentenceId: s.id, qid: qid, marks: ms)
+                                  if let i = structure?.qa?.firstIndex(where: { $0.id == qid }) { structure?.qa?[i].marks = r }
+                              })
                     .padding(.vertical, 4)
             }
         }
@@ -388,6 +392,7 @@ struct StructureView: View {
     var onClose: (() -> Void)? = nil                       // 오른쪽 위 × 접기 (동작 줄 "구조 접기"와 같다)
     var onAsk: ((String) async throws -> Void)? = nil      // 상자 맨 아래 입력란 → 서버 → 문답이 목록에 붙는다
     var onDeleteQA: ((String) async throws -> Void)? = nil
+    var onMarks: ((String, [String]) async throws -> Void)? = nil   // 답에 밑줄 (qid, 목록 통째)
     @ObservedObject private var net = Connectivity.shared
     @State private var question = ""
     @State private var asking = false
@@ -431,7 +436,7 @@ struct StructureView: View {
                                 Spacer(minLength: 0)
                                 if let onDeleteQA { Tiny(title: "×", size: 18) { Task { do { try await onDeleteQA(x.id) } catch { askErr = error.localizedDescription } } }.help("이 문답 지우기") }
                             }
-                            Text(x.answer).font(Theme.hand(18)).foregroundStyle(Theme.pencil).fixedSize(horizontal: false, vertical: true)
+                            QAAnswerView(answer: x.answer, marks: x.marks ?? [], onSet: onMarks == nil ? nil : { ms in Task { do { try await onMarks?(x.id, ms) } catch { askErr = error.localizedDescription } } })
                         }
                     }
                 }
