@@ -104,6 +104,9 @@ struct ActivityLogView: View {
     @State private var days = 60
     @State private var open: Set<String> = []
     @AppStorage("lbn_log_mode") private var byArticle = false
+    /// "구조" 세그먼트(2026-11-20): 구조 분석한 문장만 모아 보기. 탭 바가 5개라 기록 탭 안에 둔다
+    @AppStorage("lbn_log_structures") private var showStructures = false
+    @StateObject private var structs = StructuresModel()
     @State private var collapsed: Set<String> = []     // 기사 보기에서 접은 기사
     @State private var expanded: Set<String> = []      // 기사 보기에서 펼친 기사 (기본: 최근 2개)
 
@@ -116,18 +119,25 @@ struct ActivityLogView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    NotebookHead(tab: byArticle ? "\(articles.count)기사" : "\(groups.count)일") {
+                    NotebookHead(tab: showStructures ? "\(structs.items.count)문장" : byArticle ? "\(articles.count)기사" : "\(groups.count)일") {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 14) {
                                 Text("기록")
                                 HStack(spacing: 10) {
-                                    Tiny(title: "날짜", color: byArticle ? Theme.pencil : Theme.ink, size: 19) { byArticle = false }
-                                        .overlay(alignment: .bottom) { if !byArticle { Rectangle().fill(Theme.red).frame(height: 2) } }
-                                    Tiny(title: "기사", color: byArticle ? Theme.ink : Theme.pencil, size: 19) { byArticle = true }
-                                        .overlay(alignment: .bottom) { if byArticle { Rectangle().fill(Theme.red).frame(height: 2) } }
+                                    Tiny(title: "날짜", color: !showStructures && !byArticle ? Theme.ink : Theme.pencil, size: 19) { byArticle = false; showStructures = false }
+                                        .overlay(alignment: .bottom) { if !showStructures && !byArticle { Rectangle().fill(Theme.red).frame(height: 2) } }
+                                    Tiny(title: "기사", color: !showStructures && byArticle ? Theme.ink : Theme.pencil, size: 19) { byArticle = true; showStructures = false }
+                                        .overlay(alignment: .bottom) { if !showStructures && byArticle { Rectangle().fill(Theme.red).frame(height: 2) } }
+                                    Tiny(title: "구조", color: showStructures ? Theme.ink : Theme.pencil, size: 19) { showStructures = true }
+                                        .overlay(alignment: .bottom) { if showStructures { Rectangle().fill(Theme.red).frame(height: 2) } }
                                 }
                             }
-                            if byArticle {
+                            if showStructures {
+                                HStack(spacing: 10) {
+                                    Tiny(title: "최근 순", color: structs.byArticle ? Theme.pencil : Theme.ink, size: 17) { structs.byArticle = false }
+                                    Tiny(title: "기사별", color: structs.byArticle ? Theme.ink : Theme.pencil, size: 17) { structs.byArticle = true }
+                                }
+                            } else if byArticle {
                                 Text("최근 1년 · 문장 순서대로, 같은 문장을 쓴 차례대로").font(Theme.hand(17)).foregroundStyle(Theme.pencil)
                             } else {
                                 HStack(spacing: 10) {
@@ -140,7 +150,8 @@ struct ActivityLogView: View {
                         }
                     }
                     Paper {
-                        if let err { Entry { ErrorText(message: err) } }
+                        if showStructures { StructuresSection(m: structs) }
+                        else if let err { Entry { ErrorText(message: err) } }
                         else if log == nil { Entry { Text("…").pencil() } }
                         else if let log {
                             // 맨 위: 요약 한 줄 + 추이 그래프
@@ -167,7 +178,7 @@ struct ActivityLogView: View {
                                 }
                             }
                         }
-                        MutedText(text: byArticle ? "최근 1년 · 문장 순서대로, 같은 문장을 쓴 차례대로" : "최근 \(days)일").frame(height: Theme.lh).padding(.top, Theme.lh).padding(.leading, Theme.paperLeft)
+                        MutedText(text: showStructures ? "구조 분석한 문장 · 최근 분석 순" : byArticle ? "최근 1년 · 문장 순서대로, 같은 문장을 쓴 차례대로" : "최근 \(days)일").frame(height: Theme.lh).padding(.top, Theme.lh).padding(.leading, Theme.paperLeft)
                     }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
@@ -176,6 +187,7 @@ struct ActivityLogView: View {
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .task(id: span) { await load() }
+            .task(id: showStructures) { if showStructures { await structs.load() } }
             .refreshable { await load() }
         }
     }

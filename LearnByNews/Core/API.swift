@@ -161,6 +161,8 @@ final class API {
     struct StructureBody: Encodable { var force: Bool }
     /// 문장 구조 분석(2026-11-20): 저장본이 있으면 즉시(cached true), 없거나 force면 Claude 5~10초(하루 상한에 셈). 404 없는 문장, 429 상한
     func structure(_ sentenceId: String, force: Bool) async throws -> Structure { try await send("POST", "/api/sentences/\(sentenceId)/structure", body: StructureBody(force: force)) }
+    /// 구조 분석 모아보기(2026-11-20): 분석한 문장 전부, 최근 분석 순(최대 1000). 본문은 structure(저장본)
+    func structures() async throws -> [StructureItem] { try await send("GET", "/api/structures") }
     struct QuestionBody: Encodable { var question: String }
     /// 구조 상자 안 질문(2026-11-20): 서버가 문장·분석·최신 번역·첨삭·이전 문답을 맥락으로 Claude 5~10초(하루 상한에 셈). 400 빈 질문, 404, 429
     func askSentence(_ sentenceId: String, question: String) async throws -> SentenceQA { try await send("POST", "/api/sentences/\(sentenceId)/qa", body: QuestionBody(question: question)) }

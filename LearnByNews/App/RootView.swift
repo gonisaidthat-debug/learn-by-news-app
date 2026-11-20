@@ -128,7 +128,7 @@ final class Router: ObservableObject {
 
     init() {
         #if DEBUG
-        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | restart:a2 | phrases | quiz | drills | log | settings
+        // 화면 확인용: LBN_ROUTE=notebook:a1 | notebook:a1:s2 | done:a2 | restart:a2 | phrases | quiz | drills | log | structures | settings
         if ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" { SessionStore.start = Date().ms - 600_000; SessionModel.shared.start = SessionStore.start }
         if let r = ProcessInfo.processInfo.environment["LBN_ROUTE"] {
             let p = r.split(separator: ":").map(String.init)
@@ -141,6 +141,7 @@ final class Router: ObservableObject {
             case "quiz": tab = .quiz
             case "drills": tab = .drills
             case "log": tab = .log
+            case "structures": tab = .log; UserDefaults.standard.set(true, forKey: "lbn_log_structures")
             case "settings": showSettings = true
             default: break
             }
