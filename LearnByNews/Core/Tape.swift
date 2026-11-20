@@ -15,6 +15,8 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     @Published private(set) var index = 0
     @Published private(set) var playing = false
     @Published private(set) var step = 0            // 지금 읽는 단계: 0..<repeats 표현, repeats 뜻, repeats+1 원문
+    /// 한 번 읽기(🔊)로 지금 읽고 있는 글 (goni 2026-11-20 "바로 멈출 수도 있게": 버튼이 "멈춤 ■"로 바뀌고 누르면 즉시 멈춤). nil이면 안 읽는 중
+    @Published private(set) var speakingOnce: String?
     @Published var err: String?
     // 설정 (기억)
     @Published var bucket: Bucket = Bucket(rawValue: UserDefaults.standard.string(forKey: "lbn_tape_bucket") ?? "") ?? .pending { didSet { UserDefaults.standard.set(bucket.rawValue, forKey: "lbn_tape_bucket") } }
@@ -100,9 +102,18 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         synth.stopSpeaking(at: .immediate)
         activateSession()
         let u = AVSpeechUtterance(string: phrase); u.voice = enVoice; u.rate = AVSpeechUtteranceDefaultSpeechRate * Float(rate)
+        speakingOnce = phrase
         synth.speak(u)
         AppLog.shared.info("tape", "speak once", ["phrase": phrase])
     }
+    /// 한 번 읽기 즉시 멈춤 ("멈춤 ■")
+    func stopOnce() {
+        guard speakingOnce != nil else { return }
+        synth.stopSpeaking(at: .immediate)
+        speakingOnce = nil
+    }
+    /// 🔊 토글: 그 글을 읽는 중이면 멈추고, 아니면(다른 걸 읽는 중이어도) 끊고 그것을 읽는다
+    func toggleOnce(_ text: String) { speakingOnce == text ? stopOnce() : speakOnce(phrase: text) }
     /// 표현장 포스트잇 ▶: 묶음 전체·범위 없음·최근 순으로 두고 그 표현부터 바로 재생 (goni 2026-11-19)
     func startFrom(_ p: Phrase) {
         stop(); bucket = .all; range = nil; order = .recent; minStars = 0
@@ -125,6 +136,7 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         playing = false
         gapTask?.cancel(); gapTask = nil
         synth.stopSpeaking(at: .immediate)
+        speakingOnce = nil
         updateNowPlaying()
     }
     func toggle() { playing ? pause() : play() }
@@ -162,8 +174,12 @@ final class TapePlayer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             then()
         }
     }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in if self.speakingOnce == utterance.speechString { self.speakingOnce = nil } }
+    }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            if self.speakingOnce == utterance.speechString { self.speakingOnce = nil }
             guard self.playing else { return }
             self.step += 1
             // 표현 반복 사이는 짧게, 뜻·원문 뒤는 설정한 사이

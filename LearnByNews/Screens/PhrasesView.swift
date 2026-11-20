@@ -147,8 +147,7 @@ struct PhrasesView: View {
             // 오른쪽 아래: 🔊 한 번 읽기 · ▶ 테이프를 여기부터 · ✎ 내 메모
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 2) {
-                    Button { TapePlayer.shared.speakOnce(phrase: p.phrase) } label: { Text("🔊").font(.system(size: 14)).padding(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 4)) }
-                        .buttonStyle(.plain).accessibilityLabel("읽어 주기")
+                    SpeakIcon(text: p.phrase, size: 14, padding: EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 4))
                     Button { TapePlayer.shared.startFrom(p); showTape = true } label: { Text("▶\u{FE0E}").font(.system(size: 13)).foregroundStyle(Theme.red).padding(EdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4)) }
                         .buttonStyle(.plain).accessibilityLabel("테이프를 여기부터")
                     Button { noteText = p.note ?? ""; notingId = p.id } label: { Text("✎\u{FE0E}").font(Theme.hand(18)).foregroundStyle(Theme.pencil).padding(EdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 10)) }

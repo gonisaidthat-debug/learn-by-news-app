@@ -162,7 +162,7 @@ struct EntryView: View {
                                onRelated: onRelated, onAddLink: onAddLink, onRemoveLink: onRemoveLink, onOpenSentence: onOpenSentence,
                                stars: weightOf?(he) ?? 0, onStars: onWeight == nil ? nil : { w in Task { await onWeight?(he, w) } },
                                onOpen: onOpenPhrases == nil ? nil : phraseId(he).flatMap { pid in SyncManager.isTemp(pid) ? nil : { onOpenPhrases?(pid) } },
-                               onSpeak: { speak(he) })
+                               speakText: he.phrase)
                 }
             }
             if fb.grade == .skip {
@@ -231,7 +231,6 @@ struct EntryView: View {
 
     /// 표현장 ↗ 대상: 그 문장의 같은 글자 표현(없으면 공책의 같은 글자 아무 표현)
     private func phraseId(_ e: Expression) -> String? { savedPhrases.first { $0.phrase == e.phrase }?.id }
-    private func speak(_ e: Expression) { TapePlayer.shared.speakOnce(phrase: e.phrase) }   // 영어만 (goni "소리는 영어만")
     /// 붙여 둔 표현의 "↗ 엮은 것"(풀기 ×) · "← 다시 본 곳" 줄 (형광펜과 같은 줄)
     @ViewBuilder
     private func phraseLinkLines(_ sp: Phrase) -> some View {
@@ -279,7 +278,7 @@ struct EntryView: View {
                     }
                     if onPhraseNote != nil, !onSticky { Tiny(title: (noteOf?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { notingPhrase = notingPhrase == src ? nil : src } }
                     if !onSticky, let onOpenPhrases, let pid = phraseId(e), !SyncManager.isTemp(pid) { Tiny(title: "표현장 ↗\u{FE0E}", size: 17) { onOpenPhrases(pid) } }
-                    if !onSticky { Button { speak(e) } label: { Text("🔊").font(.system(size: 13)) }.buttonStyle(.plain).accessibilityLabel("읽어 주기") }
+                    if !onSticky { SpeakIcon(text: e.phrase) }
                     if let onWeight { StarRow(stars: weightOf?(e) ?? 0, size: 13) { w in Task { await onWeight(e, w) } } }   // 중요도 별
                 }
                 .frame(minHeight: Theme.lh)
@@ -358,7 +357,7 @@ struct EntryView: View {
                       onNote: onPhraseNote == nil ? nil : { e in notingPhrase = notingPhrase == e.phrase ? nil : e.phrase },
                       onSaveNote: onPhraseNote == nil ? nil : { e, t in Task { await onPhraseNote?(e, t) }; notingPhrase = nil },
                       onOpen: onOpenPhrases == nil ? nil : { e in if let pid = phraseId(e), !SyncManager.isTemp(pid) { onOpenPhrases?(pid) } },
-                      onSpeak: { e in speak(e) })
+                      onSpeak: { _ in })   // 🔊는 SpeakIcon이 스스로 토글(있음 표시만)
             // 포스트잇 쪽 "엮기"가 열려 있으면 후보 칩은 포스트잇 줄 아래에
             if let id = linkingPhrase, let sp = savedPhrases.first(where: { $0.id == id }), fb.expressions.contains(where: { $0.phrase == sp.phrase }) { phraseLinkPicker(sp) }
         }
@@ -528,7 +527,7 @@ struct StickyRow: View {
                             if saved, let onLink { Tiny(title: linkLabel?(e) ?? "엮기 ↗\u{FE0E}", size: 17) { onLink(e) } }
                             if let onNote { Tiny(title: (note?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { onNote(e) } }
                             if saved, let onOpen { Tiny(title: "표현장 ↗\u{FE0E}", size: 17) { onOpen(e) } }
-                            if let onSpeak { Button { onSpeak(e) } label: { Text("🔊").font(.system(size: 13)) }.buttonStyle(.plain).accessibilityLabel("읽어 주기") }
+                            if onSpeak != nil { SpeakIcon(text: e.phrase) }
                             if let onStars { StarRow(stars: stars?(e) ?? 0, size: 13) { w in onStars(e, w) } }
                         }
                         .padding(.leading, 6)
@@ -639,15 +638,34 @@ struct RelatedChips: View {
     }
 }
 
-/// 원문 문장 듣기 (goni 2026-11-20 "문장 자체도 소리를 들을 수 있게"). 영어만 한 번, 다시 누르면 끊고 새로(TapePlayer.speakOnce — 테이프 재생 중이면 멈춘다)
+/// 원문 문장 듣기 (goni 2026-11-20 "문장 자체도 소리를 들을 수 있게"). 영어만 한 번(TapePlayer.speakOnce — 테이프 재생 중이면 멈춘다).
+/// 읽는 동안은 빨간 "멈춤 ■"(작은 버튼은 ■)로 바뀌고 누르면 즉시 멈춤(goni "바로 멈출 수도 있게"). 다른 🔊를 누르면 끊고 그것을 읽는다
 struct SpeakButton: View {
     var text: String
     var label = "듣기 🔊\u{FE0E}"
+    var stopLabel = "멈춤 ■\u{FE0E}"
     var size: CGFloat = 20
+    @ObservedObject private var tape = TapePlayer.shared
     var body: some View {
-        Tiny(title: label, size: size) { TapePlayer.shared.speakOnce(phrase: text) }
-            .help("원문을 영어로 읽어 준다")
-            .accessibilityLabel("원문 듣기")
+        let on = tape.speakingOnce == text
+        Tiny(title: on ? stopLabel : label, color: on ? Theme.red : Theme.pencil, size: size) { tape.toggleOnce(text) }
+            .help(on ? "읽기를 멈춘다" : "원문을 영어로 읽어 준다")
+            .accessibilityLabel(on ? "멈춤" : "원문 듣기")
+    }
+}
+
+/// 작은 🔊 아이콘 토글 (포스트잇·형광펜 메모·빨간 펜 지적·표현장): 읽는 중이면 빨간 ■
+struct SpeakIcon: View {
+    var text: String
+    var size: CGFloat = 13
+    var padding = EdgeInsets()
+    @ObservedObject private var tape = TapePlayer.shared
+    var body: some View {
+        let on = tape.speakingOnce == text
+        Button { tape.toggleOnce(text) } label: {
+            Text(on ? "■\u{FE0E}" : "🔊").font(.system(size: size)).foregroundStyle(on ? Theme.red : Theme.ink).padding(padding)
+        }
+        .buttonStyle(.plain).accessibilityLabel(on ? "멈춤" : "읽어 주기")
     }
 }
 
@@ -1137,7 +1155,7 @@ struct MarkerMemo: View {
     var stars: Int = 0                         // 중요도 별 (같은 글자 표현의 weight, 없으면 누르면 붙이고 별)
     var onStars: ((Int) -> Void)? = nil
     var onOpen: (() -> Void)? = nil            // "표현장 ↗" (표현장에 있을 때만)
-    var onSpeak: (() -> Void)? = nil           // 🔊 구절만 한 번 (영어)
+    var speakText: String? = nil               // 🔊 구절만 한 번 (영어), 읽는 중엔 ■
     @State private var linking = false
     @State private var editing = false
     @State private var text = ""
@@ -1177,7 +1195,7 @@ struct MarkerMemo: View {
                     if let onTry { TryButton(title: tryTitle, count: tryCount, action: onTry) }
                     if onRelated != nil, onAddLink != nil { Tiny(title: linking ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linking.toggle() } }
                     if let onOpen { Tiny(title: "표현장 ↗\u{FE0E}", size: 17, action: onOpen) }
-                    if let onSpeak { Button(action: onSpeak) { Text("🔊").font(.system(size: 13)) }.buttonStyle(.plain).accessibilityLabel("읽어 주기") }
+                    if let t = speakText { SpeakIcon(text: t) }
                     if let onStars { StarRow(stars: stars, size: 13, onSet: onStars) }
                 }
             }
