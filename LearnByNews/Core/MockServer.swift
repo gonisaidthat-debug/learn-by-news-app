@@ -32,7 +32,7 @@ final class MockServer: URLProtocol {
         let env = ProcessInfo.processInfo.environment
         let slow = env["LBN_AUTOSUBMIT"] != nil ? 8.0 : 1.5
         let slowDrill = (env["LBN_AUTOANSWER"] != nil || env["LBN_AUTOTRY"] != nil) ? 8.0 : 1.5   // 응용 채점(멈추기 확인용)
-        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : (path.hasSuffix("/ask") && body["question"] != nil) ? 2 : 0.15
+        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : path.hasSuffix("/qa") ? 2 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
@@ -167,7 +167,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test", "weight", "note", "structure"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test", "weight", "note", "structure", "qa"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -360,7 +360,7 @@ struct MockState {
             ]
             structures[id] = o
             return (200, qaOf(o))
-        case "DELETE /api/sentences/:id/ask/:id":
+        case "DELETE /api/sentences/:id/qa/:id":
             let qid = parts.last ?? ""
             sentenceQA.removeAll { $0["id"] as? String == qid && $0["sentence_id"] as? String == id }
             return (200, ["ok": true])
@@ -554,14 +554,15 @@ struct MockState {
             cancelledDrills.insert(id); return (200, ["ok": true, "removed": false])
         case "GET /api/drills":
             return (200, drills.filter { !($0["feedback"] is NSNull) }.reversed() as [[String: Any]])
+        case "POST /api/sentences/:id/qa":   // 구조 상자 안 질문 (형광펜 묻기 /ask와 경로가 다르다, 2026-11-20 3ae0d47)
+            guard sentences.contains(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
+            let q = (body["question"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            guard !q.isEmpty else { return (400, ["error": "질문을 입력하세요"]) }
+            let row: [String: Any] = ["id": nextId("q"), "sentence_id": id, "question": q, "answer": "(모의) \(q)\n이 문장에서는 주어 뒤 동사구가 핵심이고, 마지막 전치사구는 때를 나타낸다.", "created_at": Date().ms]
+            sentenceQA.append(row)
+            return (200, row)
         case "POST /api/sentences/:id/ask":
             guard let sent = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
-            if let q = body["question"] as? String {   // 구조 상자 안 질문 (형광펜 묻기와 같은 경로, body로 구분)
-                guard !q.trimmingCharacters(in: .whitespaces).isEmpty else { return (400, ["error": "질문을 입력하세요"]) }
-                let row: [String: Any] = ["id": nextId("q"), "sentence_id": id, "question": q, "answer": "(모의) \(q)\n이 문장에서는 주어 뒤 동사구가 핵심이고, 마지막 전치사구는 때를 나타낸다.", "created_at": Date().ms]
-                sentenceQA.append(row)
-                return (200, row)
-            }
             let span = body["span"] as? String ?? ""
             let h: [String: Any] = ["id": nextId("h"), "sentence_id": id, "article_id": sent["article_id"]!, "start_word": body["start_word"] ?? 0, "end_word": body["end_word"] ?? 0, "span": span,
                                     "answer": ["meaning": "(모의) \(span)의 뜻", "why": "문맥상 이런 뜻", "similar": "similar phrase"], "created_at": Date().ms]
