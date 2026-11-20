@@ -160,6 +160,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - `SIMCTL_CHILD_LBN_TESTMODE=write|meaning|advanced`: 시험 방식. `SIMCTL_CHILD_LBN_TAPE=1`: 표현장을 열자마자 테이프로, `SIMCTL_CHILD_LBN_TAPEPLAY=1`이면 바로 재생.
 - `SIMCTL_CHILD_LBN_RANGE=<from>-<to>`: 시험·테이프 번호 범위를 그 값으로 시작.
 - `SIMCTL_CHILD_LBN_AUTOPHRASES=<표현 id>`: 공책을 열고 1초 뒤 그 표현으로 표현장 시트를 연다("표현장 ↗" 확인용).
+- `SIMCTL_CHILD_LBN_AUTOSCROLL=1`: 기록 탭(`LBN_ROUTE=log`, 날짜 보기로 연다)을 받은 뒤 맨 아래로 스크롤(세션 총평 줄 확인용). `SIMCTL_CHILD_LBN_BYARTICLE=1`: 모의 세션 닫기 총평에 기사별 총평 둘.
 - `SIMCTL_CHILD_LBN_AUTOMARK=1`: 문답의 답에서 두 번째~세 번째 단어를 고른 상태로("밑줄 긋기" 버튼 확인용).
 - `SIMCTL_CHILD_LBN_AUTOSPEAK=<문장 id>`: 공책을 열고 1초 뒤 그 문장을 읽기 시작한다("멈춤 ■" 확인용).
 - `SIMCTL_CHILD_LBN_AUTOSENTPIN=<문장 id>`: 공책을 열자마자 그 문장 전체를 표현장에 붙인다("문장 붙여 둠 ✓" 확인용).
@@ -215,3 +216,5 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - **듣기 즉시 멈춤**(goni 2026-11-20 "문장 듣기 누르면 읽히는데 바로 멈출 수도 있게", 웹과 같음): 🔊(문장 듣기·포스트잇·형광펜 메모·빨간 펜 지적·표현장 포스트잇) 모두 읽는 동안 빨간 "멈춤 ■"(작은 버튼은 ■)로 바뀌고 누르면 즉시 멈춤. 다른 🔊를 누르면 끊고 그것을 읽는다. `TapePlayer.speakingOnce`(읽는 글)·`toggleOnce`·`stopOnce`, `SpeakButton`/`SpeakIcon`(`EntryView.swift`). 테이프 재생·멈춤과 합성기 didFinish/didCancel에서 지운다. 계약 변경 없음.
 - **답에 밑줄**(goni 2026-11-20 "설명을 보다 보니 밑줄 긋고 싶다" + `**굵게**`가 날것으로 보이던 것, 웹과 같은 규칙): 문답의 답은 `QAAnswerView`(`UI/QAAnswerView.swift`)로 — `**x**`는 굵게(잉크색, ** 제거), marks의 각 글자는 표시 글자에서 첫 번째 자리에 빨간 밑줄. 긋기는 형광펜과 같은 방식: 단어를 탭(첫 단어, 노랗게) → 다른 단어를 탭(끝 단어) → 아래 "밑줄 긋기: '…'" → `PUT /api/sentences/:id/qa/:qid/marks {marks}`(목록 통째, 최대 50). 밑줄 친 단어를 탭하면 그 밑줄을 뺀다(PUT). 기기 저장본에 먼저 반영, 오프라인·끊김이면 큐 `qa_marks`(같은 문답의 앞 항목은 지우고 마지막만). 구조 모아보기의 상자에서도 같다.
 - **바는 항상 보인다**(goni 2026-11-20 "플로팅 메뉴가 상시 떠 있으면", 웹은 sticky→fixed): 앱은 원래 스크롤 방향으로 숨는 바가 없다 — 공책 상단(제목 네비 바 inline + 진행 줄 sticky)·하단 StudyDot(`safeAreaInset`)·탭 바 모두 고정. iOS 26 탭 바의 스크롤 최소화만 `tabBarMinimizeBehavior(.never)`로 명시해 못 박았다(`RootView.tabBarAlwaysVisible`). 계약 변경 없음.
+- **기사별 총평**(goni 2026-11-20 "한 시간에 다른 기사도 함께 봤을 수 있으니, 기사별로 그 시간 동안 한 것의 총평을 별도로", 웹과 같은 규칙): `SessionReview.byArticle: [{title, summary, next}]?`(옵셔널 디코딩, 예전 세션 nil, 하나뿐이면 []). `SessionReviewLines(articleTitle:)` — 공책 ✂ 줄은 제목이 그 공책과 같은 항목을 빨간 펜으로 앞세우고(summary → next) 전체 summary·keep·next는 "이 시간 전체: …" 한 줄(연필색, 작게). 홈 공부 기록·기록 탭·StudyDot 패널은 전체 summary → 기사별 줄(제목 점선 밑줄 + summary + → next) → ✓ keep → → next. 캐시(Codable)는 그대로 따라온다. `LBN_BYARTICLE=1`: 모의 세션 닫기 총평에 기사 둘이 있는 것처럼.
+- **다시 쓰기 중에도 ✂ 줄**(goni 2026-11-20 스크린샷 결정, 웹과 같음): 처음부터 다시 쓰기(pass) 진행 중인 공책에서도 "여기까지" ✂ 줄 + 총평을 그 회차에 쓴 마지막 문장 뒤(문장 사이)에 그린다(전에는 pass 중엔 비워 두고 StudyDot 패널에만). 화면에 보이는 문장(upto까지)에 걸린 세션만 그리고, 그린 것만 reviewInBody로 패널을 생략한다.

@@ -806,7 +806,9 @@ struct NotebookView: View {
         let redoIdx = m.redo.flatMap { r in d.sentences.firstIndex { $0.id == r } }
         let upto = m.browse ? total : m.passMode ? (redoIdx.map { $0 + 1 } ?? total) : (m.frontIdx ?? total)
         let waiting = m.inflight.count
-        let markers = m.passMode ? [:] : m.markers(session.sessions)
+        // ✂ 줄은 다시 쓰기(pass) 진행 중에도 그 회차에 쓴 마지막 문장 뒤에 (goni 2026-11-20). 화면에 있는 문장(upto까지)에 걸린 것만 — 그래야 reviewInBody도 실제로 그린 것만 켠다
+        let shownIds = Set(d.sentences.prefix(upto).map(\.id))
+        let markers = m.markers(session.sessions).filter { shownIds.contains($0.key) }
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -825,7 +827,7 @@ struct NotebookView: View {
                             if let s = markers[x.id] {
                                 SessionMark(session: s)
                                 if s.review != nil || s.id.hasPrefix("local-") {
-                                    SessionReviewLines(session: s, size: 16) { Task { await session.retryReview(s) } }
+                                    SessionReviewLines(session: s, size: 16, articleTitle: d.title) { Task { await session.retryReview(s) } }
                                         .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight).padding(.bottom, 4)
                                 }
                             }

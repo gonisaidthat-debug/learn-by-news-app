@@ -221,17 +221,31 @@ extension View {
 }
 
 /// 세션 총평 세 줄: summary(빨간 펜) · "✓ keep"(초록) · "→ next"(연필). 없으면 실패 이유 + 다시 시도 / 연결되면 받는다
+/// 세션 총평 줄. articleTitle이 있으면(공책 ✂ 줄) 그 기사 몫(by_article)을 빨간 펜으로 앞세우고 전체는 "이 시간 전체: …" 한 줄로 접는다.
+/// 없으면(홈 기록·기록 탭·StudyDot 패널) 전체 summary → 기사별 줄(제목 점선 밑줄 + summary + → next) → ✓ keep → → next (goni 2026-11-20)
 struct SessionReviewLines: View {
     var session: StudySession
     var size: CGFloat = 17
     var retrying = false
+    var articleTitle: String? = nil
     var onRetry: (() -> Void)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let r = session.review {
-                if !r.summary.isEmpty { Text(r.summary).font(Theme.hand(size + 1)).foregroundStyle(Theme.red) }
-                if !r.keep.isEmpty { Text("✓\u{FE0E} \(r.keep)").font(Theme.hand(size)).foregroundStyle(Theme.grade(.A)) }
-                if !r.next.isEmpty { Text("→\u{FE0E} \(r.next)").font(Theme.hand(size)).foregroundStyle(Theme.pencil) }
+                if let mine = r.forArticle(articleTitle) {
+                    if !mine.summary.isEmpty { Text(mine.summary).font(Theme.hand(size + 1)).foregroundStyle(Theme.red) }
+                    if !mine.next.isEmpty { Text("→\u{FE0E} \(mine.next)").font(Theme.hand(size)).foregroundStyle(Theme.pencil) }
+                    let whole = [r.summary, r.keep.isEmpty ? "" : "✓\u{FE0E} \(r.keep)", r.next.isEmpty ? "" : "→\u{FE0E} \(r.next)"].filter { !$0.isEmpty }.joined(separator: " · ")
+                    if !whole.isEmpty { Text("이 시간 전체: \(whole)").font(Theme.hand(size - 2)).foregroundStyle(Theme.pencil).padding(.top, 2) }
+                } else {
+                    if !r.summary.isEmpty { Text(r.summary).font(Theme.hand(size + 1)).foregroundStyle(Theme.red) }
+                    ForEach(Array((r.byArticle ?? []).enumerated()), id: \.offset) { _, a in
+                        (Text(a.title).underline(true, pattern: .dot, color: Theme.pencil).foregroundColor(Theme.ink) + Text(" \(a.summary)").foregroundColor(Theme.red) + Text(a.next.isEmpty ? "" : " →\u{FE0E} \(a.next)").foregroundColor(Theme.pencil))
+                            .font(Theme.hand(size))
+                    }
+                    if !r.keep.isEmpty { Text("✓\u{FE0E} \(r.keep)").font(Theme.hand(size)).foregroundStyle(Theme.grade(.A)) }
+                    if !r.next.isEmpty { Text("→\u{FE0E} \(r.next)").font(Theme.hand(size)).foregroundStyle(Theme.pencil) }
+                }
             } else if session.id.hasPrefix("local-") {
                 Text("총평은 연결되면 받는다").font(Theme.hand(size)).foregroundStyle(Theme.pencil)
             } else if let onRetry {

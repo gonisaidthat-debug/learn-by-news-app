@@ -116,7 +116,9 @@ struct MockState {
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
         sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 47, "score": 90, "drills": 10, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000,
-                     "review": ["summary": "짧은 세션이었지만 두 문장 다 뜻을 정확히 잡았다.", "keep": "단위와 숫자를 빠뜨리지 않은 것", "next": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현 고르기"]]]
+                     "review": ["summary": "짧은 세션이었지만 두 문장 다 뜻을 정확히 잡았다.", "keep": "단위와 숫자를 빠뜨리지 않은 것", "next": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현 고르기",
+                                "by_article": [["title": "Seoul to expand bike lanes along Han River", "summary": "자전거 기사는 숫자와 지명이 정확했다. 미래 표현은 '~할 것이다'로 굳어 있다.", "next": "will을 문맥에 맞게 '~한다'로도"],
+                                               ["title": "Fed holds rates steady as inflation cools", "summary": "연준 기사는 관용구를 직역했다. 문장 뒤 분사구문은 잘 끊었다.", "next": "held steady 같은 관용구는 우리말 관용 표현부터"]]]]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
         passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
         drills = [["id": "d1", "phrase_id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "korean": "", "kind": "free", "sentence_id": "s1", "created_at": now - 7_200_000,
@@ -463,7 +465,11 @@ struct MockState {
             let titles = Array(Set(done.map { $0.2 })).compactMap { id in articles.first { $0["id"] as? String == id }?["title"] as? String }
             let ended = max(done.map(\.0).max() ?? 0, drs.compactMap { $0["answered_at"] as? Int64 }.max() ?? 0)
             let s: [String: Any] = ["id": nextId("ss"), "started_at": start, "ended_at": ended, "attempts": done.count + drs.count, "drills": drs.count, "score": g.isEmpty ? NSNull() : Int((Double(g.reduce(0, +)) / Double(g.count)).rounded()), "articles": titles, "created_at": Date().ms,
-                                    "review": ["summary": "(모의) 오늘은 관용구를 직역하는 버릇이 줄었다.", "keep": "숫자와 고유명사를 정확히 옮긴 것", "next": "weigh on 같은 구동사는 우리말 표현부터 떠올리기"]]
+                                    "review": ["summary": "(모의) 오늘은 관용구를 직역하는 버릇이 줄었다.", "keep": "숫자와 고유명사를 정확히 옮긴 것", "next": "weigh on 같은 구동사는 우리말 표현부터 떠올리기",
+                                               // 기사별 총평: 그 시간에 둘 이상 번역했으면 기사마다 (화면 확인용 LBN_BYARTICLE=1이면 하나여도 두 기사로)
+                                               "by_article": (titles.count > 1 || ProcessInfo.processInfo.environment["LBN_BYARTICLE"] == "1")
+                                                   ? (titles.count > 1 ? titles : titles + ["Seoul to expand bike lanes along Han River"]).map { ["title": $0, "summary": "(모의) \($0.prefix(12))… 기사에서는 동사 시제를 잘 살렸다. 전치사구 위치는 아직 흔들린다.", "next": "때를 나타내는 구는 앞으로 빼기"] }
+                                                   : []]]
             sessions.append(s); return (200, s)
         case "POST /api/sessions/:id/review":
             if let i = sessions.firstIndex(where: { $0["id"] as? String == id }) {

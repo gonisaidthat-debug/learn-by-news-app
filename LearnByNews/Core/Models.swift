@@ -298,16 +298,22 @@ struct PhraseTestItem: Codable, Identifiable, Hashable {
 
 /// 세션 총평: 그 시간의 번역·응용을 모아 쓴 세 줄
 struct SessionReview: Codable, Hashable {
+    /// 기사별 총평 (goni 2026-11-20 "한 시간에 다른 기사도 함께 봤을 수 있으니 기사별로"): 그 시간에 둘 이상 번역했을 때만, 기사마다 하나. title = 기사 제목 그대로
+    struct ByArticle: Codable, Hashable { var title: String; var summary: String; var next: String }
     var summary: String
     var keep: String
     var next: String
-    init(summary: String, keep: String, next: String) { self.summary = summary; self.keep = keep; self.next = next }
+    var byArticle: [ByArticle]?       // 하나뿐이면 [], 예전 세션은 nil
+    init(summary: String, keep: String, next: String, byArticle: [ByArticle]? = nil) { self.summary = summary; self.keep = keep; self.next = next; self.byArticle = byArticle }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
         keep = try c.decodeIfPresent(String.self, forKey: .keep) ?? ""
         next = try c.decodeIfPresent(String.self, forKey: .next) ?? ""
+        byArticle = try? c.decodeIfPresent([ByArticle].self, forKey: .byArticle)
     }
+    /// 이 공책 몫의 기사별 총평
+    func forArticle(_ title: String?) -> ByArticle? { guard let title else { return nil }; return byArticle?.first { $0.title == title } }
 }
 
 struct StudySession: Codable, Identifiable, Hashable {

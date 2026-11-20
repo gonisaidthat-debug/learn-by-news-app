@@ -140,7 +140,7 @@ final class Router: ObservableObject {
             case "phrases": tab = .phrases
             case "quiz": tab = .quiz
             case "drills": tab = .drills
-            case "log": tab = .log
+            case "log": tab = .log; UserDefaults.standard.set(false, forKey: "lbn_log_structures")   // 날짜 보기로
             case "structures": tab = .log; UserDefaults.standard.set(true, forKey: "lbn_log_structures")
             case "settings": showSettings = true
             default: break

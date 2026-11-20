@@ -179,12 +179,14 @@ struct ActivityLogView: View {
                             }
                         }
                         MutedText(text: showStructures ? "구조 분석한 문장 · 최근 분석 순" : byArticle ? "최근 1년 · 문장 순서대로, 같은 문장을 쓴 차례대로" : "최근 \(days)일").frame(height: Theme.lh).padding(.top, Theme.lh).padding(.leading, Theme.paperLeft)
+                            .id("log-end")
                     }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()
             }
             .background(Theme.desk.ignoresSafeArea())
+            .scrollLogEndIfAsked()
             .toolbar(.hidden, for: .navigationBar)
             .task(id: span) { await load() }
             .task(id: showStructures) { if showStructures { await structs.load() } }
@@ -308,5 +310,18 @@ struct ActivityLogView: View {
         do { log = try await API.shared.activityLog(days: span); err = nil }
         catch let e as APIError where e.isNetwork { if log == nil { err = e.localizedDescription } }
         catch { err = error.localizedDescription }
+    }
+}
+
+private extension View {
+    /// 화면 확인용: LBN_AUTOSCROLL=1 이면 기록을 받은 뒤 맨 아래로 (DEBUG)
+    func scrollLogEndIfAsked() -> some View {
+        ScrollViewReader { proxy in
+            self.task {
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["LBN_AUTOSCROLL"] == "1" { try? await Task.sleep(for: .seconds(1.5)); proxy.scrollTo("log-end", anchor: .bottom) }
+                #endif
+            }
+        }
     }
 }
