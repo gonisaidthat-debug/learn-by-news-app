@@ -492,6 +492,16 @@ final class SyncManager: ObservableObject {
     struct PhraseMasteredOp: Codable { var id: String; var on: Bool }
     struct PhraseWeightOp: Codable { var id: String; var weight: Int }
     struct PhraseNoteOp: Codable { var id: String; var note: String }
+    /// 문장 구조 분석(2026-11-20): 온라인이면 서버(저장본 있으면 즉시) → 기기 저장본 갱신. 오프라인이거나 끊기면 기기 저장본,
+    /// 그것도 없으면 "연결되면 분석"으로 끝낸다 — 큐에 넣지 않는다(결과를 바로 봐야 의미가 있다)
+    func structure(sentenceId: String, force: Bool) async throws -> Structure {
+        if Connectivity.shared.isOnline, !Self.isTemp(sentenceId) {
+            do { let s = try await API.shared.structure(sentenceId, force: force); StructureStore.shared.put(sentenceId, s); return s }
+            catch let e as APIError where e.isNetwork { if let s = StructureStore.shared.get(sentenceId) { return s }; throw e }
+        }
+        if let s = StructureStore.shared.get(sentenceId) { return s }
+        throw APIError.network("지금은 오프라인 · 연결되면 분석")
+    }
     /// 표현 내 메모: 캐시에 먼저, 온라인이면 바로, 아니면 큐 phrase_note(임시 id는 phrase_save 재생 뒤 실제 id로). 돌려주는 값은 저장된 메모(nil = 지움)
     func setPhraseNote(_ id: String, note: String) async throws -> String? {
         let n = note.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -158,6 +158,9 @@ final class API {
     func deletePhrase(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/phrases/\(id)") }
     /// 표현장 시험 카드: 습득 완료 아닌 표현 전부 + 기록(last_correct·tries·wrong)
     func phraseTest() async throws -> [PhraseTestItem] { try await send("GET", "/api/phrases/test") }
+    struct StructureBody: Encodable { var force: Bool }
+    /// 문장 구조 분석(2026-11-20): 저장본이 있으면 즉시(cached true), 없거나 force면 Claude 5~10초(하루 상한에 셈). 404 없는 문장, 429 상한
+    func structure(_ sentenceId: String, force: Bool) async throws -> Structure { try await send("POST", "/api/sentences/\(sentenceId)/structure", body: StructureBody(force: force)) }
     struct PhraseNoteBody: Encodable { var note: String }
     struct PhraseNoted: Decodable { var ok: Bool; var id: String; var note: String? }
     /// 표현 내 메모 (빈 문자열 → null)

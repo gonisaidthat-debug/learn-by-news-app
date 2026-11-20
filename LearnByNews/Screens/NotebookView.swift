@@ -721,6 +721,8 @@ struct NotebookView: View {
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
             // 화면 확인용: LBN_AUTOPHRASES=<표현 id> 이면 그 표현으로 표현장 시트를 연다("표현장 ↗" 확인용)
             if let pid = ProcessInfo.processInfo.environment["LBN_AUTOPHRASES"] { Task { try? await Task.sleep(for: .seconds(1)); phrasesSheet = pid } }
+            // 화면 확인용: LBN_AUTOSTRUCT=<문장 id> 이면 구조 분석 상자가 보이도록 받은 뒤 맨 아래로 스크롤
+            if ProcessInfo.processInfo.environment["LBN_AUTOSTRUCT"] != nil { Task { try? await Task.sleep(for: .seconds(4.5)); m.requestScroll("bottom") } }
             // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 써 보기 상자(EntryView가 연다)가 보이도록 잠시 뒤 맨 아래로 스크롤
             if ProcessInfo.processInfo.environment["LBN_AUTOTRY"] != nil || ProcessInfo.processInfo.environment["LBN_AUTOLINK"] != nil { Task { try? await Task.sleep(for: .seconds(3.5)); m.requestScroll("bottom") } }
             // 화면 확인용: LBN_AUTOMERGE=prev|next 이면 현재 문장을 그 방향으로 합친다 (다시 쓰기 중 합치기 확인)
@@ -953,7 +955,8 @@ struct NotebookView: View {
                 onWeight: { e, w in await m.setWeight(x.id, e, w) },
                 noteOf: { e in (d.phrases.first { $0.sentenceId == x.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
                 onPhraseNote: { e, t in await m.setPhraseNote(x.id, e, t) },
-                onOpenPhrases: { pid in phrasesSheet = pid }
+                onOpenPhrases: { pid in phrasesSheet = pid },
+                onStructure: { f in try await SyncManager.shared.structure(sentenceId: x.id, force: f) }
             )
             .id(x.id)
         } else {

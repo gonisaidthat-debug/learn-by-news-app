@@ -396,7 +396,8 @@ struct DoneView: View {
                                 onWeight: { e, w in await m.setWeight(s.id, e, w) },
                                 noteOf: { e in (d.phrases.first { $0.sentenceId == s.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
                                 onPhraseNote: { e, t in await m.setPhraseNote(s.id, e, t) },
-                                onOpenPhrases: { pid in phrasesSheet = pid }
+                                onOpenPhrases: { pid in phrasesSheet = pid },
+                                onStructure: { f in try await SyncManager.shared.structure(sentenceId: s.id, force: f) }
                             )
                         }
                     }

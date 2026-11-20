@@ -156,6 +156,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - `SIMCTL_CHILD_LBN_TESTMODE=write|meaning|advanced`: 시험 방식. `SIMCTL_CHILD_LBN_TAPE=1`: 표현장을 열자마자 테이프로, `SIMCTL_CHILD_LBN_TAPEPLAY=1`이면 바로 재생.
 - `SIMCTL_CHILD_LBN_RANGE=<from>-<to>`: 시험·테이프 번호 범위를 그 값으로 시작.
 - `SIMCTL_CHILD_LBN_AUTOPHRASES=<표현 id>`: 공책을 열고 1초 뒤 그 표현으로 표현장 시트를 연다("표현장 ↗" 확인용).
+- `SIMCTL_CHILD_LBN_AUTOSTRUCT=<문장 id>`: 그 문장을 펼치자마자 "구조 분석"을 받는다(`LBN_AUTOOPEN`과 함께. 모의 분석은 2.5초 걸린다).
 - 모의 모드에서는 Face ID 잠금을 끈다.
 - 예: `SIMCTL_CHILD_LBN_MOCK=1 SIMCTL_CHILD_LBN_ROUTE=notebook:a1 xcrun simctl launch <sim> com.goni.learn-by-news`
 
@@ -198,3 +199,4 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - 다시 쓰기 진행 캐시(2026-11-15): 공책 목록 `GET /api/articles`의 `pass_done`을 받을 때마다 기기 RedoProgress를 서버와 맞춘다(진행 있으면 캐시 문장 순서로 저장, null이면 지움, 못 보낸 pass_put이 있으면 그대로). 서버 값은 UserDefaults `lbn_server_pass`에 두고 내보내기 적용 뒤에도 다시 맞춘다(문장 캐시가 없을 땐 만들지 않음). 그래서 온라인에서 공책을 연 적 없는 기기도 오프라인에서 "n회차 진행 중"으로 열린다(전엔 "완료·1회차 마지막 장"으로 열리던 사고).
 - 공책 열기: 서버 응답 전에는 빈 화면이 아니라 캐시 제목 + "공책을 불러오는 중…". 읽기(GET) 요청은 20초 타임아웃(채점·총평 등 쓰기는 120초) — 연결은 있어도 인터넷이 안 되면 빨리 네트워크 오류로 끝내 캐시(오프라인)로 넘어간다.
 - 진입: 저장된 비밀번호가 있으면 Face ID 뒤 서버 확인을 기다리지 않고 바로 홈(캐시)으로 들어간다. `GET /api/auth`는 뒤에서 하고 401일 때만 로그인 화면으로(네트워크 오류는 무시). 책갈피 띠는 캐시의 `current_round`가 없으면 로컬(총평 수 + 다시 쓰기 진행)로 센다.
+- **문장 구조 분석 ✦**(goni 2026-11-20 "문장 구조 첨삭에 대한 분석도 내가 누르면 보여 줄 수 있게", 웹 8456278과 같은 구성): 채점된 문장의 동작 줄(원문 복사 옆, 열람·마지막 장 "다시 볼 문장"에도) "구조 분석 ✦" → 받는 중 "분석 중… ✎" → 점선 상자, 받은 뒤엔 "구조 접기" 토글. `POST /api/sentences/:id/structure {force}`: 서버 저장본이 있으면 즉시(cached), 없거나 force("다시 분석 ↻")면 Claude 5~10초(하루 상한에 셈). 상자: "뼈대: …" → 덩어리 띠(text 위·role 아래, 밑줄 색: 주어 파랑 #2f6fd6 / 동사·술어 빨강 / 목적·보어 초록 #2f9e44 / 접속·관계·종속·조건·시간 보라 #7a3fb8 / 그 외 회색) → 덩어리별 "role text — note" → "읽기: …" → "함정: … · …" → "내 번역은: …"(빨간 펜) → "다시 분석 ↻" + 분석 시각. 받은 분석은 기기에도 둔다(`StructureStore`, UserDefaults 문장 id별). 오프라인·끊김: 기기 저장본이 있으면 그것, 없으면 "지금은 오프라인 · 연결되면 분석" 한 줄 — 큐에 넣지 않는다(결과를 바로 봐야 의미가 있다). 동작 줄은 버튼이 늘어 FlowLayout으로(넘치면 다음 줄).

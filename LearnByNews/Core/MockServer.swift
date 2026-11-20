@@ -32,7 +32,7 @@ final class MockServer: URLProtocol {
         let env = ProcessInfo.processInfo.environment
         let slow = env["LBN_AUTOSUBMIT"] != nil ? 8.0 : 1.5
         let slowDrill = (env["LBN_AUTOANSWER"] != nil || env["LBN_AUTOTRY"] != nil) ? 8.0 : 1.5   // 응용 채점(멈추기 확인용)
-        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : 0.15
+        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
@@ -69,6 +69,7 @@ struct MockState {
     var trash: [String: [String: Any]] = [:]
     var links: [[String: Any]] = []   // {id, from_highlight, to_kind, to_id, created_at}
     var cancelledDrills: Set<String> = []   // 응용 채점 멈추기 묘비 (서버 cancelled_attempts)
+    var structures: [String: [String: Any]] = [:]   // sentence_structures: sentence_id → analysis(+created_at)
     var masteryLog: [[String: Any]] = []   // phrase_mastery_log {id, phrase_id, action, note, attempt_id, sentence_id, created_at}
     // LBN_SESSION=1: 서버에도 시작점이 있는 상태(앱은 서버가 null이면 기기 캐시를 지우므로 둘이 맞아야 세션이 보인다)
     var sessionStart: Int64? = ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" ? Date().ms - 600_000 : nil
@@ -165,7 +166,7 @@ struct MockState {
     private func sents(of aid: String) -> [[String: Any]] { sentences.filter { $0["article_id"] as? String == aid }.sorted { ($0["idx"] as! Int) < ($1["idx"] as! Int) } }
 
     mutating func handle(method: String, path: String, query: String, body: [String: Any]) -> (Int, Any) {
-        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test", "weight", "note"]
+        let known: Set<String> = ["api", "auth", "articles", "sentences", "phrases", "quiz", "results", "sessions", "log", "logs", "review", "attempts", "merge", "export", "bookmark", "ask", "highlights", "drills", "next", "answer", "pass", "session-start", "batch", "trash", "restore", "memo", "free", "related", "links", "void", "grading", "mastered", "test", "weight", "note", "structure"]
         let parts = path.split(separator: "/").map(String.init)   // ["api", ...]
         let id = parts.first { !known.contains($0) } ?? ""
         let route = method + " /" + parts.map { known.contains($0) ? $0 : ":id" }.joined(separator: "/")
@@ -337,6 +338,26 @@ struct MockState {
             let gone = links.filter { (fromKind($0) == "phrase" && $0["from_highlight"] as? String == id) || ($0["to_kind"] as? String == "phrase" && $0["to_id"] as? String == id) }.map { $0["id"] as! String }
             links.removeAll { gone.contains($0["id"] as! String) }   // 나간 링크·들어온 링크 cascade
             return (200, ["ok": true])
+        case "POST /api/sentences/:id/structure":
+            if let saved = structures[id], (body["force"] as? Bool) != true { var o = saved; o["cached"] = true; return (200, o) }
+            guard let s = sentences.first(where: { $0["id"] as? String == id }), let text = s["text"] as? String else { return (404, ["error": "문장을 찾을 수 없습니다"]) }
+            // 단어를 넷으로 끊어 역할을 붙인 모의 분석 (화면 확인용)
+            let words = text.split(separator: " ").map(String.init)
+            let n = max(1, words.count / 4)
+            let cuts = [Array(words[0..<min(n, words.count)]), Array(words[min(n, words.count)..<min(2*n, words.count)]), Array(words[min(2*n, words.count)..<min(3*n, words.count)]), Array(words[min(3*n, words.count)...])]
+            let roles = ["주어", "동사", "목적어", "전치사구(시간)"]
+            let notes = ["문장의 주체", "주어의 동작 — 과거형", "동사가 받는 대상", "앞 전체를 꾸미는 때 표시 — 한국어에서는 맨 앞으로"]
+            let chunks: [[String: Any]] = cuts.enumerated().filter { !$0.element.isEmpty }.map { ["text": $0.element.joined(separator: " "), "role": roles[$0.offset], "note": notes[$0.offset]] }
+            var o: [String: Any] = [
+                "skeleton": "주어(\(cuts[0].joined(separator: " "))) + 동사(\(cuts[1].joined(separator: " "))) + 목적어 — 뒤에 때를 나타내는 전치사구",
+                "chunks": chunks,
+                "reading": "주어와 동사를 먼저 잡고, 뒤의 전치사구는 때를 나타내므로 한국어에서는 맨 앞으로 옮겨 읽는다. 목적어는 동사 바로 뒤에 붙여 읽으면 된다.",
+                "pitfalls": ["전치사구를 목적어에 걸어 읽기 쉽다", "과거형 동사를 현재로 옮기기 쉽다"],
+                "mine": s["attempt"] is [String: Any] ? "주어·동사는 바로 잡았지만 마지막 전치사구를 목적어에 걸어 읽었다. 첨삭의 지적도 그 자리다." : "",
+                "created_at": Date().ms, "cached": false,
+            ]
+            structures[id] = o
+            return (200, o)
         case "PUT /api/phrases/:id/note":
             guard let i = phrases.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 표현"]) }
             let n = (body["note"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

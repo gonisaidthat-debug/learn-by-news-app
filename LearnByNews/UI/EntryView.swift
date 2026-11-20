@@ -134,6 +134,12 @@ struct EntryView: View {
     var onPhraseNote: ((Expression, String) async -> Void)? = nil
     /// "표현장 ↗"(2026-11-19): 그 표현의 표현장 id로 표현장을 시트로 열어 스크롤·강조. 🔊는 TapePlayer.speakOnce
     var onOpenPhrases: ((String) -> Void)? = nil
+    /// 문장 구조 분석(2026-11-20): 동작 줄 "구조 분석 ✦" → 받는 중 "분석 중… ✎" → 점선 상자, 다시 누르면 "구조 접기". force면 다시 분석
+    var onStructure: ((Bool) async throws -> Structure)? = nil
+    @State private var structure: Structure?
+    @State private var structOpen = false
+    @State private var structBusy = false
+    @State private var structErr: String?
     @State private var notingPhrase: String?      // 메모 입력이 열린 표현(글자)
     @State private var tryExpr: Expression?
     @State private var linkingPhrase: String?     // "엮기"가 열린 표현(표현장 id)
@@ -291,14 +297,34 @@ struct EntryView: View {
         }
         ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
         do {
-            HStack(spacing: 16) {
-                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo) }
-                CopyButton(text: s.text)
-                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
-                if let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
-                if let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+            FlowLayout(spacing: 16, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
+                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
+                CopyButton(text: s.text).frame(height: Theme.lh)
+                if onStructure != nil {
+                    Tiny(title: structBusy ? "분석 중… ✎\u{FE0E}" : (structOpen && structure != nil) ? "구조 접기" : "구조 분석 ✦\u{FE0E}", color: structBusy ? Theme.placeholder : Theme.pencil) { loadStructure() }
+                        .disabled(structBusy).frame(height: Theme.lh)
+                        .help("문장의 뼈대와 덩어리, 읽는 순서, 내 번역이 구조를 어떻게 읽었는지. 처음 한 번만 Claude가 분석하고 저장한다")
+                }
+                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
+                if let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+                if let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
             }
-            .frame(height: Theme.lh)
+            .task {
+                #if DEBUG
+                // 화면 확인용: LBN_AUTOSTRUCT=<문장 id> 이면 펼치자마자 구조 분석을 받는다 (LBN_AUTOOPEN과 함께)
+                if ProcessInfo.processInfo.environment["LBN_AUTOSTRUCT"] == s.id, structure == nil { loadStructure() }
+                #endif
+            }
+            if let e = structErr {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(e).redpen(size: 20)
+                    Tiny(title: "다시 시도", size: 18) { loadStructure(force: true) }
+                }
+            }
+            if structOpen, let st = structure {
+                StructureView(st: st, busy: structBusy, onAgain: { loadStructure(force: true) })
+                    .padding(.vertical, 4)
+            }
         }
         if !fb.expressions.isEmpty {
             StickyRow(items: fb.expressions.enumerated().map { (i, e) in (e, savedPhrases.contains { $0.phrase == e.phrase }, i) }, onTap: onTogglePhrase,
@@ -322,6 +348,69 @@ struct EntryView: View {
         if let e = tryExpr, let onFree {
             TryBox(expr: e, onFree: onFree, onDrillFor: onDrillFor, onAnswerDrill: onAnswerDrill, onClose: { tryExpr = nil }, onGraded: { onDrillGraded?(e.phrase) })
         }
+    }
+
+    /// 구조 분석: 이미 받았으면 접기/펴기, 아니면 받는다(서버 저장본이면 즉시). force면 새로 분석(하루 상한에 셈)
+    private func loadStructure(force: Bool = false) {
+        guard let onStructure, !structBusy else { return }
+        if !force, structure != nil { structOpen.toggle(); return }
+        structBusy = true; structErr = nil; structOpen = true
+        Task {
+            do { structure = try await onStructure(force) }
+            catch { structErr = error.localizedDescription; if structure == nil { structOpen = false } }
+            structBusy = false
+        }
+    }
+}
+
+/// 문장 구조 분석 패널 (웹 StructureView와 같은 구성): "뼈대: …" → 덩어리 띠(text 위·role 아래, 역할별 밑줄 색) →
+/// 덩어리별 "role text — note" → "읽기: …" → "함정: … · …" → "내 번역은: …"(빨간 펜) → "다시 분석 ↻"
+struct StructureView: View {
+    var st: Structure
+    var busy = false
+    var onAgain: (() -> Void)?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            labeled("뼈대", st.skeleton, color: Theme.pencil)
+            FlowLayout(spacing: 8) {
+                ForEach(Array(st.chunks.enumerated()), id: \.offset) { _, ch in
+                    VStack(alignment: .center, spacing: 1) {
+                        Text(ch.text).font(Theme.print(16)).foregroundStyle(Theme.ink).multilineTextAlignment(.center)
+                        Text(ch.role).font(Theme.hand(15)).foregroundStyle(Structure.color(ch.role))
+                    }
+                    .padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.025)))
+                    .overlay(alignment: .bottom) { Rectangle().fill(Structure.color(ch.role)).frame(height: 3).clipShape(RoundedRectangle(cornerRadius: 1.5)) }
+                    .help(ch.note)
+                }
+            }
+            let noted = st.chunks.filter { !$0.note.isEmpty }
+            if !noted.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(noted.enumerated()), id: \.offset) { _, ch in
+                        (Text(ch.role).fontWeight(.bold).foregroundColor(Structure.color(ch.role)) + Text(" \(ch.text) — \(ch.note)").foregroundColor(Theme.ink))
+                            .font(Theme.hand(18))
+                    }
+                }
+            }
+            labeled("읽기", st.reading, color: Theme.pencil)
+            if !st.pitfalls.isEmpty { labeled("함정", st.pitfalls.joined(separator: " · "), color: Theme.pencil) }
+            if !st.mine.isEmpty { labeled("내 번역은", st.mine, color: Theme.red, size: 20) }
+            if let onAgain {
+                HStack(spacing: 10) {
+                    Tiny(title: busy ? "분석 중… ✎\u{FE0E}" : "다시 분석 ↻\u{FE0E}", color: busy ? Theme.placeholder : Theme.pencil, size: 18, action: onAgain).disabled(busy)
+                    if let at = st.createdAt { Text(Date(timeIntervalSince1970: Double(at) / 1000).formatted(.dateTime.month(.defaultDigits).day().hour().minute())).font(Theme.hand(15)).foregroundStyle(Theme.placeholder) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.paper.opacity(0.9)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3])).foregroundStyle(Theme.pencil))
+    }
+    private func labeled(_ label: String, _ text: String, color: Color, size: CGFloat = 19) -> some View {
+        (Text(label + " ").font(Theme.hand(size - 2)).foregroundColor(Theme.pencil) + Text(text).font(Theme.hand(size)).foregroundColor(color))
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -683,12 +772,13 @@ struct TryBox: View {
 /// 간단한 flow 레이아웃
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
+    var rowSpacing: CGFloat? = nil   // 줄 사이 간격 (nil이면 spacing과 같게). 동작 줄은 0으로 줄 높이를 괘선에 맞춘다
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let w = proposal.width ?? 320
         var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0
         for v in subviews {
             let s = v.sizeThatFits(.init(width: w, height: nil))
-            if x + s.width > w, x > 0 { x = 0; y += rowH + spacing; rowH = 0 }
+            if x + s.width > w, x > 0 { x = 0; y += rowH + (rowSpacing ?? spacing); rowH = 0 }
             x += s.width + spacing; rowH = max(rowH, s.height)
         }
         return CGSize(width: w, height: y + rowH)
@@ -698,7 +788,7 @@ struct FlowLayout: Layout {
         var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0
         for v in subviews {
             let s = v.sizeThatFits(.init(width: w, height: nil))
-            if x + s.width > w, x > 0 { x = 0; y += rowH + spacing; rowH = 0 }
+            if x + s.width > w, x > 0 { x = 0; y += rowH + (rowSpacing ?? spacing); rowH = 0 }
             v.place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y), proposal: .init(width: s.width, height: s.height))
             x += s.width + spacing; rowH = max(rowH, s.height)
         }
