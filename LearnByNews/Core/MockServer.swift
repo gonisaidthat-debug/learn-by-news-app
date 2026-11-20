@@ -32,7 +32,7 @@ final class MockServer: URLProtocol {
         let env = ProcessInfo.processInfo.environment
         let slow = env["LBN_AUTOSUBMIT"] != nil ? 8.0 : 1.5
         let slowDrill = (env["LBN_AUTOANSWER"] != nil || env["LBN_AUTOTRY"] != nil) ? 8.0 : 1.5   // 응용 채점(멈추기 확인용)
-        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : 0.15
+        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : (path.hasSuffix("/ask") && body["question"] != nil) ? 2 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
@@ -69,7 +69,8 @@ struct MockState {
     var trash: [String: [String: Any]] = [:]
     var links: [[String: Any]] = []   // {id, from_highlight, to_kind, to_id, created_at}
     var cancelledDrills: Set<String> = []   // 응용 채점 멈추기 묘비 (서버 cancelled_attempts)
-    var structures: [String: [String: Any]] = [:]   // sentence_structures: sentence_id → analysis(+created_at)
+    var structures: [String: [String: Any]] = [:]
+    var sentenceQA: [[String: Any]] = []   // sentence_qa {id, sentence_id, question, answer, created_at}   // sentence_structures: sentence_id → analysis(+created_at)
     var masteryLog: [[String: Any]] = []   // phrase_mastery_log {id, phrase_id, action, note, attempt_id, sentence_id, created_at}
     // LBN_SESSION=1: 서버에도 시작점이 있는 상태(앱은 서버가 null이면 기기 캐시를 지우므로 둘이 맞아야 세션이 보인다)
     var sessionStart: Int64? = ProcessInfo.processInfo.environment["LBN_SESSION"] == "1" ? Date().ms - 600_000 : nil
@@ -339,7 +340,8 @@ struct MockState {
             links.removeAll { gone.contains($0["id"] as! String) }   // 나간 링크·들어온 링크 cascade
             return (200, ["ok": true])
         case "POST /api/sentences/:id/structure":
-            if let saved = structures[id], (body["force"] as? Bool) != true { var o = saved; o["cached"] = true; return (200, o) }
+            let qaOf: ([String: Any]) -> [String: Any] = { [sentenceQA] o in var o = o; o["qa"] = sentenceQA.filter { $0["sentence_id"] as? String == id }; return o }
+            if let saved = structures[id], (body["force"] as? Bool) != true { var o = saved; o["cached"] = true; return (200, qaOf(o)) }
             guard let s = sentences.first(where: { $0["id"] as? String == id }), let text = s["text"] as? String else { return (404, ["error": "문장을 찾을 수 없습니다"]) }
             // 단어를 넷으로 끊어 역할을 붙인 모의 분석 (화면 확인용)
             let words = text.split(separator: " ").map(String.init)
@@ -357,7 +359,11 @@ struct MockState {
                 "created_at": Date().ms, "cached": false,
             ]
             structures[id] = o
-            return (200, o)
+            return (200, qaOf(o))
+        case "DELETE /api/sentences/:id/ask/:id":
+            let qid = parts.last ?? ""
+            sentenceQA.removeAll { $0["id"] as? String == qid && $0["sentence_id"] as? String == id }
+            return (200, ["ok": true])
         case "PUT /api/phrases/:id/note":
             guard let i = phrases.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 표현"]) }
             let n = (body["note"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -550,6 +556,12 @@ struct MockState {
             return (200, drills.filter { !($0["feedback"] is NSNull) }.reversed() as [[String: Any]])
         case "POST /api/sentences/:id/ask":
             guard let sent = sentences.first(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
+            if let q = body["question"] as? String {   // 구조 상자 안 질문 (형광펜 묻기와 같은 경로, body로 구분)
+                guard !q.trimmingCharacters(in: .whitespaces).isEmpty else { return (400, ["error": "질문을 입력하세요"]) }
+                let row: [String: Any] = ["id": nextId("q"), "sentence_id": id, "question": q, "answer": "(모의) \(q)\n이 문장에서는 주어 뒤 동사구가 핵심이고, 마지막 전치사구는 때를 나타낸다.", "created_at": Date().ms]
+                sentenceQA.append(row)
+                return (200, row)
+            }
             let span = body["span"] as? String ?? ""
             let h: [String: Any] = ["id": nextId("h"), "sentence_id": id, "article_id": sent["article_id"]!, "start_word": body["start_word"] ?? 0, "end_word": body["end_word"] ?? 0, "span": span,
                                     "answer": ["meaning": "(모의) \(span)의 뜻", "why": "문맥상 이런 뜻", "similar": "similar phrase"], "created_at": Date().ms]

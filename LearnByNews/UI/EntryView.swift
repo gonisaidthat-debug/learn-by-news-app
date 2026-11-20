@@ -136,6 +136,9 @@ struct EntryView: View {
     var onOpenPhrases: ((String) -> Void)? = nil
     /// 문장 구조 분석(2026-11-20): 동작 줄 "구조 분석 ✦" → 받는 중 "분석 중… ✎" → 점선 상자, 다시 누르면 "구조 접기". force면 다시 분석
     var onStructure: ((Bool) async throws -> Structure)? = nil
+    /// 구조 상자 안 질문·답(2026-11-20): 묻기(온라인에서만) · 문답 지우기
+    var onAskSentence: ((String) async throws -> SentenceQA)? = nil
+    var onDeleteQA: ((String) async throws -> Void)? = nil
     @State private var structure: Structure?
     @State private var structOpen = false
     @State private var structBusy = false
@@ -334,7 +337,9 @@ struct EntryView: View {
                 }
             }
             if structOpen, let st = structure {
-                StructureView(st: st, busy: structBusy, onAgain: { loadStructure(force: true) })
+                StructureView(st: st, busy: structBusy, onAgain: { loadStructure(force: true) }, onClose: { structOpen = false },
+                              onAsk: onAskSentence == nil ? nil : { q in let r = try await onAskSentence!(q); structure?.qa = (structure?.qa ?? []) + [r] },
+                              onDeleteQA: onDeleteQA == nil ? nil : { qid in try await onDeleteQA!(qid); structure?.qa = (structure?.qa ?? []).filter { $0.id != qid } })
                     .padding(.vertical, 4)
             }
         }
@@ -381,9 +386,17 @@ struct StructureView: View {
     var st: Structure
     var busy = false
     var onAgain: (() -> Void)?
+    var onClose: (() -> Void)? = nil                       // 오른쪽 위 × 접기 (동작 줄 "구조 접기"와 같다)
+    var onAsk: ((String) async throws -> Void)? = nil      // 상자 맨 아래 입력란 → 서버 → 문답이 목록에 붙는다
+    var onDeleteQA: ((String) async throws -> Void)? = nil
+    @ObservedObject private var net = Connectivity.shared
+    @State private var question = ""
+    @State private var asking = false
+    @State private var askErr: String?
+    @FocusState private var qFocused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            labeled("뼈대", st.skeleton, color: Theme.pencil)
+            labeled("뼈대", st.skeleton, color: Theme.pencil).padding(.trailing, onClose == nil ? 0 : 22)
             FlowLayout(spacing: 8) {
                 ForEach(Array(st.chunks.enumerated()), id: \.offset) { _, ch in
                     VStack(alignment: .center, spacing: 1) {
@@ -408,6 +421,38 @@ struct StructureView: View {
             labeled("읽기", st.reading, color: Theme.pencil)
             if !st.pitfalls.isEmpty { labeled("함정", st.pitfalls.joined(separator: " · "), color: Theme.pencil) }
             if !st.mine.isEmpty { labeled("내 번역은", st.mine, color: Theme.red, size: 20) }
+            // 문답 (goni 2026-11-20 "그 컨텍스트에 대해 추가로 질문하고 답변도"): 점선 위에 "Q. 질문"(남색) + 답(연필색, 줄바꿈 유지), 옆 × 지우기
+            let qa = st.qa ?? []
+            if !qa.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(qa) { x in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("Q. \(x.question)").font(Theme.hand(19)).foregroundStyle(Theme.blueInk).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                                if let onDeleteQA { Tiny(title: "×", size: 18) { Task { do { try await onDeleteQA(x.id) } catch { askErr = error.localizedDescription } } }.help("이 문답 지우기") }
+                            }
+                            Text(x.answer).font(Theme.hand(18)).foregroundStyle(Theme.pencil).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.top, 6)
+                .overlay(alignment: .top) { Rectangle().fill(Theme.pencil.opacity(0.35)).frame(height: 1) }
+            }
+            if onAsk != nil {
+                if net.isOnline {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        TextField("이 문장에 대해 물어볼 것 (Enter)", text: $question, axis: .vertical).font(Theme.hand(20)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                            .focused($qFocused).submitLabel(.send).autocorrectionDisabled().disabled(asking)
+                            .onSubmit { ask() }
+                        if asking { Text("답 쓰는 중… ✎\u{FE0E}").font(Theme.hand(18)).foregroundStyle(Theme.placeholder) }
+                        else if !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Tiny(title: "묻기", size: 18) { ask() } }
+                    }
+                } else {
+                    Text("연결되면 물어볼 수 있다").font(Theme.hand(18)).foregroundStyle(Theme.placeholder)
+                }
+                if let e = askErr { Text(e).font(Theme.hand(18)).foregroundStyle(Theme.red) }
+            }
             if let onAgain {
                 HStack(spacing: 10) {
                     Tiny(title: busy ? "분석 중… ✎\u{FE0E}" : "다시 분석 ↻\u{FE0E}", color: busy ? Theme.placeholder : Theme.pencil, size: 18, action: onAgain).disabled(busy)
@@ -419,6 +464,26 @@ struct StructureView: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 10).fill(Theme.paper.opacity(0.9)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3])).foregroundStyle(Theme.pencil))
+        .overlay(alignment: .topTrailing) {
+            if let onClose { Tiny(title: "×", size: 22, action: onClose).padding(.horizontal, 10).padding(.top, 4).help("접기").accessibilityLabel("구조 접기") }
+        }
+        .task {
+            #if DEBUG
+            // 화면 확인용: LBN_AUTOASK=<질문> 이면 상자가 뜨자마자 그 질문을 보낸다
+            if let q = ProcessInfo.processInfo.environment["LBN_AUTOASK"], onAsk != nil, (st.qa ?? []).isEmpty { question = q; ask() }
+            #endif
+        }
+    }
+    /// 질문 보내기: 비면 무시, 답이 오면 입력란을 비운다(문답은 st.qa에 붙어 다시 열어도 남는다)
+    private func ask() {
+        let t = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !asking, let onAsk else { return }
+        asking = true; askErr = nil
+        Task {
+            do { try await onAsk(t); question = "" }
+            catch { askErr = error.localizedDescription }
+            asking = false
+        }
     }
     private func labeled(_ label: String, _ text: String, color: Color, size: CGFloat = 19) -> some View {
         (Text(label + " ").font(Theme.hand(size - 2)).foregroundColor(Theme.pencil) + Text(text).font(Theme.hand(size)).foregroundColor(color))

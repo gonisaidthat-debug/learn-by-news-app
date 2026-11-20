@@ -502,6 +502,19 @@ final class SyncManager: ObservableObject {
         if let s = StructureStore.shared.get(sentenceId) { return s }
         throw APIError.network("지금은 오프라인 · 연결되면 분석")
     }
+    /// 구조 상자 안 질문(2026-11-20): 온라인에서만(답을 바로 봐야 한다, 큐 없음). 받은 문답은 기기 저장본에도 더한다
+    func askSentence(sentenceId: String, question: String) async throws -> SentenceQA {
+        guard Connectivity.shared.isOnline, !Self.isTemp(sentenceId) else { throw APIError.network("연결되면 물어볼 수 있다") }
+        let q = try await API.shared.askSentence(sentenceId, question: question)
+        StructureStore.shared.addQA(sentenceId, q)
+        AppLog.shared.info("structure", "asked", ["sentence": sentenceId, "id": q.id])
+        return q
+    }
+    func deleteSentenceQA(sentenceId: String, qid: String) async throws {
+        guard Connectivity.shared.isOnline else { throw APIError.network("연결되면 지울 수 있다") }
+        try await API.shared.deleteSentenceQA(sentenceId, qid: qid)
+        StructureStore.shared.removeQA(sentenceId, qid)
+    }
     /// 표현 내 메모: 캐시에 먼저, 온라인이면 바로, 아니면 큐 phrase_note(임시 id는 phrase_save 재생 뒤 실제 id로). 돌려주는 값은 저장된 메모(nil = 지움)
     func setPhraseNote(_ id: String, note: String) async throws -> String? {
         let n = note.trimmingCharacters(in: .whitespacesAndNewlines)

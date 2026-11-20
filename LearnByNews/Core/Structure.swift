@@ -12,6 +12,8 @@ struct Structure: Codable, Equatable {
     var mine: String
     var createdAt: Int64?
     var cached: Bool?
+    /// 구조 상자 안 문답(2026-11-20, 오래된 순). 서버 sentence_qa
+    var qa: [SentenceQA]?
 
     /// 역할 이름 → 색 묶음 (웹 roleKind와 같은 규칙): 주어 파랑 / 동사·술어 빨강 / 목적·보어 초록 / 접속·관계·종속·조건·시간 보라 / 나머지 회색
     static func color(_ role: String) -> Color {
@@ -22,6 +24,9 @@ struct Structure: Codable, Equatable {
         return Theme.pencil
     }
 }
+
+/// 구조 상자 안 질문·답 (goni 2026-11-20 "그 컨텍스트에 대해 추가로 질문하고 답변도 볼 수 있게"). `POST /api/sentences/:id/ask {question}` 응답
+struct SentenceQA: Codable, Equatable, Identifiable { var id: String; var question: String; var answer: String; var createdAt: Int64? }
 
 /// 받은 분석의 기기 저장본(문장 id별, UserDefaults). 오프라인에서는 이것만 보여 주고, 없으면 "연결되면 분석" —
 /// 큐에 넣지 않는다(결과를 바로 봐야 의미가 있다, goni 2026-11-20)
@@ -36,5 +41,8 @@ final class StructureStore {
     func get(_ sentenceId: String) -> Structure? { map[sentenceId] }
     func put(_ sentenceId: String, _ s: Structure) { map[sentenceId] = s; save() }
     func remove(_ sentenceId: String) { map[sentenceId] = nil; save() }
+    /// 문답을 저장본에 더하기 / 빼기 (서버가 받아 준 뒤)
+    func addQA(_ sentenceId: String, _ q: SentenceQA) { guard var s = map[sentenceId] else { return }; s.qa = (s.qa ?? []) + [q]; map[sentenceId] = s; save() }
+    func removeQA(_ sentenceId: String, _ qid: String) { guard var s = map[sentenceId] else { return }; s.qa = (s.qa ?? []).filter { $0.id != qid }; map[sentenceId] = s; save() }
     private func save() { UserDefaults.standard.set(try? JSONEncoder.api.encode(map), forKey: Self.key) }
 }

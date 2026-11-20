@@ -958,7 +958,9 @@ struct NotebookView: View {
                 noteOf: { e in (d.phrases.first { $0.sentenceId == x.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
                 onPhraseNote: { e, t in await m.setPhraseNote(x.id, e, t) },
                 onOpenPhrases: { pid in phrasesSheet = pid },
-                onStructure: { f in try await SyncManager.shared.structure(sentenceId: x.id, force: f) }
+                onStructure: { f in try await SyncManager.shared.structure(sentenceId: x.id, force: f) },
+                onAskSentence: { q in try await SyncManager.shared.askSentence(sentenceId: x.id, question: q) },
+                onDeleteQA: { qid in try await SyncManager.shared.deleteSentenceQA(sentenceId: x.id, qid: qid) }
             )
             .id(x.id)
         } else {

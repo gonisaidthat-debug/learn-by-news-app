@@ -397,7 +397,9 @@ struct DoneView: View {
                                 noteOf: { e in (d.phrases.first { $0.sentenceId == s.id && $0.phrase == e.phrase } ?? d.phrases.first { $0.phrase == e.phrase })?.note },
                                 onPhraseNote: { e, t in await m.setPhraseNote(s.id, e, t) },
                                 onOpenPhrases: { pid in phrasesSheet = pid },
-                                onStructure: { f in try await SyncManager.shared.structure(sentenceId: s.id, force: f) }
+                                onStructure: { f in try await SyncManager.shared.structure(sentenceId: s.id, force: f) },
+                                onAskSentence: { q in try await SyncManager.shared.askSentence(sentenceId: s.id, question: q) },
+                                onDeleteQA: { qid in try await SyncManager.shared.deleteSentenceQA(sentenceId: s.id, qid: qid) }
                             )
                         }
                     }
