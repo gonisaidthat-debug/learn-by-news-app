@@ -806,7 +806,7 @@ struct NotebookView: View {
         let redoIdx = m.redo.flatMap { r in d.sentences.firstIndex { $0.id == r } }
         let upto = m.browse ? total : m.passMode ? (redoIdx.map { $0 + 1 } ?? total) : (m.frontIdx ?? total)
         let waiting = m.inflight.count
-        // ✂ 줄은 다시 쓰기(pass) 진행 중에도 그 회차에 쓴 마지막 문장 뒤에 (goni 2026-11-20). 화면에 있는 문장(upto까지)에 걸린 것만 — 그래야 reviewInBody도 실제로 그린 것만 켠다
+        // ✂ 줄은 다시 쓰기(pass) 진행 중에도 그 회차에 쓴 마지막 문장 뒤에 (goni 2026-11-20). 화면에 있는 문장(upto까지)에 걸린 것만
         let shownIds = Set(d.sentences.prefix(upto).map(\.id))
         let markers = m.markers(session.sessions).filter { shownIds.contains($0.key) }
         return ScrollViewReader { proxy in
@@ -839,9 +839,7 @@ struct NotebookView: View {
                         }
                         foot(d, waiting: waiting)
                     }
-                    // 세션 줄(오늘 여기까지·버리기)은 StudyDot으로 옮겼다. 방금 닫은 세션이 이 공책에 ✂ 줄을 만들고 총평까지 있으면 StudyDot 패널에는 "기록했다"도 총평도 겹쳐 쓰지 않는다(두 번 보이던 일). 총평이 없으면 패널에 남아 "다시 시도"를 누른다
-                    .onChange(of: session.closed.map { c in c.review != nil && markers.values.contains { $0.id == c.id } } ?? false, initial: true) { _, v in session.reviewInBody = v }
-                    .onDisappear { session.reviewInBody = false }
+                    // 세션 줄(오늘 여기까지·버리기)은 StudyDot으로 옮겼다. 닫는 순간의 "기록했다 · 총평"은 어느 화면이든 StudyDot 패널 하나로, ✂ 줄을 그렸어도 생략하지 않는다(goni 2026-11-20 총평 자리 규칙)
                 }
                 .padding(EdgeInsets(top: 8, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()
@@ -1053,15 +1051,16 @@ struct PhraseRef: Identifiable { var id: String }
 /// "✂\u{FE0E} 여기까지 · 11/6 14:03–14:40 · 37분 · 12문장" 점선
 struct SessionMark: View {
     var session: StudySession
+    var compact = false     // 응용 탭 최근 응용 목록용: 공책 여백 없이, 조금 작게
     var body: some View {
         ZStack(alignment: .trailing) {
             Line().stroke(style: StrokeStyle(lineWidth: 2, dash: [6, 4])).foregroundStyle(Theme.red.opacity(0.55)).frame(height: 2)
             Text("✂\u{FE0E} 여기까지 · \(session.line)")
-                .font(Theme.hand(19)).foregroundStyle(Theme.red)
+                .font(Theme.hand(compact ? 17 : 19)).foregroundStyle(Theme.red).lineLimit(1)
                 .padding(.horizontal, 8).background(Theme.paper)
         }
-        .frame(height: Theme.lh)
-        .padding(.leading, Theme.paperLeft).padding(.trailing, Theme.paperRight)
+        .frame(height: compact ? 28 : Theme.lh)
+        .padding(.leading, compact ? 0 : Theme.paperLeft).padding(.trailing, compact ? 0 : Theme.paperRight)
     }
 }
 

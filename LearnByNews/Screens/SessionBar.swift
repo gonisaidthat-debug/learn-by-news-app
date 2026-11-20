@@ -11,7 +11,6 @@ final class SessionModel: ObservableObject {
     @Published var closed: StudySession?       // 방금 기록한 세션 (총평 표시용)
     @Published var retrying = false
     /// 공책이 방금 닫은 세션의 ✂ 줄+총평을 본문에 그리고 있다 → StudyDot 아래 패널에는 겹쳐 쓰지 않는다 (NotebookView가 켜고 끈다)
-    @Published var reviewInBody = false
     private var observer: NSObjectProtocol?
 
     init() {
@@ -139,14 +138,8 @@ struct StudyDot: View {
     @State private var dim = false
     @State private var confirmDiscard = false
 
-    /// 홈(기사 목록)은 닫은 세션을 공부 기록 맨 위에 총평과 함께 보여 준다
-    private var isHome: Bool { router.tab == .shelf && router.shelfPath.isEmpty }
-    /// 패널에 보여 줄 메시지. 닫기 결과("기록했다 · …")는 홈·공책 본문이 보여 주면 생략. 다른 메시지(오류 등)는 그대로
-    private var panelMsg: String? {
-        guard let msg = model.msg else { return nil }
-        if msg.hasPrefix("기록했다"), isHome || model.reviewInBody { return nil }
-        return msg
-    }
+    /// 패널에 보여 줄 메시지. 닫기 결과("기록했다 · …" + 총평 전체)는 어느 화면이든 이 패널 하나로, × 닫기 전까지(goni 2026-11-20 총평 자리 규칙 — 공책 ✂ 줄·홈 기록이 있어도 생략하지 않는다)
+    private var panelMsg: String? { model.msg }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

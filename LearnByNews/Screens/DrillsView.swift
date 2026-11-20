@@ -166,16 +166,18 @@ struct DrillsView: View {
                     }
                     if !store.graded.isEmpty { gradedSummary.padding(.bottom, 10) }
                     Paper { paper }
-                    if !m.recent.isEmpty { recentList.padding(.top, 28) }
+                    if !m.recent.isEmpty { recentList.padding(.top, 28).id("recent-end") }
                 }
                 .padding(EdgeInsets(top: 14, leading: 10, bottom: 40, trailing: 10))
                 .readableWidth()
             }
+            .scrollDrillsEndIfAsked()
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.desk.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .task {
                 await m.start(); focused = true
+                if session.sessions.isEmpty { await session.load() }   // 최근 응용 목록의 ✂ 줄에 쓸 세션 목록
                 #if DEBUG
                 // 화면 확인용: LBN_AUTOANSWER=1 이면 첫 문제에 답을 넣고 바로 제출한다 (채점 중 상태·멈추기 버튼 확인용, 모의 채점이 8초 걸린다)
                 if let v = ProcessInfo.processInfo.environment["LBN_AUTOANSWER"], m.current != nil {
@@ -304,12 +306,30 @@ struct DrillsView: View {
         }
     }
 
-    /// 최근 응용 20개: 작은 도장 · 표현 · 한국어 · 내 영작
+    /// 응용이 있는 세션(drills > 0)마다 그 세션 시간 안의 마지막 응용 id → 세션. 목록이 최신순이라 그 줄 "위"에 ✂ 줄 (goni 2026-11-20 총평 자리 규칙)
+    private var recentMarks: [String: StudySession] {
+        var out: [String: StudySession] = [:]
+        for s in session.sessions where (s.drills ?? 0) > 0 {
+            let inside = m.recent.filter { d in d.answeredAt.map { $0 >= s.startedAt && $0 <= s.endedAt } ?? false }
+            if let last = inside.max(by: { ($0.answeredAt ?? 0) < ($1.answeredAt ?? 0) }) { out[last.id] = s }
+        }
+        return out
+    }
+    /// 최근 응용 20개: 작은 도장 · 표현 · 한국어 · 내 영작. 세션의 마지막 응용 위에 "✂ 여기까지" + 총평(compact)
     private var recentList: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let marks = recentMarks
+        return VStack(alignment: .leading, spacing: 6) {
             Text("최근 응용").font(Theme.hand(24)).foregroundStyle(Theme.pencil)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(m.recent) { d in
+                    if let s = marks[d.id] {
+                        VStack(alignment: .leading, spacing: 2) {
+                            SessionMark(session: s, compact: true)
+                            if s.review != nil || s.id.hasPrefix("local-") { SessionReviewLines(session: s, size: 15, retrying: session.retrying) { Task { await session.retryReview(s) } } }
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 4)
+                        .background(Theme.paper)   // 괘선 위에 덮어 글이 줄에 안 겹치게
+                    }
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         if let g = d.grade { Stamp(kind: .grade(g), small: true) } else { Stamp(kind: .waiting, small: true) }
                         Text(d.phrase).font(Theme.hand(19)).foregroundStyle(Theme.ink).lineLimit(1).layoutPriority(1)   // fixedSize 금지: 긴 표현이 폭을 늘려 화면이 잘린다
@@ -329,6 +349,19 @@ struct DrillsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 3))
             .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
             .shadow(color: .black.opacity(0.08), radius: 12, y: 8)
+        }
+    }
+}
+
+private extension View {
+    /// 화면 확인용: LBN_AUTOSCROLL=1 이면 (닫기까지 끝난 뒤) 최근 응용 목록 끝으로 (DEBUG)
+    func scrollDrillsEndIfAsked() -> some View {
+        ScrollViewReader { proxy in
+            self.task {
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["LBN_AUTOSCROLL"] == "1" { try? await Task.sleep(for: .seconds(12)); proxy.scrollTo("recent-end", anchor: .bottom) }
+                #endif
+            }
         }
     }
 }
