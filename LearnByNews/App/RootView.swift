@@ -213,7 +213,15 @@ struct MainTabs: View {
             ActivityLogView().studyDot().tabItem { Label("기록", systemImage: "calendar") }.tag(Router.Tab.log)
         }
         .tint(Theme.red)
+        .tabBarAlwaysVisible()   // goni 2026-11-20 "플로팅 메뉴가 상시 떠 있으면": iOS 26 탭 바가 스크롤로 작아지지 않게 못 박는다 (StudyDot·네비 바는 원래 고정)
         .sheet(isPresented: $router.showSettings) { SettingsView() }
         .task { await SessionModel.shared.loadStart() }   // 공부 상태(StudyDot)는 모든 탭에 보이므로 서버 시작점을 여기서 한 번 맞춘다 (기사 탭 load에만 맡기면 다른 탭으로 열었을 때 옛 캐시가 보인다)
+    }
+}
+
+extension View {
+    /// 탭 바를 스크롤 방향과 상관없이 늘 그대로 (iOS 26 Liquid Glass 탭 바의 최소화 동작을 끈다. 그 아래 버전은 원래 고정)
+    @ViewBuilder func tabBarAlwaysVisible() -> some View {
+        if #available(iOS 26.0, *) { self.tabBarMinimizeBehavior(.never) } else { self }
     }
 }
