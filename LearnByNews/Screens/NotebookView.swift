@@ -721,6 +721,8 @@ struct NotebookView: View {
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOVOID"], let x = m.data?.sentences.first(where: { $0.id == sid }) { await m.voidAttempt(x); m.redo = nil; m.open = sid; m.requestScroll(sid) }
             // 화면 확인용: LBN_AUTOPHRASES=<표현 id> 이면 그 표현으로 표현장 시트를 연다("표현장 ↗" 확인용)
             if let pid = ProcessInfo.processInfo.environment["LBN_AUTOPHRASES"] { Task { try? await Task.sleep(for: .seconds(1)); phrasesSheet = pid } }
+            // 화면 확인용: LBN_AUTOSENTPIN=<문장 id> 이면 그 문장 전체를 표현장에 붙인다("문장 붙여 둠 ✓" 확인용)
+            if let sid = ProcessInfo.processInfo.environment["LBN_AUTOSENTPIN"], let x = m.data?.sentences.first(where: { $0.id == sid }), let a = x.attempt { await m.togglePhrase(sid, Expression(phrase: x.text, meaning: a.feedback.reference.isEmpty ? a.translation : a.feedback.reference)) }
             // 화면 확인용: LBN_AUTOSTRUCT=<문장 id> 이면 구조 분석 상자가 보이도록 받은 뒤 맨 아래로 스크롤
             if ProcessInfo.processInfo.environment["LBN_AUTOSTRUCT"] != nil { Task { try? await Task.sleep(for: .seconds(4.5)); m.requestScroll("bottom") } }
             // 화면 확인용: LBN_AUTOTRY=<문장 id> 이면 써 보기 상자(EntryView가 연다)가 보이도록 잠시 뒤 맨 아래로 스크롤
@@ -968,8 +970,10 @@ struct NotebookView: View {
         let redo = m.redo != nil
         return Entry(stamp: redo ? AnyView(Stamp(kind: .redo)) : nil) {
             Text(s.text).font(Theme.print(16)).foregroundStyle(redo ? Theme.pencil : Theme.ink).modifier(RuledText(uiFont: Theme.printUI(16), lh: Theme.lh))
-                .padding(.trailing, 28)
-                .overlay(alignment: .topTrailing) { CopyButton(text: s.text, label: "⎘\u{FE0E}", size: 18).frame(height: Theme.lh) }   // 지금 쓰는 문장의 원문 복사
+                .padding(.trailing, 58)
+                .overlay(alignment: .topTrailing) {   // 지금 쓰는 문장의 원문 듣기 🔊 · 복사 ⎘
+                    HStack(spacing: 8) { SpeakButton(text: s.text, label: "🔊\u{FE0E}", size: 16); CopyButton(text: s.text, label: "⎘\u{FE0E}", size: 18) }.frame(height: Theme.lh)
+                }
             if !session.inSession {
                 Button { session.begin(); focused = true } label: {
                     Text("공부 시작 ▶\u{FE0E} 을 누르면 여기에 쓸 수 있다").redpen()

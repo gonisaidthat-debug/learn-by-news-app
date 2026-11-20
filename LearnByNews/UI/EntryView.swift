@@ -163,11 +163,12 @@ struct EntryView: View {
                 }
             }
             if fb.grade == .skip {
-                HStack(spacing: 10) {
+                FlowLayout(spacing: 10, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
-                    if let onRedo { Tiny(title: "써 보기 ↻\u{FE0E}", action: onRedo) }
-                    if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid) }
-                    CopyButton(text: s.text)
+                    if let onRedo { Tiny(title: "써 보기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
+                    if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh) }
+                    CopyButton(text: s.text).frame(height: Theme.lh)
+                    SpeakButton(text: s.text).frame(height: Theme.lh)
                 }
                 ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
             } else {
@@ -300,6 +301,17 @@ struct EntryView: View {
             FlowLayout(spacing: 16, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
                 if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
                 CopyButton(text: s.text).frame(height: Theme.lh)
+                SpeakButton(text: s.text).frame(height: Theme.lh)
+                do {
+                    // 문장 전체를 표현장에 (goni 2026-11-20 "짧은 문장 중 써먹고 싶은 것이 있어서"). 뜻은 참고 번역(없으면 내 번역).
+                    // 붙은 뒤 다시 누르면 습득 완료 토글(포스트잇과 같다), 떼는 건 표현장 ×. 응용·시험·테이프에 자연히 들어간다
+                    let sp = savedPhrases.first { $0.phrase == s.text && $0.sentenceId == s.id } ?? savedPhrases.first { $0.phrase == s.text }
+                    Tiny(title: sp?.isMastered == true ? "문장 습득 완료 ✓\u{FE0E}" : sp != nil ? "문장 붙여 둠 ✓\u{FE0E}" : "문장을 표현장에 ＋", color: sp != nil ? Theme.grade(.A) : Theme.pencil) {
+                        onTogglePhrase(Expression(phrase: s.text, meaning: fb.reference.isEmpty ? (s.attempt?.translation ?? "") : fb.reference))
+                    }
+                    .frame(height: Theme.lh)
+                    .help(sp?.isMastered == true ? "습득 완료. 누르면 되돌린다" : sp != nil ? "문장이 표현장에 붙어 있다. 누르면 습득 완료. 떼려면 표현장에서 ×" : "이 문장 통째로 표현장에 붙인다 (뜻 = 참고 번역). 응용·시험·테이프에도 들어간다")
+                }
                 if onStructure != nil {
                     Tiny(title: structBusy ? "분석 중… ✎\u{FE0E}" : (structOpen && structure != nil) ? "구조 접기" : "구조 분석 ✦\u{FE0E}", color: structBusy ? Theme.placeholder : Theme.pencil) { loadStructure() }
                         .disabled(structBusy).frame(height: Theme.lh)
@@ -559,6 +571,18 @@ struct RelatedChips: View {
             }
         }
         .task { items = await load(span, nil, excludeSentence, exclude); loaded = true }
+    }
+}
+
+/// 원문 문장 듣기 (goni 2026-11-20 "문장 자체도 소리를 들을 수 있게"). 영어만 한 번, 다시 누르면 끊고 새로(TapePlayer.speakOnce — 테이프 재생 중이면 멈춘다)
+struct SpeakButton: View {
+    var text: String
+    var label = "듣기 🔊\u{FE0E}"
+    var size: CGFloat = 20
+    var body: some View {
+        Tiny(title: label, size: size) { TapePlayer.shared.speakOnce(phrase: text) }
+            .help("원문을 영어로 읽어 준다")
+            .accessibilityLabel("원문 듣기")
     }
 }
 
