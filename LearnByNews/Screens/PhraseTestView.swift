@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 표현장 시험 (웹 PhraseTest.tsx, goni 2026-11-18). 방식 셋(웹 50680bb·71126bc):
 /// - 표현 쓰기: 뜻 → 영어 표현. Enter로 확인 — 소문자·구두점·공백·앞의 to/a/an/the 무시하고 같으면 바로 "맞았다 ○"(기록), 아니면 답 포스트잇 + 내 답(취소선) + 스스로 ○/×. key "pr|<id>"
-/// - 뜻 쓰기: 표현 → 한국어 뜻. Enter로 답 공개(글자 비교 없음) → 알았다/몰랐다. key "pm|<id>", 기록·순서도 그 기록(m_*)으로
+/// - 뜻 쓰기: 표현 → 한국어 뜻. Enter로 확인 — 저장된 뜻과 느슨하게 비교(meaningHit)해 비슷하면 바로 "맞았다 ○"(기록) + "사실 몰랐다 ×", 아니면 답 공개 → 알았다/몰랐다. key "pm|<id>", 기록·순서도 그 기록(m_*)으로
 /// - 고급 ✎: 뜻만 보고 그 표현으로 내 문장 하나(영어) → POST /api/drills/free(멈추기 가능) → 결과를 써 보기 상자처럼. used_expression && A·B면 맞았다, 아니면 몰랐다 → key "pr|<id>"로 기록
 /// 순서는 시험지와 같이 안 본 것 → 틀린 것 → 맞힌 것. 묶음 아직/습득 완료/전체(기억). 습득 완료 묶음을 고르면 고급이 기본. 오프라인이면 캐시 표현으로 카드, 결과는 큐
 @MainActor
@@ -91,7 +91,26 @@ final class PhraseTestModel: ObservableObject {
         for art in ["to ", "a ", "an ", "the "] where w.hasPrefix(art) { w = String(w.dropFirst(art.count)); break }
         return w
     }
-    /// Enter: 표현 쓰기는 맞으면 바로 기록, 아니면 답 공개 후 ○/× 대기. 뜻 쓰기는 답만 공개. 고급은 자유 작문 채점
+    /// 뜻 비교 (goni 2026-11-21 "채점이 바로바로 되는 게 아닌가", 웹 meaningHit과 같다): 한글 뜻은 말이 달라도 같을 수 있어 완전 일치는 못 본다.
+    /// 소문자화, 괄호 속 제거, 한글·영문·숫자 외 전부 제거 → 저장된 뜻을 , ， · ; / 또는 " 또는 "으로 쪼갠 갈래(2글자 이상) 중 하나가 내 답에 들어 있거나
+    /// 내 답이 그 갈래에 들어 있으면(내 답 2글자 이상), 또는 공통 앞부분 ≥ max(3, min(두 길이) − 2)이면(어미만 다른 것) 맞음
+    static func meaningHit(_ answer: String, _ meaning: String) -> Bool {
+        func nz(_ t: String) -> [Character] {
+            let noParen = t.lowercased().replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)
+            return noParen.filter { c in
+                guard let u = c.unicodeScalars.first, c.unicodeScalars.count == 1 else { return false }
+                return (0xAC00...0xD7A3).contains(u.value) || (c.isLetter && c.isASCII) || (c.isNumber && c.isASCII)
+            }.map { $0 }
+        }
+        let a = nz(answer)
+        guard a.count >= 2 else { return false }
+        let parts = meaning.replacingOccurrences(of: " 또는 ", with: ",")
+            .split(whereSeparator: { ",，·;/".contains($0) }).map { nz(String($0)) }.filter { $0.count >= 2 }
+        func prefix(_ x: [Character], _ y: [Character]) -> Int { var i = 0; while i < x.count, i < y.count, x[i] == y[i] { i += 1 }; return i }
+        func contains(_ hay: [Character], _ needle: [Character]) -> Bool { String(hay).contains(String(needle)) }
+        return parts.contains { x in contains(a, x) || contains(x, a) || prefix(a, x) >= max(3, min(a.count, x.count) - 2) }
+    }
+    /// Enter: 표현 쓰기는 맞으면 바로 기록, 아니면 답 공개 후 ○/× 대기. 뜻 쓰기는 비슷하면 바로 기록, 아니면 답 공개 후 ○/×. 고급은 자유 작문 채점
     func check() {
         guard let it = current, revealed == nil, !grading else { return }
         let a = answer.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -100,10 +119,17 @@ final class PhraseTestModel: ObservableObject {
         case .write:
             if Self.norm(a) == Self.norm(it.phrase) { revealed = .right; right += 1; record(it, true) } else { revealed = .wrong }
         case .meaning:
-            revealed = .shown
+            if Self.meaningHit(a, it.meaning) { revealed = .right; right += 1; record(it, true) } else { revealed = .shown }
         case .advanced:
             submitFree(it, a)
         }
+    }
+    /// 뜻 쓰기에서 글자가 비슷해 맞음으로 쳤지만 사실 몰랐다: 맞음을 빼고 몰랐다로 다시 기록(도장 뗌 반영) → 다음 카드
+    func unhit() {
+        guard let it = current, mode == .meaning, revealed == .right else { return }
+        right -= 1; wrong += 1
+        revokedPrev = nil
+        record(it, false); next()
     }
     func giveUp() { if current != nil, revealed == nil, !grading { revealed = mode == .meaning ? .shown : .wrong } }
     /// 스스로 매기기(표현 쓰기 틀렸을 때·뜻 쓰기). 습득 완료 카드에서 몰랐다고 하면 서버가 도장을 뗀다(revoked) → 다음 카드 위에 한 줄
@@ -233,11 +259,12 @@ struct PhraseTestView: View {
             if let v = ProcessInfo.processInfo.environment["LBN_TESTANSWER"], let it = m.current {
                 switch m.mode {
                 case .write: m.answer = v == "right" ? it.phrase : "keep the rate"
-                case .meaning: m.answer = v == "right" ? it.meaning : "금리를 올리다"
+                case .meaning: m.answer = v == "wrong" ? "금리를 올리다" : String(it.meaning.replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression).split(whereSeparator: { ",，·;/".contains($0) }).first ?? "").trimmingCharacters(in: .whitespaces).dropLast(1) + "는"   // 어미만 다르게
                 case .advanced: m.answer = v == "right" ? "The central bank decided to \(it.phrase) this quarter." : "The bank kept everything as it was."
                 }
                 m.check()
                 if v == "wrongmark" { m.mark(false) }   // 몰랐다까지 → 다음 카드 위 "⟲ 앞 표현…" 확인용
+                if v == "unhit" { m.unhit() }           // 뜻 쓰기: 맞은 뒤 "사실 몰랐다 ×"까지
             }
             #endif
         }
@@ -359,6 +386,7 @@ struct PhraseTestView: View {
                         if m.revealed == .wrong, it.isMastered { MutedText(text: "도장 뗌") }
                     } else if m.revealed == .right {
                         Tiny(title: "맞았다 ○ · 다음 ↵\u{FE0E}", color: Theme.grade(.A)) { m.next(); focused = true }.keyboardShortcut(.return, modifiers: [])
+                        if m.mode == .meaning { Tiny(title: "사실 몰랐다 ×", color: Theme.red) { m.unhit(); focused = true }.help("글자가 비슷해서 맞음으로 쳤지만 사실은 몰랐다 → 몰랐다로 기록") }
                         if m.mastered.contains(it.id) { MutedText(text: "습득 완료로 찍었다") }
                         else { Tiny(title: "습득 완료 ✓\u{FE0E}") { Task { await m.master() } }.help("다 익혔다. 표현장에 남고 응용·시험에서 빠진다") }
                     } else {
