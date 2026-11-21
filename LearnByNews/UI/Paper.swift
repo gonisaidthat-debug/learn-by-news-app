@@ -132,12 +132,32 @@ struct Sticky: View {
     var big = false
     var mastered = false      // 습득 완료 도장: 흐려지고 오른쪽 아래 초록 테두리 "습득 완료"
     var note: String? = nil   // 표현 내 메모: 뜻 아래 "✎ 메모" (연필색, 작게)
+    /// A안(goni 2026-11-20): 제목 오른쪽에 🔊 ★★★, 뜻 아래 메모 줄은 누르면 쓰고 고친다(없으면 흐린 "+ 메모"). 공책 포스트잇에서만 준다
+    var speak = false
+    var stars = 0
+    var onStars: ((Int) -> Void)? = nil
+    var onNote: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(phrase).font(Theme.hand(big ? 24 : 22)).foregroundStyle(Color(hex: 0x2A2412)).fontWeight(.bold)
+            HStack(alignment: .top, spacing: 8) {
+                Text(phrase).font(Theme.hand(big ? 24 : 22)).foregroundStyle(Color(hex: 0x2A2412)).fontWeight(.bold)
+                if speak || onStars != nil {
+                    HStack(spacing: 2) {
+                        if speak { SpeakIcon(text: phrase, size: 12) }
+                        if let onStars { StarRow(stars: stars, size: 11, onSet: onStars) }
+                    }
+                    .padding(.top, 3)
+                }
+            }
             Text(meaning).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x5B5440))
-            if let n = note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(16)).foregroundStyle(Color(hex: 0x6B5D2A)) }
+            if let n = note, !n.isEmpty {
+                Button { onNote?() } label: { Text("✎\u{FE0E} \(n)").font(Theme.hand(16)).foregroundStyle(Color(hex: 0x6B5D2A)) }
+                    .buttonStyle(.plain).disabled(onNote == nil).help("누르면 메모를 고친다")
+            } else if let onNote {
+                Button(action: onNote) { Text("+ 메모").font(Theme.hand(15)).foregroundStyle(Color(hex: 0x6B5D2A).opacity(0.5)) }
+                    .buttonStyle(.plain).help("내 말로 한 줄 (예: 도약이라고 해석됨)")
+            }
         }
         .multilineTextAlignment(.leading)
         .padding(EdgeInsets(top: 12, leading: 14, bottom: mastered ? 30 : 12, trailing: 14))

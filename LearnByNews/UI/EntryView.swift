@@ -146,12 +146,17 @@ struct EntryView: View {
     @State private var notingPhrase: String?      // 메모 입력이 열린 표현(글자)
     @State private var tryExpr: Expression?
     @State private var linkingPhrase: String?     // "엮기"가 열린 표현(표현장 id)
+    @State private var moreOpen = false           // 동작 줄 ⋯ (앞/뒤와 합치기)
 
     var body: some View {
         let a = s.attempt!
         let fb = a.feedback
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
-            if expanded, let onAsk { MarkerWords(text: s.text, sentenceId: s.id, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight, onRelated: onRelated) }
+            // 원문의 것은 원문 줄 끝에 (goni 2026-11-20 A안): 복사 ⎘ · 듣기 🔊 · 구조 분석 ✦. 건너뛴 문장도 ⎘ 🔊는 원문 끝
+            let tools = SrcTools(text: s.text, structOpen: structOpen && structure != nil, structBusy: structBusy,
+                                 onStructure: (onStructure == nil || fb.grade == .skip) ? nil : { loadStructure() })
+            if expanded || fb.grade == .skip, let onAsk { MarkerWords(text: s.text, sentenceId: s.id, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight, onRelated: onRelated, tools: tools) }
+            else if expanded || fb.grade == .skip { HStack(alignment: .bottom, spacing: 0) { Text(markHighlights(s.text, highlights)).enLine(); tools } }
             else { Text(markHighlights(s.text, highlights)).enLine() }
             if expanded {
                 ForEach(highlights) { h in
@@ -170,8 +175,6 @@ struct EntryView: View {
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
                     if let onRedo { Tiny(title: "써 보기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
                     if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh) }
-                    CopyButton(text: s.text).frame(height: Theme.lh)
-                    SpeakButton(text: s.text).frame(height: Theme.lh)
                 }
                 ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
             } else {
@@ -274,10 +277,10 @@ struct EntryView: View {
                         TryButton(title: tryExpr == e ? "접기" : "써 보기 ✎\u{FE0E}", count: tryExpr == e ? 0 : (drillCounts[src] ?? 0)) { tryExpr = tryExpr == e ? nil : e }
                     }
                     if let sp, !onSticky, onAddPhraseLink != nil, onRelated != nil {
-                        Tiny(title: linkingPhrase == sp.id ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id }
+                        Tiny(title: linkingPhrase == sp.id ? "접기" : "엮기 ⟷\u{FE0E}", size: 17) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id }
                     }
-                    if onPhraseNote != nil, !onSticky { Tiny(title: (noteOf?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { notingPhrase = notingPhrase == src ? nil : src } }
-                    if !onSticky, let onOpenPhrases, let pid = phraseId(e), !SyncManager.isTemp(pid) { Tiny(title: "표현장 ↗\u{FE0E}", size: 17) { onOpenPhrases(pid) } }
+                    if onPhraseNote != nil, saved, !onSticky { Tiny(title: (noteOf?(e) ?? "").isEmpty ? "+ 메모" : "메모 고치기", size: 17) { notingPhrase = notingPhrase == src ? nil : src } }
+                    if !onSticky, let onOpenPhrases, let pid = phraseId(e), !SyncManager.isTemp(pid) { Tiny(title: "표현장 ⧉\u{FE0E}", size: 17) { onOpenPhrases(pid) } }
                     if !onSticky { SpeakIcon(text: e.phrase) }
                     if let onWeight { StarRow(stars: weightOf?(e) ?? 0, size: 13) { w in Task { await onWeight(e, w) } } }   // 중요도 별
                 }
@@ -300,10 +303,10 @@ struct EntryView: View {
         }
         ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
         do {
+            // 번역을 고치는 것은 첨삭 아래 (A안): 다시 쓰기 ↻ · 잘못 눌렀다 ✗ · 문장을 표현장에 ＋ · ⋯(앞/뒤와 합치기). 복사·듣기·구조 분석은 원문 줄 끝으로 갔다
             FlowLayout(spacing: 16, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
-                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
-                CopyButton(text: s.text).frame(height: Theme.lh)
-                SpeakButton(text: s.text).frame(height: Theme.lh)
+                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh).help("첨삭을 보고 고쳐 쓴다. 이 번역은 이전 시도로 남고 집계에도 남는다") }
+                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
                 do {
                     // 문장 전체를 표현장에 (goni 2026-11-20 "짧은 문장 중 써먹고 싶은 것이 있어서"). 뜻은 참고 번역(없으면 내 번역).
                     // 붙은 뒤 다시 누르면 습득 완료 토글(포스트잇과 같다), 떼는 건 표현장 ×. 응용·시험·테이프에 자연히 들어간다
@@ -314,14 +317,9 @@ struct EntryView: View {
                     .frame(height: Theme.lh)
                     .help(sp?.isMastered == true ? "습득 완료. 누르면 되돌린다" : sp != nil ? "문장이 표현장에 붙어 있다. 누르면 습득 완료. 떼려면 표현장에서 ×" : "이 문장 통째로 표현장에 붙인다 (뜻 = 참고 번역). 응용·시험·테이프에도 들어간다")
                 }
-                if onStructure != nil {
-                    Tiny(title: structBusy ? "분석 중… ✎\u{FE0E}" : (structOpen && structure != nil) ? "구조 접기" : "구조 분석 ✦\u{FE0E}", color: structBusy ? Theme.placeholder : Theme.pencil) { loadStructure() }
-                        .disabled(structBusy).frame(height: Theme.lh)
-                        .help("문장의 뼈대와 덩어리, 읽는 순서, 내 번역이 구조를 어떻게 읽었는지. 처음 한 번만 Claude가 분석하고 저장한다")
-                }
-                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
-                if let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
-                if let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+                if onMergePrev != nil || onMergeNext != nil, !moreOpen { Tiny(title: "⋯") { moreOpen = true }.frame(height: Theme.lh).help("드물게 쓰는 것: 잘못 끊긴 문장 합치기") }
+                if moreOpen, let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+                if moreOpen, let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
             }
             .task {
                 #if DEBUG
@@ -354,7 +352,7 @@ struct EntryView: View {
                       mastered: { e in savedPhrases.first { $0.phrase == e.phrase }?.isMastered ?? false },
                       links: { e in savedPhrases.first { $0.phrase == e.phrase }?.links ?? [] },
                       onLink: onAddPhraseLink == nil || onRelated == nil ? nil : { e in if let sp = savedPhrases.first(where: { $0.phrase == e.phrase }) { linkingPhrase = linkingPhrase == sp.id ? nil : sp.id } },
-                      linkLabel: { e in savedPhrases.first { $0.phrase == e.phrase }.map { linkingPhrase == $0.id ? "접기" : "엮기 ↗\u{FE0E}" } ?? "엮기 ↗\u{FE0E}" },
+                      linkLabel: { e in savedPhrases.first { $0.phrase == e.phrase }.map { linkingPhrase == $0.id ? "접기" : "엮기 ⟷\u{FE0E}" } ?? "엮기 ⟷\u{FE0E}" },
                       onRemoveLink: onRemovePhraseLink == nil ? nil : { e, l in if let sp = savedPhrases.first(where: { $0.phrase == e.phrase }) { Task { await onRemovePhraseLink?(sp, l) } } },
                       stars: weightOf, onStars: onWeight == nil ? nil : { e, w in Task { await onWeight?(e, w) } },
                       note: noteOf, noting: notingPhrase,
@@ -523,17 +521,17 @@ struct StickyRow: View {
         FlowLayout(spacing: 14) {
             ForEach(items, id: \.0) { e, saved, i in
                 VStack(alignment: .leading, spacing: 2) {
-                    Button { onTap(e) } label: { Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false), note: note?(e)) }
-                        .buttonStyle(.plain)
+                    // A안(goni 2026-11-20): 🔊 ★★★ 메모는 포스트잇 안으로. 본체 탭은 전처럼 붙이기/습득 완료(안의 버튼이 먼저 받는다)
+                    Sticky(phrase: e.phrase, meaning: e.meaning, index: i, pinned: saved, mastered: saved && (mastered?(e) ?? false), note: note?(e),
+                           speak: onSpeak != nil, stars: stars?(e) ?? 0, onStars: onStars == nil ? nil : { w in onStars?(e, w) }, onNote: onNote == nil ? nil : { onNote?(e) })
+                        .contentShape(Rectangle())
+                        .onTapGesture { onTap(e) }
                         .help(saved ? "붙여 둠. 누르면 습득 완료(표현장에 남고 응용·시험지에서 빠짐). 떼려면 표현장에서 ×" : "누르면 표현장에 붙인다")
-                    if onTry != nil || (saved && onLink != nil) || onStars != nil || onNote != nil {
-                        FlowLayout(spacing: 12) {
+                    if onTry != nil || (saved && (onLink != nil || onOpen != nil)) {
+                        FlowLayout(spacing: 12) {   // 아래 줄은 써 보기 ✎ · 엮기 ⟷ · 표현장 ⧉ 셋
                             if let onTry { TryButton(title: openPhrase == e.phrase ? "접기" : "써 보기 ✎\u{FE0E}", count: openPhrase == e.phrase ? 0 : (counts[e.phrase] ?? 0)) { onTry(e) } }
-                            if saved, let onLink { Tiny(title: linkLabel?(e) ?? "엮기 ↗\u{FE0E}", size: 17) { onLink(e) } }
-                            if let onNote { Tiny(title: (note?(e) ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { onNote(e) } }
-                            if saved, let onOpen { Tiny(title: "표현장 ↗\u{FE0E}", size: 17) { onOpen(e) } }
-                            if onSpeak != nil { SpeakIcon(text: e.phrase) }
-                            if let onStars { StarRow(stars: stars?(e) ?? 0, size: 13) { w in onStars(e, w) } }
+                            if saved, let onLink { Tiny(title: linkLabel?(e) ?? "엮기 ⟷\u{FE0E}", size: 17) { onLink(e) } }
+                            if saved, let onOpen { Tiny(title: "표현장 ⧉\u{FE0E}", size: 17) { onOpen(e) } }
                         }
                         .padding(.leading, 6)
                     }
@@ -664,11 +662,12 @@ struct SpeakIcon: View {
     var text: String
     var size: CGFloat = 13
     var padding = EdgeInsets()
+    var color: Color = Theme.ink
     @ObservedObject private var tape = TapePlayer.shared
     var body: some View {
         let on = tape.speakingOnce == text
         Button { tape.toggleOnce(text) } label: {
-            Text(on ? "■\u{FE0E}" : "🔊").font(.system(size: size)).foregroundStyle(on ? Theme.red : Theme.ink).padding(padding)
+            Text(on ? "■\u{FE0E}" : "🔊").font(.system(size: size)).foregroundStyle(on ? Theme.red : color).padding(padding)
         }
         .buttonStyle(.plain).accessibilityLabel(on ? "멈춤" : "읽어 주기")
     }
@@ -678,16 +677,38 @@ struct SpeakIcon: View {
 struct CopyButton: View {
     var text: String
     var label = "원문 복사 ⎘\u{FE0E}"
+    var doneLabel = "복사됨 ✓\u{FE0E}"
     var size: CGFloat = 20
     @State private var done = false
     var body: some View {
-        Tiny(title: done ? "복사됨 ✓\u{FE0E}" : label, color: done ? Theme.grade(.A) : Theme.pencil, size: size) {
+        Tiny(title: done ? doneLabel : label, color: done ? Theme.grade(.A) : Theme.pencil, size: size) {
             UIPasteboard.general.string = text
             done = true
             Task { try? await Task.sleep(for: .seconds(1.5)); done = false }
         }
         .help("영어 원문을 클립보드에 복사한다")
         .accessibilityLabel("원문 복사")
+    }
+}
+
+/// 원문 줄 끝 도구 (goni 2026-11-20 A안 "원문의 것은 원문 옆에"): 복사 ⎘ · 듣기 🔊(읽는 중 ■) · 구조 분석 ✦(열려 있으면 진하게, 분석 중 ✦…)
+struct SrcTools: View {
+    var text: String
+    var structOpen = false
+    var structBusy = false
+    var onStructure: (() -> Void)? = nil
+    var body: some View {
+        HStack(spacing: 10) {
+            CopyButton(text: text, label: "⎘\u{FE0E}", doneLabel: "✓\u{FE0E}", size: 18)
+            SpeakIcon(text: text, size: 14, color: Theme.pencil)
+            if let onStructure {
+                Tiny(title: structBusy ? "✦\u{FE0E}…" : "✦\u{FE0E}", color: structOpen ? Theme.ink : Theme.pencil, size: 18, action: onStructure)
+                    .disabled(structBusy)
+                    .help(structOpen ? "구조 분석 접기" : "문장의 뼈대와 덩어리, 읽는 순서, 내 번역이 구조를 어떻게 읽었는지. 처음 한 번만 Claude가 분석하고 저장한다")
+                    .accessibilityLabel(structOpen ? "구조 접기" : "구조 분석")
+            }
+        }
+        .padding(.leading, 10).frame(height: Theme.lh)
     }
 }
 
@@ -998,6 +1019,7 @@ struct MarkerWords: View {
     var onNote: ((Highlight, String) async -> Void)? = nil
     var onDelete: ((Highlight) async -> Void)? = nil
     var onRelated: ((String?, String?, String?, String?) async -> [Related])? = nil
+    var tools: SrcTools? = nil                    // 원문 줄 끝 ⎘ 🔊 ✦ (A안)
     @State private var chosen: [Related] = []     // 메모와 함께 엮을 것
     @State private var anchor: Int?
     @State private var range: ClosedRange<Int>?
@@ -1030,6 +1052,7 @@ struct MarkerWords: View {
                     .contentShape(Rectangle())
                     .onTapGesture { tap(i) }
                 }
+                if let tools { tools }
             }
             if let h = picked, range == nil {
                 // 기존 형광펜을 골랐다: 내 메모 · 새로 칠하기 · 지우기 · 닫기
@@ -1181,9 +1204,14 @@ struct MarkerMemo: View {
                     Text(h.span).font(Theme.hand(20)).fontWeight(.bold).foregroundStyle(Color(hex: 0x2A2412))
                 }
                 Spacer(minLength: 0)
-                if let onDelete {
-                    Button { Task { await onDelete(h) } } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
-                        .buttonStyle(.plain).accessibilityLabel("형광펜 지우기")
+                // A안: 오른쪽 위 🔊 ★★★ ×
+                HStack(spacing: 2) {
+                    if let t = speakText { SpeakIcon(text: t, size: 12) }
+                    if let onStars { StarRow(stars: stars, size: 11, onSet: onStars) }
+                    if let onDelete {
+                        Button { Task { await onDelete(h) } } label: { Text("×").font(.system(size: 16)).foregroundStyle(Theme.pencil).padding(.horizontal, 4) }
+                            .buttonStyle(.plain).accessibilityLabel("형광펜 지우기")
+                    }
                 }
             }
             if editing {
@@ -1195,16 +1223,18 @@ struct MarkerMemo: View {
                     Tiny(title: "취소", size: 18) { editing = false }.keyboardShortcut(.escape, modifiers: [])
                 }
             } else {
-                FlowLayout(spacing: 10) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로 (메모 글이 좁게 접히던 일)
-                    if let n = h.note, !n.isEmpty { Text("✎\u{FE0E} \(n)").font(Theme.hand(20)).foregroundStyle(Theme.blueInk) }
-                    if onNote != nil {
-                        Tiny(title: (h.note ?? "").isEmpty ? "내 메모 ✎\u{FE0E}" : "메모 고치기", size: 17) { text = h.note ?? ""; editing = true; focused = true }
+                // A안: 내 메모 줄은 눌러서 고치기, 아래 줄은 써 보기 · 엮기 ⟷ · 표현장 ⧉ · (메모 없을 때) + 메모
+                if let n = h.note, !n.isEmpty {
+                    Button { text = n; editing = true; focused = true } label: { Text("✎\u{FE0E} \(n)").font(Theme.hand(20)).foregroundStyle(Theme.blueInk) }
+                        .buttonStyle(.plain).disabled(onNote == nil).help("누르면 메모를 고친다")
+                }
+                if onTry != nil || (onRelated != nil && onAddLink != nil) || onOpen != nil || (onNote != nil && (h.note ?? "").isEmpty) {
+                    FlowLayout(spacing: 10) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
+                        if let onTry { TryButton(title: tryTitle, count: tryCount, action: onTry) }
+                        if onRelated != nil, onAddLink != nil { Tiny(title: linking ? "접기" : "엮기 ⟷\u{FE0E}", size: 17) { linking.toggle() } }
+                        if let onOpen { Tiny(title: "표현장 ⧉\u{FE0E}", size: 17, action: onOpen) }
+                        if onNote != nil, (h.note ?? "").isEmpty { Tiny(title: "+ 메모", size: 17) { text = ""; editing = true; focused = true } }
                     }
-                    if let onTry { TryButton(title: tryTitle, count: tryCount, action: onTry) }
-                    if onRelated != nil, onAddLink != nil { Tiny(title: linking ? "접기" : "엮기 ↗\u{FE0E}", size: 17) { linking.toggle() } }
-                    if let onOpen { Tiny(title: "표현장 ↗\u{FE0E}", size: 17, action: onOpen) }
-                    if let t = speakText { SpeakIcon(text: t) }
-                    if let onStars { StarRow(stars: stars, size: 13, onSet: onStars) }
                 }
             }
             if linking, let onRelated, let onAddLink {
