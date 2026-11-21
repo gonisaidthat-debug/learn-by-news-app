@@ -60,7 +60,7 @@ struct BlankLine: View { var body: some View { Color.clear.frame(height: Theme.l
 
 /// 등급 도장. 왼쪽 여백의 동그라미
 struct Stamp: View {
-    enum Kind { case grade(Grade), busy, error, redo, question, pin, session, marker, waiting }
+    enum Kind { case grade(Grade), busy, error, redo, question, pin, session, marker, waiting, number(Int), ok, no }   // number/ok/no: 표현장 시험지 줄(번호 점선 → ○/✗)
     var kind: Kind
     var small = false
 
@@ -75,20 +75,25 @@ struct Stamp: View {
         case .marker: return "🖍"
         case .session: return "✂\u{FE0E}"
         case .waiting: return "⏱\u{FE0E}"
+        case .number(let n): return "\(n)"
+        case .ok: return "○\u{FE0E}"
+        case .no: return "✗\u{FE0E}"
         }
     }
     private var color: Color {
         switch kind {
         case .grade(let g): return Theme.grade(g)
         case .busy, .error, .session: return Theme.red
-        case .redo, .question, .waiting: return Theme.pencil
+        case .redo, .question, .waiting, .number: return Theme.pencil
         case .pin, .marker: return Theme.ink
+        case .ok: return Theme.grade(.A)
+        case .no: return Theme.grade(.D)
         }
     }
     private var dash: [CGFloat]? {
         switch kind {
         case .redo, .session: return [5, 3]
-        case .question, .waiting: return [2, 3]
+        case .question, .waiting, .number: return [2, 3]
         default: return nil
         }
     }
