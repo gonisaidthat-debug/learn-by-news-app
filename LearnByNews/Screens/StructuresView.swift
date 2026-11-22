@@ -87,7 +87,7 @@ struct StructuresSection: View {
         if let err = m.err { Entry { ErrorText(message: err) } }
         if m.list == nil { Entry { Text("…").pencil() } }
         else if items.isEmpty {
-            Entry { Text(m.q.isEmpty ? "아직 분석한 문장이 없다. 공책의 채점된 문장에서 \"구조 분석 ✦\"을 누르면 여기 모인다." : "없다.").pencil(size: 20) }
+            Entry { Text(m.q.isEmpty ? "아직 분석한 문장이 없다. 공책의 채점된 문장 원문 줄 끝의 \"구조 분석\"을 누르면 여기 모인다." : "없다.").pencil(size: 20) }
         } else {
             ForEach(Array(items.enumerated()), id: \.element.id) { i, it in
                 if m.byArticle, i == 0 || items[i - 1].title != it.title {

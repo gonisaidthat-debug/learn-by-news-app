@@ -134,7 +134,7 @@ struct EntryView: View {
     var onPhraseNote: ((Expression, String) async -> Void)? = nil
     /// "표현장 ↗"(2026-11-19): 그 표현의 표현장 id로 표현장을 시트로 열어 스크롤·강조. 🔊는 TapePlayer.speakOnce
     var onOpenPhrases: ((String) -> Void)? = nil
-    /// 문장 구조 분석(2026-11-20): 동작 줄 "구조 분석 ✦" → 받는 중 "분석 중… ✎" → 점선 상자, 다시 누르면 "구조 접기". force면 다시 분석
+    /// 문장 구조 분석(2026-11-20): 원문 줄 끝 "구조 분석" → 받는 중 "분석 중…" → 원문 줄 바로 아래 점선 상자, 다시 누르면 "구조 접기". force면 다시 분석
     var onStructure: ((Bool) async throws -> Structure)? = nil
     /// 구조 상자 안 질문·답(2026-11-20): 묻기(온라인에서만) · 문답 지우기
     var onAskSentence: ((String) async throws -> SentenceQA)? = nil
@@ -152,7 +152,7 @@ struct EntryView: View {
         let a = s.attempt!
         let fb = a.feedback
         Entry(stamp: AnyView(Stamp(kind: .grade(fb.grade))), highlight: highlight) {
-            // 원문의 것은 원문 줄 끝에 (goni 2026-11-20 A안): 복사 ⎘ · 듣기 🔊 · 구조 분석 ✦. 건너뛴 문장도 ⎘ 🔊는 원문 끝
+            // 원문의 것은 원문 줄 끝에 (goni 2026-11-20 A안): 복사 ⎘ · 듣기 🔊 · "구조 분석". 건너뛴 문장도 ⎘ 🔊는 원문 끝
             let tools = SrcTools(text: s.text, structOpen: structOpen && structure != nil, structBusy: structBusy,
                                  onStructure: (onStructure == nil || fb.grade == .skip) ? nil : { loadStructure() })
             if expanded || fb.grade == .skip, let onAsk { MarkerWords(text: s.text, sentenceId: s.id, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight, onRelated: onRelated, tools: tools) }
@@ -169,6 +169,23 @@ struct EntryView: View {
                                onOpen: onOpenPhrases == nil ? nil : phraseId(he).flatMap { pid in SyncManager.isTemp(pid) ? nil : { onOpenPhrases?(pid) } },
                                speakText: he.phrase)
                 }
+            }
+            // 구조 분석 상자는 버튼(원문 줄 끝) 바로 아래, 내 번역 줄 앞 (goni 2026-11-22 "분석 내용이 바로 버튼 하단에 나오면")
+            if expanded, let e = structErr {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(e).redpen(size: 20)
+                    Tiny(title: "다시 시도", size: 18) { loadStructure(force: true) }
+                }
+            }
+            if expanded, structOpen, let st = structure {
+                StructureView(st: st, busy: structBusy, onAgain: { loadStructure(force: true) }, onClose: { structOpen = false },
+                              onAsk: onAskSentence == nil ? nil : { q in let r = try await onAskSentence!(q); structure?.qa = (structure?.qa ?? []) + [r] },
+                              onDeleteQA: onDeleteQA == nil ? nil : { qid in try await onDeleteQA!(qid); structure?.qa = (structure?.qa ?? []).filter { $0.id != qid } },
+                              onMarks: { qid, ms in
+                                  let r = try await SyncManager.shared.setQAMarks(sentenceId: s.id, qid: qid, marks: ms)
+                                  if let i = structure?.qa?.firstIndex(where: { $0.id == qid }) { structure?.qa?[i].marks = r }
+                              })
+                    .padding(.vertical, 4)
             }
             if fb.grade == .skip {
                 FlowLayout(spacing: 10, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
@@ -326,22 +343,6 @@ struct EntryView: View {
                 // 화면 확인용: LBN_AUTOSTRUCT=<문장 id> 이면 펼치자마자 구조 분석을 받는다 (LBN_AUTOOPEN과 함께)
                 if ProcessInfo.processInfo.environment["LBN_AUTOSTRUCT"] == s.id, structure == nil { loadStructure() }
                 #endif
-            }
-            if let e = structErr {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(e).redpen(size: 20)
-                    Tiny(title: "다시 시도", size: 18) { loadStructure(force: true) }
-                }
-            }
-            if structOpen, let st = structure {
-                StructureView(st: st, busy: structBusy, onAgain: { loadStructure(force: true) }, onClose: { structOpen = false },
-                              onAsk: onAskSentence == nil ? nil : { q in let r = try await onAskSentence!(q); structure?.qa = (structure?.qa ?? []) + [r] },
-                              onDeleteQA: onDeleteQA == nil ? nil : { qid in try await onDeleteQA!(qid); structure?.qa = (structure?.qa ?? []).filter { $0.id != qid } },
-                              onMarks: { qid, ms in
-                                  let r = try await SyncManager.shared.setQAMarks(sentenceId: s.id, qid: qid, marks: ms)
-                                  if let i = structure?.qa?.firstIndex(where: { $0.id == qid }) { structure?.qa?[i].marks = r }
-                              })
-                    .padding(.vertical, 4)
             }
         }
         if !fb.expressions.isEmpty {
@@ -691,7 +692,7 @@ struct CopyButton: View {
     }
 }
 
-/// 원문 줄 끝 도구 (goni 2026-11-20 A안 "원문의 것은 원문 옆에"): 복사 ⎘ · 듣기 🔊(읽는 중 ■) · 구조 분석 ✦(열려 있으면 진하게, 분석 중 ✦…)
+/// 원문 줄 끝 도구 (goni 2026-11-20 A안 "원문의 것은 원문 옆에"): 복사 ⎘ · 듣기 🔊(읽는 중 ■) · "구조 분석"(글자, goni 2026-11-22 "아이콘을 알아보기 힘들어서 한글로"; 열려 있으면 "구조 접기", 분석 중 "분석 중…")
 struct SrcTools: View {
     var text: String
     var structOpen = false
@@ -702,10 +703,9 @@ struct SrcTools: View {
             CopyButton(text: text, label: "⎘\u{FE0E}", doneLabel: "✓\u{FE0E}", size: 18)
             SpeakIcon(text: text, size: 14, color: Theme.pencil)
             if let onStructure {
-                Tiny(title: structBusy ? "✦\u{FE0E}…" : "✦\u{FE0E}", color: structOpen ? Theme.ink : Theme.pencil, size: 18, action: onStructure)
+                Tiny(title: structBusy ? "분석 중…" : structOpen ? "구조 접기" : "구조 분석", color: structOpen ? Theme.ink : Theme.pencil, size: 18, action: onStructure)
                     .disabled(structBusy)
                     .help(structOpen ? "구조 분석 접기" : "문장의 뼈대와 덩어리, 읽는 순서, 내 번역이 구조를 어떻게 읽었는지. 처음 한 번만 Claude가 분석하고 저장한다")
-                    .accessibilityLabel(structOpen ? "구조 접기" : "구조 분석")
             }
         }
         .padding(.leading, 10).frame(height: Theme.lh)
@@ -1019,7 +1019,7 @@ struct MarkerWords: View {
     var onNote: ((Highlight, String) async -> Void)? = nil
     var onDelete: ((Highlight) async -> Void)? = nil
     var onRelated: ((String?, String?, String?, String?) async -> [Related])? = nil
-    var tools: SrcTools? = nil                    // 원문 줄 끝 ⎘ 🔊 ✦ (A안)
+    var tools: SrcTools? = nil                    // 원문 줄 끝 ⎘ 🔊 구조 분석 (A안)
     @State private var chosen: [Related] = []     // 메모와 함께 엮을 것
     @State private var anchor: Int?
     @State private var range: ClosedRange<Int>?
