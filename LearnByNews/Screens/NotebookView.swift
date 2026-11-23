@@ -637,14 +637,16 @@ final class NotebookModel: ObservableObject {
         catch { err = error.localizedDescription }
     }
 
-    /// 세션마다 이 공책에서 마지막으로 채점한 문장 뒤에 "여기까지" 줄
+    /// 세션마다 이 공책에서 마지막으로 채점한 문장 뒤에 "여기까지" 줄.
+    /// 채점 대기·진행 중(inflight, 큐 포함)인 문장과 다시 쓰기 중 이번 회차에 제출하지 않은 문장은 뺀다 — 그 문장이 들고 있는 attempt는 아직 옛 번역이라
+    /// 옛 세션의 "마지막 문장"으로 잡혀 옛 ✂ 줄·총평이 떴다 사라진다 (goni 2026-11-23 "엔터쳤는데 옛날 총평이 잠깐", 웹 f9e04ec과 같은 규칙)
     func markers(_ sessions: [StudySession]) -> [String: StudySession] {
         guard let d = data else { return [:] }
         var m: [String: StudySession] = [:]
         for s in sessions {
             var best: Sentence?
-            for x in d.sentences {
-                guard let t = x.attempt?.createdAt, t >= s.startedAt, t <= s.endedAt else { continue }
+            for x in d.sentences where inflight[x.id] == nil {
+                guard let t = visibleAttempt(x)?.createdAt, t >= s.startedAt, t <= s.endedAt else { continue }
                 if best == nil || t > best!.attempt!.createdAt { best = x }
             }
             if let best { m[best.id] = s }
