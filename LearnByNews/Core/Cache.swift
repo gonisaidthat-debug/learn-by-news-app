@@ -493,7 +493,8 @@ final class Cache {
         let sessions = all(CachedSession.self).filter { $0.endedAt >= since }.sorted { $0.startedAt < $1.startedAt }.map(toSession)
         let reviews = all(CachedReview.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.compactMap { r -> LogReview? in
             guard let ar = arts[r.articleId] else { return nil }
-            return LogReview(id: r.id, articleId: r.articleId, title: ar.title, score: r.score, createdAt: r.createdAt, summary: r.summary)
+            return LogReview(id: r.id, articleId: r.articleId, title: ar.title, score: r.score, createdAt: r.createdAt, summary: r.summary,
+                             patterns: (try? JSONDecoder().decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise)
         }
         let phraseArt = Dictionary(uniqueKeysWithValues: all(CachedPhrase.self).map { ($0.id, $0.articleId) })
         let quiz = all(CachedQuizResult.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.map { q -> LogQuiz in

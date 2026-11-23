@@ -72,7 +72,16 @@ final class DoneModel: ObservableObject {
             estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil
             // 다시 쓰기가 진행 중이면 총평을 자동 요청하지 않는다
             if progress != nil { return }
-            if newReview, !autoTried { autoTried = true; await requestReview(); return }
+            if newReview, !autoTried {
+                autoTried = true
+                // 이미 있는 최신 총평이 모든 문장의 마지막 시도보다 새로우면 다시 받지 않는다 (같은 화면을 다시 열어 총평이 두 번 생긴 사고, 2026-11-23, 웹 49bef55)
+                let lastAttempt = d.sentences.compactMap { $0.attempt?.createdAt }.max() ?? 0
+                if let latest = d.reviews.map(\.createdAt).max(), latest > lastAttempt {
+                    AppLog.shared.info("done", "review already newer than last attempt; skip", ["article": id])
+                    return
+                }
+                await requestReview(); return
+            }
             // 다 끝났는데 총평이 없으면 한 번 자동으로 받는다
             if !autoTried, d.reviews.isEmpty, d.sentences.allSatisfy({ $0.attempt != nil }), d.sentences.contains(where: { $0.attempt != nil && $0.attempt!.grade != .skip }) {
                 autoTried = true

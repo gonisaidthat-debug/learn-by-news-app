@@ -140,7 +140,9 @@ final class Router: ObservableObject {
             case "phrases": tab = .phrases
             case "quiz": tab = .quiz
             case "drills": tab = .drills
-            case "log": tab = .log; UserDefaults.standard.set(false, forKey: "lbn_log_structures")   // 날짜 보기로
+            case "log":   // 날짜 보기로. LBN_LOGMODE=article 이면 기사 보기로
+                tab = .log; UserDefaults.standard.set(false, forKey: "lbn_log_structures")
+                UserDefaults.standard.set(ProcessInfo.processInfo.environment["LBN_LOGMODE"] == "article", forKey: "lbn_log_mode")
             case "structures": tab = .log; UserDefaults.standard.set(true, forKey: "lbn_log_structures")
             case "settings": showSettings = true
             default: break

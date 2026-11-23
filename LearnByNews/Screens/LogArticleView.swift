@@ -107,6 +107,16 @@ struct LogArticleSection: View {
             .frame(height: Theme.lh)
             if isOpen {
                 ForEach(rd) { r in roundLine(r) }
+                // 회차별 총평 본문 (goni 2026-11-23 "기사 탭에서 지금은 점수만 보이는 것 같다"): 회차 순, 머리줄 + 요약 + 자세히
+                ForEach(Array(reviews.enumerated()), id: \.element.id) { i, r in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        (Text("\(i + 1)회차 총평" + (r.score.map { " · \($0)점" } ?? "")).font(Theme.hand(20)).foregroundColor(Theme.red)
+                         + Text(" · " + LogRuns.md(r.createdAt)).font(Theme.hand(17)).foregroundColor(Theme.pencil))
+                        Tiny(title: "마지막 장 ↗\u{FE0E}", size: 17) { router.open(.done(id: group.id)) }
+                    }
+                    .frame(height: Theme.lh)
+                    LogReviewText(r: r)
+                }
                 if !multi.isEmpty {
                     let up = multi.filter { $0.dir == .up }.count, down = multi.filter { $0.dir == .down }.count, same = multi.filter { $0.dir == .same }.count
                     (Text("회차를 거듭 쓴 \(multi.count)문장 중 ") + Text("↑").foregroundColor(LogRuns.color(.up)) + Text(" 올라갔다 \(up) · ") + Text("↓").foregroundColor(LogRuns.color(.down)) + Text(" 내려갔다 \(down) · ") + Text("=").foregroundColor(LogRuns.color(.same)) + Text(" 그대로 \(same)"))
@@ -217,6 +227,29 @@ struct LogArticleSection: View {
                 if i > 0 { Text("→").font(.system(size: 12)).foregroundStyle(Theme.pencil) }
                 Stamp(kind: .grade(g), small: true).scaleEffect(0.8).frame(width: 22, height: 22)
             }
+        }
+    }
+}
+
+/// 기록 탭의 총평 본문 (goni 2026-11-23 "각 기사별 총평을 기록 화면에서 볼 수 없나", 웹 Log.tsx ReviewText와 같음):
+/// 요약은 늘 보이고 끝의 "자세히"를 누르면 패턴(제목 밑줄 + 설명)·칭찬까지, "접기"로 닫는다
+struct LogReviewText: View {
+    let r: LogReview
+    @State private var more = false
+    var body: some View {
+        #if DEBUG
+        let _ = { if ProcessInfo.processInfo.environment["LBN_AUTOREVIEW"] == "1", !more { DispatchQueue.main.async { more = true } } }()   // 화면 확인용: 펼친 채로
+        #endif
+        let hasMore = !r.patterns.isEmpty || !r.praise.isEmpty
+        (Text(r.summary) + (hasMore ? Text("  ") + Text(more ? "접기" : "자세히").font(Theme.hand(18)).foregroundColor(Theme.pencil).underline(true, color: Theme.pencil) : Text("")))
+            .redpen()
+            .contentShape(Rectangle())
+            .onTapGesture { if hasMore { withAnimation(.easeInOut(duration: 0.15)) { more.toggle() } } }
+        if more {
+            ForEach(Array(r.patterns.enumerated()), id: \.offset) { _, p in
+                (Text(p.title).underline(true, color: Theme.red) + Text("  ") + Text(p.detail)).redpen(size: 20)
+            }
+            if !r.praise.isEmpty { Text(r.praise).handLine(size: 20, color: Theme.grade(.A)) }
         }
     }
 }

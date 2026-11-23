@@ -250,7 +250,7 @@ struct ActivityLogView: View {
                     (Text(Date(ms: r.createdAt).hm + " ").font(Theme.hand(17)).foregroundColor(Theme.pencil) + Text("총평" + (r.score.map { " · \($0)점" } ?? "") + " ·")).redpen()
                     Tiny(title: r.title) { router.open(.done(id: r.articleId)) }.lineLimit(1)
                 }
-                Text(r.summary).redpen()
+                LogReviewText(r: r)   // 요약 + "자세히"(패턴·칭찬), 2026-11-23
             }
         case .drills(_, let items):
             Entry { drillLines(items, head: true) }

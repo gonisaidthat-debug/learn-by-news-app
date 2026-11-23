@@ -380,6 +380,20 @@ struct LogReview: Codable, Identifiable, Hashable {
     var score: Int?
     var createdAt: Int64
     var summary: String
+    var patterns: [ReviewPattern] = []     // 2026-11-23: 기록 탭에서 총평 본문("자세히"). 없으면 빈 값
+    var praise: String = ""
+    init(id: String, articleId: String, title: String, score: Int?, createdAt: Int64, summary: String, patterns: [ReviewPattern] = [], praise: String = "") {
+        self.id = id; self.articleId = articleId; self.title = title; self.score = score; self.createdAt = createdAt; self.summary = summary; self.patterns = patterns; self.praise = praise
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id); articleId = try c.decode(String.self, forKey: .articleId)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        score = try c.decodeIfPresent(Int.self, forKey: .score); createdAt = try c.decode(Int64.self, forKey: .createdAt)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        patterns = (try? c.decodeIfPresent([ReviewPattern].self, forKey: .patterns)) ?? []
+        praise = (try? c.decodeIfPresent(String.self, forKey: .praise)) ?? ""
+    }
 }
 
 struct LogQuiz: Codable, Identifiable, Hashable {

@@ -492,7 +492,8 @@ struct MockState {
             attempts.sort { ($0["created_at"] as! Int64) < ($1["created_at"] as! Int64) }
             let revs = reviews.map { r -> [String: Any] in
                 let a = articles.first { $0["id"] as? String == r["article_id"] as? String }
-                return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!]
+                return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!,
+                        "patterns": r["patterns"] ?? [], "praise": r["praise"] ?? ""]
             }
             let ds = drills.filter { !($0["feedback"] is NSNull) }.map { d -> [String: Any] in
                 let sid = d["sentence_id"] as? String
