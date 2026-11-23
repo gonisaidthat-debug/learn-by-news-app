@@ -384,6 +384,8 @@ struct MockState {
             var o: [String: Any] = [
                 "skeleton": "주어(\(cuts[0].joined(separator: " "))) + 동사(\(cuts[1].joined(separator: " "))) + 목적어 — 뒤에 때를 나타내는 전치사구",
                 "chunks": chunks,
+                // 꾸밈 관계 화살표 확인용 (2026-11-23): 같은 줄 / 아랫줄→윗줄 / 윗줄→아랫줄 하나씩 (덩어리가 넷일 때)
+                "links": chunks.count >= 4 ? [["from": 3, "to": 2, "label": "시간"], ["from": 2, "to": 1, "label": "꾸밈"], ["from": 0, "to": 3, "label": "동격"]] : [],
                 "reading": "주어와 동사를 먼저 잡고, 뒤의 전치사구는 때를 나타내므로 한국어에서는 맨 앞으로 옮겨 읽는다. 목적어는 동사 바로 뒤에 붙여 읽으면 된다.",
                 "pitfalls": ["전치사구를 목적어에 걸어 읽기 쉽다", "과거형 동사를 현재로 옮기기 쉽다"],
                 "mine": s["attempt"] is [String: Any] ? "주어·동사는 바로 잡았지만 마지막 전치사구를 목적어에 걸어 읽었다. 첨삭의 지적도 그 자리다." : "",

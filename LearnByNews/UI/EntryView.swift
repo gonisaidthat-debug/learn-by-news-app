@@ -170,6 +170,17 @@ struct EntryView: View {
                                speakText: he.phrase)
                 }
             }
+            // 참고 번역 줄은 원문(형광펜 메모) 다음, 구조 분석 상자 위 (goni 2026-11-23 "참고 해석 위치는 구조분석 펼치기보다 위에"; 전에는 지적 다음 → 상자 아래 → 상자 위). 토글·기본 펼침은 그대로
+            if expanded, fb.grade != .skip {
+                if showRef {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil()
+                        Tiny(title: "접기", action: onToggleRef)
+                    }
+                } else {
+                    Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
+                }
+            }
             // 구조 분석 상자는 버튼(원문 줄 끝) 바로 아래, 내 번역 줄 앞 (goni 2026-11-22 "분석 내용이 바로 버튼 하단에 나오면")
             if expanded, let e = structErr {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -198,17 +209,6 @@ struct EntryView: View {
                                   }
                               })
                     .padding(.vertical, 4)
-            }
-            // 참고 번역 줄은 구조 분석 상자와 내 번역 사이 (goni 2026-11-23 "문장 구조 분석과 본문 사이에 참고 해석 위치가"; 전에는 지적 다음). 토글·기본 펼침은 그대로
-            if expanded, fb.grade != .skip {
-                if showRef {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil()
-                        Tiny(title: "접기", action: onToggleRef)
-                    }
-                } else {
-                    Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
-                }
             }
             if fb.grade == .skip {
                 FlowLayout(spacing: 10, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
@@ -409,6 +409,69 @@ struct EntryView: View {
     }
 }
 
+struct ChunkFrames: PreferenceKey {
+    static var defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
+}
+
+/// 구조 분석 덩어리 위 꾸밈 관계 화살표 (웹 Entry.tsx의 chunk-arrows와 같은 기하, goni 2026-11-23). 상자 자리(frames)는 레이아웃 뒤에 잰 것.
+/// 같은 줄이면 상자 위로 호(라벨은 호 꼭대기), 다른 줄이면 줄 사이 틈으로 지나 아랫줄→윗줄은 받는 상자의 아래쪽에, 윗줄→아랫줄은 받는 상자의 위쪽에 화살촉(상자를 가로지르지 않는다, 라벨은 틈 가운데).
+/// 갈색 1.6pt, 라벨 손글씨 13pt에 종이색 테두리
+struct ChunkArrows: View {
+    var links: [Structure.Link]
+    var frames: [Int: CGRect]
+    private let brown = Color(hex: 0x8A6A2A)
+    var body: some View {
+        Canvas { ctx, _ in
+            for l in links {
+                guard let ra = frames[l.from], let rb = frames[l.to] else { continue }
+                let x1 = ra.midX, x2 = rb.midX
+                let top1 = ra.minY - 2, top2 = rb.minY - 2
+                let bot1 = ra.maxY + 2, bot2 = rb.maxY + 2
+                var p = Path()
+                var end: CGPoint, before: CGPoint, label: CGPoint
+                if abs(top1 - top2) < 8 {
+                    // 같은 줄: 상자 위로 호. 꼭대기는 top1 - h
+                    let h = min(24, 10 + abs(x2 - x1) / 10)
+                    let c = CGPoint(x: (x1 + x2) / 2, y: top1 - 2 * h)
+                    p.move(to: CGPoint(x: x1, y: top1)); p.addQuadCurve(to: CGPoint(x: x2, y: top2), control: c)
+                    end = CGPoint(x: x2, y: top2); before = c; label = CGPoint(x: (x1 + x2) / 2, y: top1 - h - 7)
+                } else if top1 > top2 {
+                    // 아랫줄 → 윗줄: 줄 사이 틈으로 지나 받는 상자의 아래쪽에
+                    let g = (top1 - bot2) / 2
+                    let c1 = CGPoint(x: x1, y: top1 - g), c2 = CGPoint(x: x2, y: bot2 + g)
+                    p.move(to: CGPoint(x: x1, y: top1)); p.addCurve(to: CGPoint(x: x2, y: bot2), control1: c1, control2: c2)
+                    end = CGPoint(x: x2, y: bot2); before = c2; label = CGPoint(x: (x1 + x2) / 2, y: (top1 + bot2) / 2)
+                } else {
+                    // 윗줄 → 아랫줄: 보내는 상자의 아래에서 나와 받는 상자의 위에
+                    let g = (top2 - bot1) / 2
+                    let c1 = CGPoint(x: x1, y: bot1 + g), c2 = CGPoint(x: x2, y: top2 - g)
+                    p.move(to: CGPoint(x: x1, y: bot1)); p.addCurve(to: CGPoint(x: x2, y: top2), control1: c1, control2: c2)
+                    end = CGPoint(x: x2, y: top2); before = c2; label = CGPoint(x: (x1 + x2) / 2, y: (bot1 + top2) / 2)
+                }
+                ctx.stroke(p, with: .color(brown), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                // 화살촉: 끝점에서 들어오는 방향으로 7pt
+                let ang = atan2(end.y - before.y, end.x - before.x)
+                var head = Path()
+                head.move(to: end)
+                head.addLine(to: CGPoint(x: end.x - 8 * cos(ang - 0.42), y: end.y - 8 * sin(ang - 0.42)))
+                head.addLine(to: CGPoint(x: end.x - 8 * cos(ang + 0.42), y: end.y - 8 * sin(ang + 0.42)))
+                head.closeSubpath()
+                ctx.fill(head, with: .color(brown))
+                // 라벨: 종이색 바탕(흰 테두리 대신) 위 갈색 손글씨
+                let t = l.label.trimmingCharacters(in: .whitespaces)
+                if !t.isEmpty {
+                    let r = ctx.resolve(Text(t).font(Theme.hand(13)).foregroundColor(brown))
+                    let sz = r.measure(in: CGSize(width: 200, height: 40))
+                    let bg = CGRect(x: label.x - sz.width / 2 - 3, y: label.y - sz.height / 2 - 1, width: sz.width + 6, height: sz.height + 2)
+                    ctx.fill(Path(roundedRect: bg, cornerRadius: 3), with: .color(Color(red: 1, green: 0.992, blue: 0.965).opacity(0.95)))
+                    ctx.draw(r, at: label, anchor: .center)
+                }
+            }
+        }
+    }
+}
+
 /// 문장 구조 분석 패널 (웹 StructureView와 같은 구성): "뼈대: …" → 덩어리 띠(text 위·role 아래, 역할별 밑줄 색) →
 /// 덩어리별 "role text — note" → "읽기: …" → "함정: … · …" → "내 번역은: …"(빨간 펜) → "다시 분석 ↻"
 struct StructureView: View {
@@ -423,12 +486,15 @@ struct StructureView: View {
     @State private var question = ""
     @State private var asking = false
     @State private var askErr: String?
+    @State private var chunkFrames: [Int: CGRect] = [:]   // 덩어리 상자 자리(화살표용)
     @FocusState private var qFocused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             labeled("뼈대", st.skeleton, color: Theme.pencil).padding(.trailing, onClose == nil ? 0 : 22)
-            FlowLayout(spacing: 8) {
-                ForEach(Array(st.chunks.enumerated()), id: \.offset) { _, ch in
+            // 덩어리 띠. 꾸밈 관계(links)가 있으면 상자 위 30pt·줄 사이 32pt를 띄우고 상자들의 실제 자리를 재서 화살표를 덧그린다 (goni 2026-11-23 "꾸밈 관계를 화살표로도")
+            let links = (st.links ?? []).filter { $0.from != $0.to && st.chunks.indices.contains($0.from) && st.chunks.indices.contains($0.to) }
+            FlowLayout(spacing: 8, rowSpacing: links.isEmpty ? nil : 32) {
+                ForEach(Array(st.chunks.enumerated()), id: \.offset) { i, ch in
                     VStack(alignment: .center, spacing: 1) {
                         Text(ch.text).font(Theme.print(16)).foregroundStyle(Theme.ink).multilineTextAlignment(.center)
                         Text(ch.role).font(Theme.hand(15)).foregroundStyle(Structure.color(ch.role))
@@ -437,8 +503,13 @@ struct StructureView: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.025)))
                     .overlay(alignment: .bottom) { Rectangle().fill(Structure.color(ch.role)).frame(height: 3).clipShape(RoundedRectangle(cornerRadius: 1.5)) }
                     .help(ch.note)
+                    .background(GeometryReader { g in Color.clear.preference(key: ChunkFrames.self, value: [i: g.frame(in: .named("chunks"))]) })
                 }
             }
+            .padding(.top, links.isEmpty ? 0 : 30)
+            .coordinateSpace(name: "chunks")
+            .onPreferenceChange(ChunkFrames.self) { chunkFrames = $0 }
+            .overlay { if !links.isEmpty { ChunkArrows(links: links, frames: chunkFrames).allowsHitTesting(false) } }
             let noted = st.chunks.filter { !$0.note.isEmpty }
             if !noted.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {

@@ -5,11 +5,14 @@ import SwiftUI
 /// `POST /api/sentences/:id/structure {force?}` 응답. 서버가 문장별로 저장해 두 번째부터는 저장본(cached true, 즉시)
 struct Structure: Codable, Equatable {
     struct Chunk: Codable, Equatable { var text: String; var role: String; var note: String }
+    /// 꾸밈 관계(2026-11-23): from(꾸미는 쪽) → to(받는 쪽), chunks 번호(0부터), label은 관계 이름 한 단어. 옛 분석엔 없다(→ 화살표 없음)
+    struct Link: Codable, Equatable { var from: Int; var to: Int; var label: String }
     var skeleton: String
     var chunks: [Chunk]
     var reading: String
     var pitfalls: [String]
     var mine: String
+    var links: [Link]?
     var createdAt: Int64?
     var cached: Bool?
     /// 구조 상자 안 문답(2026-11-20, 오래된 순). 서버 sentence_qa
