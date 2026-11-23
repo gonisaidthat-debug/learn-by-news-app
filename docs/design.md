@@ -161,6 +161,7 @@ QuizItem   { key, kind: "issue"|"phrase"|"highlight", sentence_id, article_id, a
 - `SIMCTL_CHILD_LBN_RANGE=<from>-<to>`: 시험·테이프 번호 범위를 그 값으로 시작.
 - `SIMCTL_CHILD_LBN_AUTOPHRASES=<표현 id>`: 공책을 열고 1초 뒤 그 표현으로 표현장 시트를 연다("표현장 ↗" 확인용).
 - `SIMCTL_CHILD_LBN_AUTOSCROLL=1`: 기록 탭(`LBN_ROUTE=log`, 날짜 보기로 연다)을 받은 뒤 맨 아래로 스크롤(세션 총평 줄 확인용). 응용 탭에서는 12초 뒤 StudyDot 패널을 닫고 최근 응용 목록 끝으로(✂ 줄 확인용, `LBN_AUTOANSWER=1 LBN_AUTOCLOSE=1`과 함께). `SIMCTL_CHILD_LBN_BYARTICLE=1`: 모의 세션 닫기 총평에 기사별 총평 둘.
+- `SIMCTL_CHILD_LBN_AUTOHISTORY=1`: 이전 시도 줄을 펼친 채로 시작(펼침 내용 확인용).
 - `SIMCTL_CHILD_LBN_AUTOMARK=1`: 문답의 답에서 두 번째~세 번째 단어를 고른 상태로("밑줄 긋기" 버튼 확인용). 값이 있으면 모의 서버가 s1 구조 상자에 문답 q0을 미리 둔다. `=2`: 바로 "밑줄 긋기"까지 누르고 모의 PUT marks를 8초 늦춘다 → 앱 로그에 "qa marks drawn"이 PUT 200보다 먼저 찍히는지(즉시 그리기 확인용).
 - `SIMCTL_CHILD_LBN_AUTOSPEAK=<문장 id>`: 공책을 열고 1초 뒤 그 문장을 읽기 시작한다("멈춤 ■" 확인용).
 - `SIMCTL_CHILD_LBN_AUTOSENTPIN=<문장 id>`: 공책을 열자마자 그 문장 전체를 표현장에 붙인다("문장 붙여 둠 ✓" 확인용).

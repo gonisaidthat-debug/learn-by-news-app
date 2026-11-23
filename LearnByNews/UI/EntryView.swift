@@ -33,7 +33,11 @@ func markSource(_ text: String, _ source: String) -> AttributedString {
 struct HistoryLine: View {
     var attempt: Attempt
     var onRestore: (() -> Void)? = nil   // void("잘못 누름")인 시도의 되살리기
+    #if DEBUG
+    @State private var open = ProcessInfo.processInfo.environment["LBN_AUTOHISTORY"] == "1"   // 화면 확인용: 펼친 채로 시작
+    #else
     @State private var open = false
+    #endif
 
     private var when: String {
         let d = Date(ms: attempt.createdAt)
@@ -72,9 +76,7 @@ struct HistoryLine: View {
                         (Text(i.source).underline(true, color: Theme.red) + Text(" →\u{FE0E} \(i.meaning)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A)))
                             .redpen(size: 21)
                     }
-                    if !fb.reference.isEmpty {
-                        (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil(size: 21)
-                    }
+                    // "참고" 번역은 문장에 하나뿐이라 위의 참고 줄로 충분 — 이전 시도마다 다시 보이지 않는다 (goni 2026-11-23 "히스토리에서 참고는 필요없잖아")
                 }
                 .padding(.leading, 32)
                 .opacity(0.85)
