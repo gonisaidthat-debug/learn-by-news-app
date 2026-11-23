@@ -187,6 +187,17 @@ struct EntryView: View {
                               })
                     .padding(.vertical, 4)
             }
+            // 참고 번역 줄은 구조 분석 상자와 내 번역 사이 (goni 2026-11-23 "문장 구조 분석과 본문 사이에 참고 해석 위치가"; 전에는 지적 다음). 토글·기본 펼침은 그대로
+            if expanded, fb.grade != .skip {
+                if showRef {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil()
+                        Tiny(title: "접기", action: onToggleRef)
+                    }
+                } else {
+                    Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
+                }
+            }
             if fb.grade == .skip {
                 FlowLayout(spacing: 10, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
                     Text("건너뜀").handLine(size: 21, color: Theme.pencil)
@@ -309,14 +320,6 @@ struct EntryView: View {
                     if linkingPhrase == sp.id { phraseLinkPicker(sp) }
                 }
             }
-        }
-        if showRef {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil()
-                Tiny(title: "접기", action: onToggleRef)
-            }
-        } else {
-            Tiny(title: "참고 번역 보기", action: onToggleRef).frame(height: Theme.lh)
         }
         ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
         do {
