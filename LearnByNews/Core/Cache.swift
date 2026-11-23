@@ -341,6 +341,11 @@ final class Cache {
                 let ids = (sents[id] ?? []).sorted { $0.idx < $1.idx }.map(\.id)
                 guard !ids.isEmpty else { continue }   // 문장 캐시가 아직 없으면 만들지 않는다(내보내기 적용 뒤 다시 온다)
                 let p = RedoProgress(ids: ids, done: done)
+                if p.remaining.isEmpty {
+                    // 모든 문장을 덮는 pass_done은 끝난 회차의 찌꺼기(진행 없음)로 본다 (2026-11-23, 웹 6ebbc32와 같은 규칙)
+                    if RedoProgress.load(id) != nil { AppLog.shared.info("cache", "server pass covers all sentences; treating as none", ["article": id]); RedoProgress.clear(id) }
+                    continue
+                }
                 if RedoProgress.load(id) != p { p.save(id) }
             } else if RedoProgress.load(id) != nil {
                 AppLog.shared.info("cache", "server pass is null; dropping local progress", ["article": id])
@@ -668,6 +673,14 @@ final class Cache {
     /// 지금 채점 중(직접 보내는 중)인 번역·응용 수 — "오늘 여기까지 ✂"는 이게 0일 때만
     var gradingCount: Int { pending().filter { $0.isClaimed && ["attempt", "drill_answer", "drill_free"].contains($0.kind) }.count }
     func pending(kind: String) -> [PendingOp] { pending().filter { $0.kind == kind } }
+    /// 큐에서 조건에 맞는 항목을 뺀다(직접 보내는 중인 것은 두고). 다시 쓰기 진행 PUT을 DELETE 앞에서 빼는 데 쓴다 (2026-11-23)
+    func dropPending(kind: String, where match: (PendingOp) -> Bool) {
+        let hit = pending(kind: kind).filter { !$0.isClaimed && match($0) }
+        guard !hit.isEmpty else { return }
+        for op in hit { ctx.delete(op) }
+        try? ctx.save()
+        AppLog.shared.info("queue", "dropped \(hit.count) \(kind)")
+    }
     func pendingUnclaimed(kind: String) -> [PendingOp] { pending(kind: kind).filter { !$0.isClaimed } }
     /// 임시 세션(오프라인 닫기)을 서버 세션으로 교체
     func replaceLocalSession(startedAt: Int64, with s: StudySession) {

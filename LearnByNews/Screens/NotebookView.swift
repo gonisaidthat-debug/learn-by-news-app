@@ -358,6 +358,7 @@ final class NotebookModel: ObservableObject {
                 Task { await SyncManager.shared.putPass(id, done: done) }
                 redo = next; requestScroll(next); focusRequest += 1
             } else {
+                // 마지막 문장: PUT 없이 DELETE만 (2026-11-23 규칙). 앞 문장의 PUT이 아직 가는 중이면 SyncManager가 순서를 지킨다
                 RedoProgress.clear(id)
                 Task { await SyncManager.shared.deletePass(id) }
                 self.pass = nil; redo = nil; finishingPass = true

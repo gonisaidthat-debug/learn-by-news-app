@@ -120,7 +120,8 @@ struct MockState {
                                 "by_article": [["title": "Seoul to expand bike lanes along Han River", "summary": "자전거 기사는 숫자와 지명이 정확했다. 미래 표현은 '~할 것이다'로 굳어 있다.", "next": "will을 문맥에 맞게 '~한다'로도"],
                                                ["title": "Fed holds rates steady as inflation cools", "summary": "연준 기사는 관용구를 직역했다. 문장 뒤 분사구문은 잘 끊었다.", "next": "held steady 같은 관용구는 우리말 관용 표현부터"]]]]]
         bookmark = ["article_id": "a1", "sentence_id": "s3", "round": NSNull(), "created_at": now - 1000]
-        passes = ["a2": ["s7"]]   // 서버에 저장된 다시 쓰기 진행(2회차 1/2)
+        // 서버에 저장된 다시 쓰기 진행(2회차 1/2). LBN_STALEPASS=1: 모든 문장을 덮는 찌꺼기(s7·s8) — 마지막 장이 지우고 평소대로 가는지 확인용
+        passes = ["a2": ProcessInfo.processInfo.environment["LBN_STALEPASS"] == "1" ? ["s7", "s8"] : ["s7"]]
         drills = [["id": "d1", "phrase_id": "p1", "phrase": "hold rates steady", "meaning": "금리를 동결하다", "korean": "", "kind": "free", "sentence_id": "s1", "created_at": now - 7_200_000,
                    "answer": "The Fed decided to hold rates steady this month.", "grade": "A", "answered_at": now - 7_200_000,
                    "feedback": ["grade": "A", "used_expression": true, "issues": [], "reference": "The Fed held rates steady this month.", "reference_ko": "연준은 이번 달 금리를 동결했다.", "note": "자연스럽다."] as [String: Any],
@@ -511,7 +512,10 @@ struct MockState {
         case "GET /api/articles/:id/pass":
             return (200, passes[id].map { ["done": $0, "updated_at": Date().ms] as [String: Any] } ?? NSNull())
         case "PUT /api/articles/:id/pass":
-            passes[id] = body["done"] as? [String] ?? []; return (200, ["ok": true])
+            let done = body["done"] as? [String] ?? []
+            let sids = sentences.filter { $0["article_id"] as? String == id }.compactMap { $0["id"] as? String }
+            if !sids.isEmpty, sids.allSatisfy(done.contains) { passes[id] = nil; return (200, ["ok": true, "finished": true, "updated_at": Date().ms]) }
+            passes[id] = done; return (200, ["ok": true, "updated_at": Date().ms])
         case "DELETE /api/articles/:id/pass":
             passes[id] = nil; return (200, ["ok": true])
         case "GET /api/session-start":

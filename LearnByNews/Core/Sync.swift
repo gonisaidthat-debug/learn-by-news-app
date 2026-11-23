@@ -199,7 +199,8 @@ final class SyncManager: ObservableObject {
                     StructureStore.shared.setMarks(b.sentenceId, b.qid, r)
                 case "pass_put":
                     let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
-                    try await API.shared.putPass(b.articleId, done: b.done ?? [])
+                    let r = try await API.shared.putPass(b.articleId, done: b.done ?? [])
+                    if r.finished == true { Self.passFinished(b.articleId) }
                 case "pass_delete":
                     let b = try JSONDecoder.api.decode(PassOp.self, from: op.payload)
                     try await API.shared.deletePass(b.articleId)
@@ -469,11 +470,39 @@ final class SyncManager: ObservableObject {
     }
 
     // MARK: 다시 쓰기 진행 (서버가 진실, RedoProgress는 캐시)
+    // 같은 기사의 PUT·DELETE는 보낸 순서대로 하나씩 (2026-11-23: 웹에서 마지막 문장의 PUT과 DELETE가 같이 나가 PUT이 늦게 도착,
+    // 150/150 진행 상태가 남아 마지막 장이 새 총평을 건너뛰었다). 마지막 문장은 애초에 PUT 없이 DELETE만 보낸다(NotebookModel.submit)
+    private var passTail: [String: Task<Void, Never>] = [:]
+    private func passOrdered(_ articleId: String, _ body: @escaping @MainActor () async -> Void) async {
+        let prev = passTail[articleId]
+        let t = Task { @MainActor in await prev?.value; await body() }
+        passTail[articleId] = t
+        await t.value
+        if passTail[articleId] == t { passTail[articleId] = nil }
+    }
+    /// 서버가 finished:true(모든 문장을 덮는 done은 저장하지 않고 지움)면 진행 없음으로 — 로컬 캐시도 지운다
+    static func passFinished(_ articleId: String) {
+        AppLog.shared.info("sync", "server says pass finished; dropping local progress", ["article": articleId])
+        RedoProgress.clear(articleId)
+    }
     func putPass(_ articleId: String, done: [String]) async {
-        await sendOrQueue("pass_put", PassOp(articleId: articleId, done: done)) { try await API.shared.putPass(articleId, done: done) }
+        await passOrdered(articleId) {
+            if Connectivity.shared.isOnline {
+                do { let r = try await API.shared.putPass(articleId, done: done); if r.finished == true { Self.passFinished(articleId) }; return }
+                catch let e as APIError where e.isNetwork { /* 큐로 */ }
+                catch { AppLog.shared.warn("sync", "pass_put failed: \(error.localizedDescription)"); return }
+            }
+            // 큐에는 그 기사의 마지막 PUT 하나만 남긴다
+            Cache.shared.dropPending(kind: "pass_put") { (try? JSONDecoder.api.decode(PassOp.self, from: $0.payload))?.articleId == articleId }
+            Cache.shared.enqueue("pass_put", PassOp(articleId: articleId, done: done)); self.refreshCounts()
+        }
     }
     func deletePass(_ articleId: String) async {
-        await sendOrQueue("pass_delete", PassOp(articleId: articleId, done: nil)) { try await API.shared.deletePass(articleId) }
+        await passOrdered(articleId) {
+            // 큐에 남은 그 기사의 PUT은 DELETE 앞에서 뺀다 — 늦게 가서 끝난 진행을 되살리지 않게
+            Cache.shared.dropPending(kind: "pass_put") { (try? JSONDecoder.api.decode(PassOp.self, from: $0.payload))?.articleId == articleId }
+            await self.sendOrQueue("pass_delete", PassOp(articleId: articleId, done: nil)) { try await API.shared.deletePass(articleId) }
+        }
     }
     // MARK: 공부 시작점
     func putSessionStart(_ t: Int64) async {

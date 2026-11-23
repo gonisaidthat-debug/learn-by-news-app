@@ -210,7 +210,9 @@ final class API {
     // MARK: 기기 상태 → 서버 (다시 쓰기 진행, 공부 시작점). 서버가 진실, 로컬은 캐시
     func pass(_ articleId: String) async throws -> PassState? { let r: PassState? = try await send("GET", "/api/articles/\(articleId)/pass"); return r }
     struct PassBody: Codable { var done: [String] }
-    func putPass(_ articleId: String, done: [String]) async throws { let _: OK = try await send("PUT", "/api/articles/\(articleId)/pass", body: PassBody(done: done)) }
+    /// 서버는 done이 그 기사의 모든 문장을 덮으면 저장하지 않고 행을 지우고 finished:true (2026-11-23)
+    struct PassPutResult: Decodable { var ok: Bool; var finished: Bool? }
+    func putPass(_ articleId: String, done: [String]) async throws -> PassPutResult { try await send("PUT", "/api/articles/\(articleId)/pass", body: PassBody(done: done)) }
     func deletePass(_ articleId: String) async throws { let _: OK = try await send("DELETE", "/api/articles/\(articleId)/pass") }
     func sessionStart() async throws -> SessionStartState? { let r: SessionStartState? = try await send("GET", "/api/session-start"); return r }
     /// 응답은 `{started_at}` (서버는 처음부터 이 형식. 앱·모의 서버가 `{ok}`로 잘못 맞춰져 있어 디코드 실패가 났고, c012d1c부터 그 실패를 거절로 오인해 시작점을 지웠다, 2026-11-15 수정)

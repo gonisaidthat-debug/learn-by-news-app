@@ -60,6 +60,13 @@ final class DoneModel: ObservableObject {
                 if let server = try await API.shared.pass(id) { progress = RedoProgress.from(serverDone: server.done, sentenceIds: d.sentences.map(\.id)); progress?.save(id) }
                 else { RedoProgress.clear(id); progress = nil }
             } catch { AppLog.shared.warn("done", "pass unreachable, using local: \(error.localizedDescription)", ["article": id]) }
+            // 모든 문장을 덮는 진행 상태는 끝난 회차의 찌꺼기: 지우고(DELETE) 평소대로(총평 없으면 새 총평 요청) 간다.
+            // "처음부터 다시 쓰기 이어서 (150/150)"를 만들지 않는다 (2026-11-23, 웹 6ebbc32와 같은 규칙)
+            if let p = progress, !d.sentences.isEmpty, p.remaining.isEmpty {
+                AppLog.shared.warn("done", "stale pass covers all sentences; deleting", ["article": id, "done": "\(p.done.count)"])
+                RedoProgress.clear(id); progress = nil
+                await SyncManager.shared.deletePass(id)
+            }
             bookmark = Cache.shared.bookmark()
             if let b = try? await API.shared.bookmark() { bookmark = b; Cache.shared.setBookmark(b) }
             estimated = progress == nil ? RedoProgress.estimateRewritten(d.sentences) : nil
