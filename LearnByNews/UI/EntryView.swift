@@ -216,16 +216,11 @@ struct EntryView: View {
                     if let onRedo { Tiny(title: "써 보기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh) }
                     if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh) }
                 }
-                ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
+                historyBlock
             } else {
                 if a.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) }
                 else { Text(markWrong(a.translation, fb.issues)).koLine() }
-                if expanded {
-                    ForEach(revoked) { rv in
-                        Text("⟲\u{FE0E} 습득 완료 취소 · \(rv.phrase) — 이 문장에서 틀려서 표현장에 다시 보인다").font(Theme.hand(18)).foregroundStyle(Theme.red)
-                    }
-                    marks(fb)
-                }
+                if expanded { marks(fb) }
             }
         }
         #if DEBUG
@@ -295,8 +290,52 @@ struct EntryView: View {
         }
     }
 
+    /// 이전 시도: 동작 줄 밑에 답글처럼 — 왼쪽 연필색 세로줄 2px, 바깥 여백 26pt + 안쪽 14pt, 살짝 흐리게 (goni 2026-11-23 "히스토리는 그 버튼들 밑에 답글처럼 들여쓰기")
+    @ViewBuilder
+    private var historyBlock: some View {
+        if !s.history.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
+            }
+            .padding(.leading, 14)
+            .overlay(alignment: .leading) { Rectangle().fill(Theme.pencil).frame(width: 2).padding(.vertical, 4) }
+            .padding(.leading, 26)
+            .opacity(0.85)
+        }
+    }
+
     @ViewBuilder
     private func marks(_ fb: Feedback) -> some View {
+        do {
+            // 동작 줄은 내 번역 바로 아래 (goni 2026-11-23 "다시쓰기랑 같이 있는 버튼은 내가 직접 쓴 해석 밑으로"; 전에는 지적·이전 시도 다음, 포스트잇 위): 다시 쓰기 ↻ · 잘못 눌렀다 ✗ · 문장을 표현장에 ＋ · ⋯(앞/뒤와 합치기). 복사·듣기·구조 분석은 원문 줄 끝
+            FlowLayout(spacing: 16, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
+                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh).help("첨삭을 보고 고쳐 쓴다. 이 번역은 이전 시도로 남고 집계에도 남는다") }
+                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
+                do {
+                    // 문장 전체를 표현장에 (goni 2026-11-20 "짧은 문장 중 써먹고 싶은 것이 있어서"). 뜻은 참고 번역(없으면 내 번역).
+                    // 붙은 뒤 다시 누르면 습득 완료 토글(포스트잇과 같다), 떼는 건 표현장 ×. 응용·시험·테이프에 자연히 들어간다
+                    let sp = savedPhrases.first { $0.phrase == s.text && $0.sentenceId == s.id } ?? savedPhrases.first { $0.phrase == s.text }
+                    Tiny(title: sp?.isMastered == true ? "문장 습득 완료 ✓\u{FE0E}" : sp != nil ? "문장 붙여 둠 ✓\u{FE0E}" : "문장을 표현장에 ＋", color: sp != nil ? Theme.grade(.A) : Theme.pencil) {
+                        onTogglePhrase(Expression(phrase: s.text, meaning: fb.reference.isEmpty ? (s.attempt?.translation ?? "") : fb.reference))
+                    }
+                    .frame(height: Theme.lh)
+                    .help(sp?.isMastered == true ? "습득 완료. 누르면 되돌린다" : sp != nil ? "문장이 표현장에 붙어 있다. 누르면 습득 완료. 떼려면 표현장에서 ×" : "이 문장 통째로 표현장에 붙인다 (뜻 = 참고 번역). 응용·시험·테이프에도 들어간다")
+                }
+                if onMergePrev != nil || onMergeNext != nil, !moreOpen { Tiny(title: "⋯") { moreOpen = true }.frame(height: Theme.lh).help("드물게 쓰는 것: 잘못 끊긴 문장 합치기") }
+                if moreOpen, let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+                if moreOpen, let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
+            }
+            .task {
+                #if DEBUG
+                // 화면 확인용: LBN_AUTOSTRUCT=<문장 id> 이면 펼치자마자 구조 분석을 받는다 (LBN_AUTOOPEN과 함께)
+                if ProcessInfo.processInfo.environment["LBN_AUTOSTRUCT"] == s.id, structure == nil { loadStructure() }
+                #endif
+            }
+        }
+        historyBlock
+        ForEach(revoked) { rv in
+            Text("⟲\u{FE0E} 습득 완료 취소 · \(rv.phrase) — 이 문장에서 틀려서 표현장에 다시 보인다").font(Theme.hand(18)).foregroundStyle(Theme.red)
+        }
         ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
             // 빨간 펜으로 지적된 표현도 표현장에 붙여 응용에서 연습할 수 있다 (goni 2026-11-17 "빨간색으로 알려준 표현도 공부하고 싶은데"). 포스트잇과 같은 경로(POST/DELETE phrases)
             let src = i.source.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -331,33 +370,6 @@ struct EntryView: View {
                     phraseLinkLines(sp)
                     if linkingPhrase == sp.id { phraseLinkPicker(sp) }
                 }
-            }
-        }
-        ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
-        do {
-            // 번역을 고치는 것은 첨삭 아래 (A안): 다시 쓰기 ↻ · 잘못 눌렀다 ✗ · 문장을 표현장에 ＋ · ⋯(앞/뒤와 합치기). 복사·듣기·구조 분석은 원문 줄 끝으로 갔다
-            FlowLayout(spacing: 16, rowSpacing: 0) {   // 버튼이 늘어 한 줄에 안 들어가면 다음 줄로
-                if let onRedo { Tiny(title: "다시 쓰기 ↻\u{FE0E}", action: onRedo).frame(height: Theme.lh).help("첨삭을 보고 고쳐 쓴다. 이 번역은 이전 시도로 남고 집계에도 남는다") }
-                if let onVoid { Tiny(title: "잘못 눌렀다 ✗\u{FE0E}", color: Theme.red, action: onVoid).frame(height: Theme.lh).help("실수로 낸 번역을 무효로 표시한다. 점수·총평·기록에서 빠지고 이전 시도에 '잘못 누름'으로 남는다") }
-                do {
-                    // 문장 전체를 표현장에 (goni 2026-11-20 "짧은 문장 중 써먹고 싶은 것이 있어서"). 뜻은 참고 번역(없으면 내 번역).
-                    // 붙은 뒤 다시 누르면 습득 완료 토글(포스트잇과 같다), 떼는 건 표현장 ×. 응용·시험·테이프에 자연히 들어간다
-                    let sp = savedPhrases.first { $0.phrase == s.text && $0.sentenceId == s.id } ?? savedPhrases.first { $0.phrase == s.text }
-                    Tiny(title: sp?.isMastered == true ? "문장 습득 완료 ✓\u{FE0E}" : sp != nil ? "문장 붙여 둠 ✓\u{FE0E}" : "문장을 표현장에 ＋", color: sp != nil ? Theme.grade(.A) : Theme.pencil) {
-                        onTogglePhrase(Expression(phrase: s.text, meaning: fb.reference.isEmpty ? (s.attempt?.translation ?? "") : fb.reference))
-                    }
-                    .frame(height: Theme.lh)
-                    .help(sp?.isMastered == true ? "습득 완료. 누르면 되돌린다" : sp != nil ? "문장이 표현장에 붙어 있다. 누르면 습득 완료. 떼려면 표현장에서 ×" : "이 문장 통째로 표현장에 붙인다 (뜻 = 참고 번역). 응용·시험·테이프에도 들어간다")
-                }
-                if onMergePrev != nil || onMergeNext != nil, !moreOpen { Tiny(title: "⋯") { moreOpen = true }.frame(height: Theme.lh).help("드물게 쓰는 것: 잘못 끊긴 문장 합치기") }
-                if moreOpen, let onMergePrev { Tiny(title: "↑\u{FE0E} 앞과 합치기", action: onMergePrev).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
-                if moreOpen, let onMergeNext { Tiny(title: "↓\u{FE0E} 뒤와 합치기", action: onMergeNext).frame(height: Theme.lh).help("두 문장의 기록은 남고, 합쳐진 문장을 다시 쓴다") }
-            }
-            .task {
-                #if DEBUG
-                // 화면 확인용: LBN_AUTOSTRUCT=<문장 id> 이면 펼치자마자 구조 분석을 받는다 (LBN_AUTOOPEN과 함께)
-                if ProcessInfo.processInfo.environment["LBN_AUTOSTRUCT"] == s.id, structure == nil { loadStructure() }
-                #endif
             }
         }
         if !fb.expressions.isEmpty {
