@@ -759,6 +759,7 @@ struct TryBox: View {
     @State private var queued = false
     @State private var msg: String?
     @State private var past: [Drill] = []      // 같은 표현으로 푼 지난 시도 (최신순, 최대 10)
+    @State private var pastLoading = false     // 서버에서 지난 시도를 받는 중 (캐시에 없을 때만 "불러오는 중…")
     @State private var openPast: String?       // 탭해서 펼친 지난 시도
     @State private var gradingTask: Task<Void, Never>?   // 채점 요청. 멈추기 때 cancel
     @State private var gradingId: String?                // 채점 중인 문제 id(출제형) 또는 drill_id(자유 작문). nil이면 채점 중이 아니다
@@ -796,6 +797,9 @@ struct TryBox: View {
                     .textInputAutocapitalization(.sentences).autocorrectionDisabled()
                     .focused($focused).disabled(busy).opacity(busy ? 0.55 : 1)     // 서버가 일하는 동안 입력란은 비활성·반투명, 글은 그대로
                     .onChange(of: answer) { _, v in if v.contains("\n") { answer = v.replacingOccurrences(of: "\n", with: " "); Task { await submit() } } }
+            }
+            if past.isEmpty, pastLoading {
+                Text("지난 시도 불러오는 중…").font(Theme.hand(17)).foregroundStyle(Theme.pencil).padding(.top, 4)
             }
             if !past.isEmpty {
                 Text("지난 시도 \(past.count)").font(Theme.hand(17)).foregroundStyle(Theme.pencil).padding(.top, 4)
@@ -869,12 +873,14 @@ struct TryBox: View {
         }
     }
 
-    /// 같은 표현으로 푼 지난 시도: 서버(1년), 안 되면 캐시
+    /// 같은 표현으로 푼 지난 시도: 로컬 캐시 것을 먼저 보여 주고, 서버에서 그 표현만(GET /api/drills?phrase=) 받아 맞춘다.
+    /// 전에는 1년치 전체(?days=365, 약 290KB·1.5초+)를 받아 걸러서 "써 보기 · 2"인데 지난 시도가 늦게 나왔다 (goni 2026-11-23, 웹 fb39342)
     private func loadPast() async {
-        if let all = try? await API.shared.drills(days: 365) {
-            past = all.filter { $0.phrase == expr.phrase && $0.answer != nil }.sorted { ($0.answeredAt ?? 0) > ($1.answeredAt ?? 0) }
-        } else {
-            past = await MainActor.run { Cache.shared.drills(phrase: expr.phrase) }
+        past = await MainActor.run { Cache.shared.drills(phrase: expr.phrase) }
+        pastLoading = true
+        defer { pastLoading = false }
+        if let r = try? await API.shared.drills(phrase: expr.phrase) {
+            past = r.filter { $0.answer != nil }.sorted { ($0.answeredAt ?? 0) > ($1.answeredAt ?? 0) }
         }
     }
 

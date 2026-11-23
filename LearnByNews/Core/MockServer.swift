@@ -598,7 +598,14 @@ struct MockState {
             }
             cancelledDrills.insert(id); return (200, ["ok": true, "removed": false])
         case "GET /api/drills":
-            return (200, drills.filter { !($0["feedback"] is NSNull) }.reversed() as [[String: Any]])
+            // ?phrase= : 그 표현으로 한 응용만(답한 것, 최신순 50개). 없으면 전체(days는 무시)
+            var params: [String: String] = [:]
+            for kv in query.split(separator: "&") { let p = kv.split(separator: "=", maxSplits: 1).map(String.init); if p.count == 2 { params[p[0]] = p[1].removingPercentEncoding } }
+            let answered = drills.filter { !($0["feedback"] is NSNull) && $0["answer"] != nil }
+            if let ph = params["phrase"]?.trimmingCharacters(in: .whitespaces), !ph.isEmpty {
+                return (200, Array(answered.filter { $0["phrase"] as? String == ph }.reversed().prefix(50)) as [[String: Any]])
+            }
+            return (200, answered.reversed() as [[String: Any]])
         case "POST /api/sentences/:id/qa":   // 구조 상자 안 질문 (형광펜 묻기 /ask와 경로가 다르다, 2026-11-20 3ae0d47)
             guard sentences.contains(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
             let q = (body["question"] as? String ?? "").trimmingCharacters(in: .whitespaces)

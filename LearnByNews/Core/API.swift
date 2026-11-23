@@ -227,6 +227,8 @@ final class API {
     func answerDrill(_ id: String, answer: String, answeredAt: Int64? = nil) async throws -> Drill { try await send("POST", "/api/drills/\(id)/answer", body: DrillAnswerBody(answer: answer, answeredAt: answeredAt)) }
     func deleteDrill(_ id: String) async throws { let _: OK = try await send("DELETE", "/api/drills/\(id)") }
     func drills(days: Int = 30) async throws -> [Drill] { try await send("GET", "/api/drills?days=\(days)") }
+    /// 그 표현으로 한 응용만(답한 것, 최신순 50개). 써 보기 상자의 "지난 시도" — 1년치 전체를 받아 거르지 않는다 (2026-11-23)
+    func drills(phrase: String) async throws -> [Drill] { try await send("GET", "/api/drills?phrase=\(phrase.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") }
     struct DrillFreeBody: Codable { var phrase: String; var meaning: String?; var phraseId: String?; var sentenceId: String?; var answer: String; var drillId: String? }
     /// 자유 작문: 한국어 원문 없이 표현을 써서 지은 내 문장을 채점. drillId(클라이언트 UUID)를 주면 멈추기(DELETE grading)가 되고 같은 id 재전송은 저장된 것을 돌려준다(duplicate)
     func freeDrill(_ b: DrillFreeBody) async throws -> Drill { try await send("POST", "/api/drills/free", body: b) }
