@@ -245,6 +245,7 @@ struct LogReviewText: View {
             .redpen()
             .contentShape(Rectangle())
             .onTapGesture { if hasMore { withAnimation(.easeInOut(duration: 0.15)) { more.toggle() } } }
+        ReviewCompareView(c: r.compare, size: 19)   // 지난 회차와 견주어: 요약 바로 뒤, 자세히와 무관하게 늘 (2026-11-23)
         if more {
             ForEach(Array(r.patterns.enumerated()), id: \.offset) { _, p in
                 (Text(p.title).underline(true, color: Theme.red) + Text("  ") + Text(p.detail)).redpen(size: 20)

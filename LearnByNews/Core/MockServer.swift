@@ -115,6 +115,12 @@ struct MockState {
         ]
         reviews = [["id": "r1", "article_id": "a2", "score": 90, "created_at": now - 2 * 86_400_000 + 200_000,
                     "summary": "짧은 기사였지만 두 문장 모두 뜻을 정확히 옮겼다.", "patterns": [["title": "어감", "detail": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현을 고르면 좋다."]], "praise": "숫자와 단위를 빠뜨리지 않은 점이 좋다."]]
+        // LBN_COMPARE=1: r1에 "지난 회차와 견주어"가 있는 것처럼 (기록 탭·마지막 장 확인용)
+        if ProcessInfo.processInfo.environment["LBN_COMPARE"] == "1" {
+            reviews[0]["compare"] = ["better": ["관용구를 직역하던 버릇이 줄었다 — weigh on을 '부담을 주다'로 옮겼다.", "분사구문을 앞 절에 자연스럽게 붙였다."],
+                                     "worse": ["숫자 단위(km)를 한 번 빠뜨렸다."],
+                                     "changed": "문장이 전반적으로 짧아졌다. 뜻은 같지만 기사체보다 구어체에 가깝다."]
+        }
         sessions = [["id": "ss1", "started_at": now - 2 * 86_400_000 - 300_000, "ended_at": now - 2 * 86_400_000 + 90_000, "attempts": 47, "score": 90, "drills": 10, "articles": ["Seoul to expand bike lanes along Han River"], "created_at": now - 2 * 86_400_000 + 100_000,
                      "review": ["summary": "짧은 세션이었지만 두 문장 다 뜻을 정확히 잡았다.", "keep": "단위와 숫자를 빠뜨리지 않은 것", "next": "'완화하다'보다 '덜어 주다'처럼 우리말다운 표현 고르기",
                                 "by_article": [["title": "Seoul to expand bike lanes along Han River", "summary": "자전거 기사는 숫자와 지명이 정확했다. 미래 표현은 '~할 것이다'로 굳어 있다.", "next": "will을 문맥에 맞게 '~한다'로도"],
@@ -220,7 +226,10 @@ struct MockState {
             let r: [String: Any] = ["id": nextId("r"), "article_id": id, "score": body["score"] ?? NSNull(), "created_at": Date().ms,
                                     "summary": "전체적으로 뜻은 잘 잡았다. 관용 표현을 직역하는 버릇만 고치면 된다.",
                                     "patterns": [["title": "관용구 직역", "detail": "weigh on, hold steady 같은 구는 사전 뜻보다 기사에서 쓰는 우리말 표현을 찾자."], ["title": "분사구문", "detail": "saying ~ 은 '~라고 말하며'로 앞 절에 붙인다."]],
-                                    "praise": "숫자·고유명사를 정확히 옮겼다."]
+                                    "praise": "숫자·고유명사를 정확히 옮겼다.",
+                                    "compare": ["better": ["관용구를 직역하던 버릇이 줄었다 — weigh on을 '부담을 주다'로 옮겼다.", "분사구문을 앞 절에 자연스럽게 붙였다."],
+                                                "worse": ["숫자 단위(km)를 한 번 빠뜨렸다."],
+                                                "changed": "문장이 전반적으로 짧아졌다. 뜻은 같지만 기사체보다 구어체에 가깝다."]]
             reviews.append(r); return (200, r)
         case "POST /api/sentences/:id/attempts":
             guard let i = sentences.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 문장"]) }
@@ -493,7 +502,7 @@ struct MockState {
             let revs = reviews.map { r -> [String: Any] in
                 let a = articles.first { $0["id"] as? String == r["article_id"] as? String }
                 return ["id": r["id"]!, "article_id": r["article_id"]!, "title": a?["title"] ?? "", "score": r["score"]!, "created_at": r["created_at"]!, "summary": r["summary"]!,
-                        "patterns": r["patterns"] ?? [], "praise": r["praise"] ?? ""]
+                        "patterns": r["patterns"] ?? [], "praise": r["praise"] ?? "", "compare": r["compare"] ?? NSNull()]
             }
             let ds = drills.filter { !($0["feedback"] is NSNull) }.map { d -> [String: Any] in
                 let sid = d["sentence_id"] as? String
@@ -679,7 +688,7 @@ struct MockState {
                 }
             }
             let revs = reviews.filter { ($0["created_at"] as! Int64) > since }.map { r -> [String: Any] in
-                ["id": r["id"]!, "article_id": r["article_id"]!, "score": r["score"]!, "created_at": r["created_at"]!, "review": ["summary": r["summary"]!, "patterns": r["patterns"]!, "praise": r["praise"]!]]
+                ["id": r["id"]!, "article_id": r["article_id"]!, "score": r["score"]!, "created_at": r["created_at"]!, "review": ["summary": r["summary"]!, "patterns": r["patterns"]!, "praise": r["praise"]!, "compare": r["compare"] ?? NSNull()]]
             }
             return (200, ["exported_at": Date().ms, "since": since,
                           "articles": articles.map { a in var o = a; o["sentence_count"] = sents(of: a["id"] as! String).count; o["done_count"] = 0; return o },

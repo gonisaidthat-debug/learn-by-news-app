@@ -119,6 +119,21 @@ struct ReviewPattern: Codable, Hashable {
     var detail: String
 }
 
+/// 총평의 "지난 회차와 견주어" (2026-11-23): 좋아진 점 ↑ · 나빠진 점 ↓ · 달라진 점 =. 첫 회차·옛 총평은 없거나 전부 비어 있다
+struct ReviewCompare: Codable, Hashable {
+    var better: [String] = []
+    var worse: [String] = []
+    var changed: String = ""
+    var isEmpty: Bool { better.isEmpty && worse.isEmpty && changed.isEmpty }
+    init(better: [String] = [], worse: [String] = [], changed: String = "") { self.better = better; self.worse = worse; self.changed = changed }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        better = (try? c.decodeIfPresent([String].self, forKey: .better)) ?? []
+        worse = (try? c.decodeIfPresent([String].self, forKey: .worse)) ?? []
+        changed = (try? c.decodeIfPresent(String.self, forKey: .changed)) ?? ""
+    }
+}
+
 struct Review: Codable, Identifiable, Hashable {
     var id: String
     var score: Int?
@@ -126,9 +141,10 @@ struct Review: Codable, Identifiable, Hashable {
     var summary: String
     var patterns: [ReviewPattern]
     var praise: String
+    var compare: ReviewCompare?     // 지난 회차와 견주어 (없으면 nil)
 
-    init(id: String, score: Int?, createdAt: Int64, summary: String, patterns: [ReviewPattern], praise: String) {
-        self.id = id; self.score = score; self.createdAt = createdAt; self.summary = summary; self.patterns = patterns; self.praise = praise
+    init(id: String, score: Int?, createdAt: Int64, summary: String, patterns: [ReviewPattern], praise: String, compare: ReviewCompare? = nil) {
+        self.id = id; self.score = score; self.createdAt = createdAt; self.summary = summary; self.patterns = patterns; self.praise = praise; self.compare = compare
     }
 
     init(from decoder: Decoder) throws {
@@ -139,6 +155,7 @@ struct Review: Codable, Identifiable, Hashable {
         summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
         patterns = try c.decodeIfPresent([ReviewPattern].self, forKey: .patterns) ?? []
         praise = try c.decodeIfPresent(String.self, forKey: .praise) ?? ""
+        compare = try? c.decodeIfPresent(ReviewCompare.self, forKey: .compare)
     }
 }
 
@@ -382,8 +399,9 @@ struct LogReview: Codable, Identifiable, Hashable {
     var summary: String
     var patterns: [ReviewPattern] = []     // 2026-11-23: 기록 탭에서 총평 본문("자세히"). 없으면 빈 값
     var praise: String = ""
-    init(id: String, articleId: String, title: String, score: Int?, createdAt: Int64, summary: String, patterns: [ReviewPattern] = [], praise: String = "") {
-        self.id = id; self.articleId = articleId; self.title = title; self.score = score; self.createdAt = createdAt; self.summary = summary; self.patterns = patterns; self.praise = praise
+    var compare: ReviewCompare? = nil      // 지난 회차와 견주어
+    init(id: String, articleId: String, title: String, score: Int?, createdAt: Int64, summary: String, patterns: [ReviewPattern] = [], praise: String = "", compare: ReviewCompare? = nil) {
+        self.id = id; self.articleId = articleId; self.title = title; self.score = score; self.createdAt = createdAt; self.summary = summary; self.patterns = patterns; self.praise = praise; self.compare = compare
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -393,6 +411,7 @@ struct LogReview: Codable, Identifiable, Hashable {
         summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
         patterns = (try? c.decodeIfPresent([ReviewPattern].self, forKey: .patterns)) ?? []
         praise = (try? c.decodeIfPresent(String.self, forKey: .praise)) ?? ""
+        compare = try? c.decodeIfPresent(ReviewCompare.self, forKey: .compare)
     }
 }
 
@@ -692,7 +711,7 @@ struct ExportPayload: Decodable {
     struct Article: Decodable { var id: String; var title: String; var source: String?; var createdAt: Int64 }
     struct Sentence: Decodable { var id: String; var articleId: String; var idx: Int; var paragraph: Int?; var text: String }
     struct Attempt: Decodable { var id: String; var sentenceId: String; var articleId: String; var translation: String; var grade: Grade; var feedback: Feedback; var createdAt: Int64; var void: Int? }
-    struct ReviewBody: Decodable { var summary: String?; var patterns: [ReviewPattern]?; var praise: String? }
+    struct ReviewBody: Decodable { var summary: String?; var patterns: [ReviewPattern]?; var praise: String?; var compare: ReviewCompare? }
     struct Review: Decodable { var id: String; var articleId: String; var score: Int?; var review: ReviewBody; var createdAt: Int64 }
     struct QuizResult: Decodable {
         var id: String; var key: String; var sentenceId: String; var source: String; var correct: Bool; var createdAt: Int64

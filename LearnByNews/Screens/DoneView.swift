@@ -460,5 +460,6 @@ struct DoneView: View {
             (Text(p.title).underline(true, color: Theme.red) + Text("  ") + Text(p.detail)).redpen()
         }
         if !r.praise.isEmpty { Text(r.praise).handLine(size: 22, color: Theme.grade(.A)) }
+        ReviewCompareView(c: r.compare, size: 22)   // 지난 회차와 견주어 (2026-11-23)
     }
 }

@@ -57,10 +57,12 @@ import SwiftData
     var summary: String
     var patterns: Data          // [ReviewPattern] JSON
     var praise: String
+    var compare: Data? = nil    // ReviewCompare JSON (2026-11-23, 없으면 nil)
     var createdAt: Int64
-    init(id: String, articleId: String, score: Int?, summary: String, patterns: Data, praise: String, createdAt: Int64) {
-        self.id = id; self.articleId = articleId; self.score = score; self.summary = summary; self.patterns = patterns; self.praise = praise; self.createdAt = createdAt
+    init(id: String, articleId: String, score: Int?, summary: String, patterns: Data, praise: String, compare: Data? = nil, createdAt: Int64) {
+        self.id = id; self.articleId = articleId; self.score = score; self.summary = summary; self.patterns = patterns; self.praise = praise; self.compare = compare; self.createdAt = createdAt
     }
+    var compareValue: ReviewCompare? { compare.flatMap { try? JSONDecoder.api.decode(ReviewCompare.self, from: $0) } }
 }
 
 @Model final class CachedQuizResult {
@@ -241,7 +243,8 @@ final class Cache {
         }
         for p in x.phrases { ctx.insert(CachedPhrase(id: p.id, phrase: p.phrase, meaning: p.meaning, sentenceId: p.sentenceId, articleId: p.articleId, createdAt: p.createdAt, masteredAt: p.masteredAt, seq: p.seq, weight: p.weight, note: p.note)) }
         for r in x.reviews {
-            ctx.insert(CachedReview(id: r.id, articleId: r.articleId, score: r.score, summary: r.review.summary ?? "", patterns: (try? JSONEncoder.api.encode(r.review.patterns ?? [])) ?? Data(), praise: r.review.praise ?? "", createdAt: r.createdAt))
+            ctx.insert(CachedReview(id: r.id, articleId: r.articleId, score: r.score, summary: r.review.summary ?? "", patterns: (try? JSONEncoder.api.encode(r.review.patterns ?? [])) ?? Data(), praise: r.review.praise ?? "",
+                                    compare: r.review.compare.flatMap { try? JSONEncoder.api.encode($0) }, createdAt: r.createdAt))
         }
         for q in x.quizResults { ctx.insert(CachedQuizResult(id: q.id, key: q.key, sentenceId: q.sentenceId, source: q.source, correct: q.correct, createdAt: q.createdAt)) }
         for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review)) }
@@ -266,7 +269,7 @@ final class Cache {
         if let a = all(CachedAttempt.self).first(where: { $0.id == id }) { a.isVoid = v; try? ctx.save() }
     }
     private func toReview(_ r: CachedReview) -> Review {
-        Review(id: r.id, score: r.score, createdAt: r.createdAt, summary: r.summary, patterns: (try? JSONDecoder.api.decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise)
+        Review(id: r.id, score: r.score, createdAt: r.createdAt, summary: r.summary, patterns: (try? JSONDecoder.api.decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise, compare: r.compareValue)
     }
     private func toSession(_ s: CachedSession) -> StudySession {
         StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review.flatMap { try? JSONDecoder.api.decode(SessionReview.self, from: $0) })
@@ -494,7 +497,7 @@ final class Cache {
         let reviews = all(CachedReview.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.compactMap { r -> LogReview? in
             guard let ar = arts[r.articleId] else { return nil }
             return LogReview(id: r.id, articleId: r.articleId, title: ar.title, score: r.score, createdAt: r.createdAt, summary: r.summary,
-                             patterns: (try? JSONDecoder().decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise)
+                             patterns: (try? JSONDecoder().decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise, compare: r.compareValue)
         }
         let phraseArt = Dictionary(uniqueKeysWithValues: all(CachedPhrase.self).map { ($0.id, $0.articleId) })
         let quiz = all(CachedQuizResult.self).filter { $0.createdAt >= since }.sorted { $0.createdAt < $1.createdAt }.map { q -> LogQuiz in

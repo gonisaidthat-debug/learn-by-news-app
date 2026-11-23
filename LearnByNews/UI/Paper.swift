@@ -297,3 +297,25 @@ struct MutedText: View {
     var text: String
     var body: some View { Text(text).font(.system(size: 13)).foregroundStyle(Theme.muted) }
 }
+
+
+/// 총평의 "지난 회차와 견주어" (goni 2026-11-23 "좋아진 점 나빠진 점과 같이 변화된 점도", 웹 ReviewCompareView와 같음):
+/// 빨간 밑줄 제목 → ↑(초록) 좋아진 점 줄들 → ↓(빨강) 나빠진 점 줄들 → =(잉크색, 약간 흐리게) 달라진 점 한 줄. 둘째 줄부터는 화살표 뒤에 맞춘다. 비어 있으면 아무것도 안 그린다
+struct ReviewCompareView: View {
+    var c: ReviewCompare?
+    var size: CGFloat = 20
+    var body: some View {
+        if let c, !c.isEmpty {
+            Text("지난 회차와 견주어").font(Theme.hand(size)).foregroundStyle(Theme.red).underline(true, color: Theme.red).frame(height: Theme.lh)
+            ForEach(Array(c.better.enumerated()), id: \.offset) { _, x in line("↑", Theme.grade(.A), x, Theme.red) }
+            ForEach(Array(c.worse.enumerated()), id: \.offset) { _, x in line("↓", Theme.red, x, Theme.red) }
+            if !c.changed.isEmpty { line("=", Theme.ink.opacity(0.7), c.changed, Theme.ink.opacity(0.7)) }
+        }
+    }
+    private func line(_ mark: String, _ markColor: Color, _ text: String, _ color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(mark).font(Theme.hand(size)).fontWeight(.bold).foregroundStyle(markColor).frame(width: 16, alignment: .center)
+            Text(text).handLine(size: size, color: color)
+        }
+    }
+}
