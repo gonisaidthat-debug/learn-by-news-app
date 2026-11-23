@@ -32,6 +32,7 @@ func markSource(_ text: String, _ source: String) -> AttributedString {
 /// 이전 시도 한 줄: 작은 도장 + 연필로 줄 그은 글씨 + 시각. 누르면 그때의 첨삭이 펼쳐진다
 struct HistoryLine: View {
     var attempt: Attempt
+    var index: Int? = nil                // "1번째" 번호 (오래된 것부터, goni 2026-11-23 "역순인지 순서대로인지 잘 모르겠는데")
     var onRestore: (() -> Void)? = nil   // void("잘못 누름")인 시도의 되살리기
     #if DEBUG
     @State private var open = ProcessInfo.processInfo.environment["LBN_AUTOHISTORY"] == "1"   // 화면 확인용: 펼친 채로 시작
@@ -48,6 +49,7 @@ struct HistoryLine: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let index { Text("\(index)번째").font(Theme.hand(14)).foregroundStyle(Theme.pencil).fixedSize() }
                     Stamp(kind: .grade(attempt.grade), small: true).opacity(0.6)
                     Text(attempt.translation.isEmpty ? "건너뜀" : attempt.translation)
                         .strikethrough(true, color: Theme.pencil)
@@ -297,7 +299,9 @@ struct EntryView: View {
     private var historyBlock: some View {
         if !s.history.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(s.history.enumerated()), id: \.offset) { _, h in HistoryLine(attempt: h, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
+                // 머리줄: 순서가 헷갈리지 않게 (goni 2026-11-23). 오래된 것부터 아래로
+                Text("이전 시도 \(s.history.count) · 오래된 것부터 ↓\u{FE0E}").font(Theme.hand(14)).foregroundStyle(Theme.pencil).frame(height: 20)
+                ForEach(Array(s.history.enumerated()), id: \.offset) { i, h in HistoryLine(attempt: h, index: i + 1, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
             }
             .padding(.leading, 14)
             .overlay(alignment: .leading) { Rectangle().fill(Theme.pencil).frame(width: 2).padding(.vertical, 4) }
