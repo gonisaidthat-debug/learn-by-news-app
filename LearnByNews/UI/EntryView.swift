@@ -182,8 +182,20 @@ struct EntryView: View {
                               onAsk: onAskSentence == nil ? nil : { q in let r = try await onAskSentence!(q); structure?.qa = (structure?.qa ?? []) + [r] },
                               onDeleteQA: onDeleteQA == nil ? nil : { qid in try await onDeleteQA!(qid); structure?.qa = (structure?.qa ?? []).filter { $0.id != qid } },
                               onMarks: { qid, ms in
-                                  let r = try await SyncManager.shared.setQAMarks(sentenceId: s.id, qid: qid, marks: ms)
-                                  if let i = structure?.qa?.firstIndex(where: { $0.id == qid }) { structure?.qa?[i].marks = r }
+                                  // 밑줄은 누르는 즉시 그리고 PUT은 뒤에서 (goni 2026-11-23 "빨간 밑줄 업데이트가 느리다"). 오프라인이면 SyncManager가 큐에 넣는다.
+                                  // 서버가 거절하면 이전 밑줄로 되돌리고 알린다(throw → askErr)
+                                  guard let i = structure?.qa?.firstIndex(where: { $0.id == qid }) else { return }
+                                  let before = structure?.qa?[i].marks
+                                  structure?.qa?[i].marks = ms
+                                  AppLog.shared.info("structure", "qa marks drawn", ["sentence": s.id, "qid": qid, "count": "\(ms.count)"])
+                                  do {
+                                      let r = try await SyncManager.shared.setQAMarks(sentenceId: s.id, qid: qid, marks: ms)
+                                      if let j = structure?.qa?.firstIndex(where: { $0.id == qid }) { structure?.qa?[j].marks = r }
+                                  } catch {
+                                      if let j = structure?.qa?.firstIndex(where: { $0.id == qid }) { structure?.qa?[j].marks = before }
+                                      AppLog.shared.warn("structure", "qa marks rejected; reverted", ["sentence": s.id, "qid": qid, "error": error.localizedDescription])
+                                      throw error
+                                  }
                               })
                     .padding(.vertical, 4)
             }

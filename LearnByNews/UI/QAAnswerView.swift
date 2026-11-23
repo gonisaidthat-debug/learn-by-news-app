@@ -95,8 +95,14 @@ struct QAAnswerView: View {
         }
         .task {
             #if DEBUG
-            // 화면 확인용: LBN_AUTOMARK=1 이면 두 번째~세 번째 단어를 고른 상태로
-            if ProcessInfo.processInfo.environment["LBN_AUTOMARK"] == "1", onSet != nil, toks.count > 3 { from = 1; to = 2 }
+            // 화면 확인용: LBN_AUTOMARK=1 이면 두 번째~세 번째 단어를 고른 상태로. =2 이면 바로 "밑줄 긋기"까지 (모의 서버는 PUT을 8초 늦춘다 → 응답 전에 그려지는지)
+            let am = ProcessInfo.processInfo.environment["LBN_AUTOMARK"]
+            if am == "1" || am == "2", onSet != nil, toks.count > 3 { from = 1; to = 2 }
+            if am == "2", let onSet, toks.count > 3, marks.count < 2 {
+                let text = Self.display(answer).0
+                let chosen = String(Array(text)[toks[1].range.lowerBound..<toks[2].range.upperBound])
+                onSet(Array((marks + [chosen]).prefix(50))); from = nil; to = nil
+            }
             #endif
         }
     }

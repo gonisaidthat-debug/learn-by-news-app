@@ -32,7 +32,7 @@ final class MockServer: URLProtocol {
         let env = ProcessInfo.processInfo.environment
         let slow = env["LBN_AUTOSUBMIT"] != nil ? 8.0 : 1.5
         let slowDrill = (env["LBN_AUTOANSWER"] != nil || env["LBN_AUTOTRY"] != nil) ? 8.0 : 1.5   // 응용 채점(멈추기 확인용)
-        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : path.hasSuffix("/qa") ? 2 : 0.15
+        let delay: Double = (path.hasSuffix("/attempts") && body["skip"] == nil) ? slow : (path.hasSuffix("/answer") || path.hasSuffix("/drills/free")) ? slowDrill : path.hasSuffix("/review") ? 2 : path.hasSuffix("/structure") ? 2.5 : path.hasSuffix("/qa") ? 2 : (path.hasSuffix("/marks") && env["LBN_AUTOMARK"] == "2") ? 8 : 0.15
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             Self.lock.lock()
             let (code, json) = Self.state.handle(method: method, path: path, query: query, body: body)
@@ -138,6 +138,8 @@ struct MockState {
                       ["id": "h1", "sentence_id": "s1", "article_id": "a1", "start_word": 3, "end_word": 5, "span": "held rates steady",
                        "answer": ["meaning": "금리를 동결했다", "why": "hold steady = 변동 없이 유지", "similar": "kept rates unchanged"], "note": "뉴스에서 자주 봄", "created_at": h]]
         quizResults = [["id": "q1", "key": "s8|ease congestion", "source": "ease congestion", "correct": false, "created_at": now - 86_400_000, "kind": "issue"]]
+        // LBN_AUTOMARK: s1 구조 상자에 문답 하나를 미리 (밑줄 즉시 그리기 확인용)
+        if ProcessInfo.processInfo.environment["LBN_AUTOMARK"] != nil { sentenceQA = [["id": "q0", "sentence_id": "s1", "question": "왜 on인가?", "answer": "(모의) 요일 앞에는 **on**을 쓴다. 날짜도 on, 달과 해는 in.", "created_at": now - 60_000, "marks": ["요일 앞에는"]]] }
         if ProcessInfo.processInfo.environment["LBN_MASTERED"] == "1" { masteryLog = [["id": "ml0", "phrase_id": "p1", "action": "mastered", "note": NSNull(), "attempt_id": NSNull(), "sentence_id": NSNull(), "created_at": now - 3_600_000]] }
     }
 
