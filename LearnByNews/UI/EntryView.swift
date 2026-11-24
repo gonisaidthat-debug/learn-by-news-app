@@ -420,58 +420,44 @@ struct ChunkFrames: PreferenceKey {
     static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
 }
 
-/// 구조 분석 덩어리 위 꾸밈 관계 화살표 (웹 Entry.tsx의 chunk-arrows와 같은 기하, goni 2026-11-23). 상자 자리(frames)는 레이아웃 뒤에 잰 것.
-/// 같은 줄이면 상자 위로 호(라벨은 호 꼭대기), 다른 줄이면 줄 사이 틈으로 지나 아랫줄→윗줄은 받는 상자의 아래쪽에, 윗줄→아랫줄은 받는 상자의 위쪽에 화살촉(상자를 가로지르지 않는다, 라벨은 틈 가운데).
-/// 갈색 1.6pt, 라벨 손글씨 13pt에 종이색 테두리
+/// 구조 분석 덩어리 아래 꾸밈 관계 화살표 (웹 Entry.tsx의 chunk-arrows와 같은 기하, goni 2026-11-24 "단어 밑으로만").
+/// 모든 화살표는 보내는 상자의 아래 가운데에서 나와 아래로만 돌아 받는 상자의 아래 가운데에 닿는다(화살촉은 아래에서 위로).
+/// cubic: (x1,y) → 제어점 (x1,y+h),(x2,y+h) → (x2,y). h = 18 + 11×|to−from| (최대 72)라 멀리 걸릴수록 깊어 겹치지 않는다. 라벨은 호 바닥(0.75h) 바로 위 가운데.
+/// 갈색 1.6pt, 라벨 손글씨 13pt에 종이색 바탕
 struct ChunkArrows: View {
     var links: [Structure.Link]
     var frames: [Int: CGRect]
     private let brown = Color(hex: 0x8A6A2A)
+    static func depth(_ l: Structure.Link) -> CGFloat { min(72, 18 + 11 * CGFloat(abs(l.to - l.from))) }
+    /// 아래 여백: 가장 깊은 호(0.75h) + 14
+    static func bottomPad(_ links: [Structure.Link]) -> CGFloat { (links.map(depth).max() ?? 0) * 0.75 + 14 }
     var body: some View {
         Canvas { ctx, _ in
             for l in links {
                 guard let ra = frames[l.from], let rb = frames[l.to] else { continue }
                 let x1 = ra.midX, x2 = rb.midX
-                let top1 = ra.minY - 2, top2 = rb.minY - 2
-                let bot1 = ra.maxY + 2, bot2 = rb.maxY + 2
+                let y = max(ra.maxY, rb.maxY) + 2
+                let h = Self.depth(l)
                 var p = Path()
-                var end: CGPoint, before: CGPoint, label: CGPoint
-                if abs(top1 - top2) < 8 {
-                    // 같은 줄: 상자 위로 호. 꼭대기는 top1 - h
-                    let h = min(24, 10 + abs(x2 - x1) / 10)
-                    let c = CGPoint(x: (x1 + x2) / 2, y: top1 - 2 * h)
-                    p.move(to: CGPoint(x: x1, y: top1)); p.addQuadCurve(to: CGPoint(x: x2, y: top2), control: c)
-                    end = CGPoint(x: x2, y: top2); before = c; label = CGPoint(x: (x1 + x2) / 2, y: top1 - h - 7)
-                } else if top1 > top2 {
-                    // 아랫줄 → 윗줄: 줄 사이 틈으로 지나 받는 상자의 아래쪽에
-                    let g = (top1 - bot2) / 2
-                    let c1 = CGPoint(x: x1, y: top1 - g), c2 = CGPoint(x: x2, y: bot2 + g)
-                    p.move(to: CGPoint(x: x1, y: top1)); p.addCurve(to: CGPoint(x: x2, y: bot2), control1: c1, control2: c2)
-                    end = CGPoint(x: x2, y: bot2); before = c2; label = CGPoint(x: (x1 + x2) / 2, y: (top1 + bot2) / 2)
-                } else {
-                    // 윗줄 → 아랫줄: 보내는 상자의 아래에서 나와 받는 상자의 위에
-                    let g = (top2 - bot1) / 2
-                    let c1 = CGPoint(x: x1, y: bot1 + g), c2 = CGPoint(x: x2, y: top2 - g)
-                    p.move(to: CGPoint(x: x1, y: bot1)); p.addCurve(to: CGPoint(x: x2, y: top2), control1: c1, control2: c2)
-                    end = CGPoint(x: x2, y: top2); before = c2; label = CGPoint(x: (x1 + x2) / 2, y: (bot1 + top2) / 2)
-                }
+                p.move(to: CGPoint(x: x1, y: y))
+                p.addCurve(to: CGPoint(x: x2, y: y), control1: CGPoint(x: x1, y: y + h), control2: CGPoint(x: x2, y: y + h))
                 ctx.stroke(p, with: .color(brown), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                // 화살촉: 끝점에서 들어오는 방향으로 7pt
-                let ang = atan2(end.y - before.y, end.x - before.x)
+                // 화살촉: 받는 상자 아래에서 위로
                 var head = Path()
-                head.move(to: end)
-                head.addLine(to: CGPoint(x: end.x - 8 * cos(ang - 0.42), y: end.y - 8 * sin(ang - 0.42)))
-                head.addLine(to: CGPoint(x: end.x - 8 * cos(ang + 0.42), y: end.y - 8 * sin(ang + 0.42)))
+                head.move(to: CGPoint(x: x2, y: y))
+                head.addLine(to: CGPoint(x: x2 - 3.5, y: y + 8))
+                head.addLine(to: CGPoint(x: x2 + 3.5, y: y + 8))
                 head.closeSubpath()
                 ctx.fill(head, with: .color(brown))
-                // 라벨: 종이색 바탕(흰 테두리 대신) 위 갈색 손글씨
+                // 라벨: 호 바닥(y + 0.75h) 바로 위
                 let t = l.label.trimmingCharacters(in: .whitespaces)
                 if !t.isEmpty {
                     let r = ctx.resolve(Text(t).font(Theme.hand(13)).foregroundColor(brown))
                     let sz = r.measure(in: CGSize(width: 200, height: 40))
-                    let bg = CGRect(x: label.x - sz.width / 2 - 3, y: label.y - sz.height / 2 - 1, width: sz.width + 6, height: sz.height + 2)
+                    let at = CGPoint(x: (x1 + x2) / 2, y: y + 0.75 * h - sz.height / 2 - 1)
+                    let bg = CGRect(x: at.x - sz.width / 2 - 3, y: at.y - sz.height / 2 - 1, width: sz.width + 6, height: sz.height + 2)
                     ctx.fill(Path(roundedRect: bg, cornerRadius: 3), with: .color(Color(red: 1, green: 0.992, blue: 0.965).opacity(0.95)))
-                    ctx.draw(r, at: label, anchor: .center)
+                    ctx.draw(r, at: at, anchor: .center)
                 }
             }
         }
@@ -494,28 +480,38 @@ struct StructureView: View {
     @State private var askErr: String?
     @State private var chunkFrames: [Int: CGRect] = [:]   // 덩어리 상자 자리(화살표용)
     @FocusState private var qFocused: Bool
+    /// 덩어리 상자들(text 위·role 아래, 역할별 밑줄 색). 자리는 ChunkFrames로 알린다
+    @ViewBuilder private var chunkBoxes: some View {
+        ForEach(Array(st.chunks.enumerated()), id: \.offset) { i, ch in
+            VStack(alignment: .center, spacing: 1) {
+                Text(ch.text).font(Theme.print(16)).foregroundStyle(Theme.ink).multilineTextAlignment(.center)
+                Text(ch.role).font(Theme.hand(15)).foregroundStyle(Structure.color(ch.role))
+            }
+            .padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.025)))
+            .overlay(alignment: .bottom) { Rectangle().fill(Structure.color(ch.role)).frame(height: 3).clipShape(RoundedRectangle(cornerRadius: 1.5)) }
+            .help(ch.note)
+            .fixedSize()
+            .background(GeometryReader { g in Color.clear.preference(key: ChunkFrames.self, value: [i: g.frame(in: .named("chunks"))]) })
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             labeled("뼈대", st.skeleton, color: Theme.pencil).padding(.trailing, onClose == nil ? 0 : 22)
-            // 덩어리 띠. 꾸밈 관계(links)가 있으면 상자 위 30pt·줄 사이 32pt를 띄우고 상자들의 실제 자리를 재서 화살표를 덧그린다 (goni 2026-11-23 "꾸밈 관계를 화살표로도")
+            // 덩어리 띠. 꾸밈 관계(links)가 있으면 한 줄로 늘어놓고(가로 스크롤) 상자 아래로만 도는 화살표를 덧그린다
+            // (goni 2026-11-23 "꾸밈 관계를 화살표로도" → 2026-11-24 "화살표는 단어 밑으로만, 위아래로 끝점이 찍히니 어지럽다"). 없으면 전처럼 줄바꿈
             let links = (st.links ?? []).filter { $0.from != $0.to && st.chunks.indices.contains($0.from) && st.chunks.indices.contains($0.to) }
-            FlowLayout(spacing: 8, rowSpacing: links.isEmpty ? nil : 32) {
-                ForEach(Array(st.chunks.enumerated()), id: \.offset) { i, ch in
-                    VStack(alignment: .center, spacing: 1) {
-                        Text(ch.text).font(Theme.print(16)).foregroundStyle(Theme.ink).multilineTextAlignment(.center)
-                        Text(ch.role).font(Theme.hand(15)).foregroundStyle(Structure.color(ch.role))
-                    }
-                    .padding(.horizontal, 8).padding(.top, 2).padding(.bottom, 4)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.025)))
-                    .overlay(alignment: .bottom) { Rectangle().fill(Structure.color(ch.role)).frame(height: 3).clipShape(RoundedRectangle(cornerRadius: 1.5)) }
-                    .help(ch.note)
-                    .background(GeometryReader { g in Color.clear.preference(key: ChunkFrames.self, value: [i: g.frame(in: .named("chunks"))]) })
+            if links.isEmpty {
+                FlowLayout(spacing: 8) { chunkBoxes }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) { chunkBoxes }
+                        .padding(.bottom, ChunkArrows.bottomPad(links))
+                        .coordinateSpace(name: "chunks")
+                        .onPreferenceChange(ChunkFrames.self) { chunkFrames = $0 }
+                        .overlay { ChunkArrows(links: links, frames: chunkFrames).allowsHitTesting(false) }
                 }
             }
-            .padding(.top, links.isEmpty ? 0 : 30)
-            .coordinateSpace(name: "chunks")
-            .onPreferenceChange(ChunkFrames.self) { chunkFrames = $0 }
-            .overlay { if !links.isEmpty { ChunkArrows(links: links, frames: chunkFrames).allowsHitTesting(false) } }
             let noted = st.chunks.filter { !$0.note.isEmpty }
             if !noted.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
