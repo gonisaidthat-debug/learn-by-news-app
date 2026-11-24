@@ -68,7 +68,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.desk, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { dismiss() } } }
-            .sheet(isPresented: $showLogs) { LocalLogView() }
+            .sheet(isPresented: $showLogs) { LocalLogView().keyboardDismissBar() }
             .confirmationDialog("로컬 로그를 지울까요?", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("지우기", role: .destructive) { AppLog.shared.clear(); msg = "지웠다" }
             }

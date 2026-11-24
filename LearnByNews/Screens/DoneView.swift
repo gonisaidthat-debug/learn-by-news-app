@@ -283,7 +283,7 @@ struct DoneView: View {
         .toolbar { ToolbarItem(placement: .principal) { Text(m.data?.title ?? "").font(Theme.hand(22)).lineLimit(1) } }
         .task { await m.load() }
         .sheet(item: Binding(get: { phrasesSheet.map { PhraseRef(id: $0) } }, set: { phrasesSheet = $0?.id })) { r in
-            PhrasesView(focusPhraseId: r.id, onClose: { phrasesSheet = nil }).environmentObject(router)
+            PhrasesView(focusPhraseId: r.id, onClose: { phrasesSheet = nil }).environmentObject(router).keyboardDismissBar()
         }
     }
 

@@ -166,8 +166,9 @@ struct RootView: View {
             switch auth.state {
             case .unknown: Theme.desk.ignoresSafeArea()
             case .loggedOut: LoginView()
-            case .locked: LockView()
-            case .loggedIn: MainTabs()
+            // 잠금은 탭 위에 덮는다(바꿔치기하지 않는다): 바꿔치기하면 공책 등 화면 트리가 통째로 새로 만들어져 보던 자리·펼친 상태가 사라졌다
+            // (goni 2026-11-24 "백그라운드 전환하고 다시 보면 그 위치가 기억되지 않는" — 2분 넘게 비우면 Face ID 재잠금이 걸리는 경우)
+            case .locked, .loggedIn: MainTabs().overlay { if auth.state == .locked { LockView() } }
             }
         }
         .task { await auth.check() }
@@ -215,15 +216,49 @@ struct MainTabs: View {
             ActivityLogView().studyDot().tabItem { Label("기록", systemImage: "calendar") }.tag(Router.Tab.log)
         }
         .tint(Theme.red)
+        .keyboardDismissBar()    // goni 2026-11-24 "키보드가 안 내려가면 아래 네비를 누를 수 없는 경우들이" (표현장 검색란 등)
         .tabBarAlwaysVisible()   // goni 2026-11-20 "플로팅 메뉴가 상시 떠 있으면": iOS 26 탭 바가 스크롤로 작아지지 않게 못 박는다 (StudyDot·네비 바는 원래 고정)
-        .sheet(isPresented: $router.showSettings) { SettingsView() }
+        .sheet(isPresented: $router.showSettings) { SettingsView().keyboardDismissBar() }
         .task { await SessionModel.shared.loadStart() }   // 공부 상태(StudyDot)는 모든 탭에 보이므로 서버 시작점을 여기서 한 번 맞춘다 (기사 탭 load에만 맡기면 다른 탭으로 열었을 때 옛 캐시가 보인다)
     }
 }
 
 extension View {
+    /// 키보드가 떠 있는 동안 그 바로 위 오른쪽에 "키보드 내리기 ⌄" 버튼 + 스크롤로 내리기 (goni 2026-11-24 "키보드 쓸 수 있는 곳에서 키보드가 안내려가면 아래 네비를 누를 수 없는 경우들이").
+    /// 표현장 검색란처럼 내릴 수단이 없는 입력란에서 키보드가 탭 바·StudyDot을 가렸다. SwiftUI의 `.toolbar(placement: .keyboard)`는 TabView 루트에 붙이면 안 떠서
+    /// 키보드 알림(높이)으로 직접 띄운다. 시트는 호스팅이 따로라 시트 본문에도 붙인다. 맥(하드웨어 키보드)에선 안 뜬다
+    func keyboardDismissBar() -> some View {
+        self.scrollDismissesKeyboard(.interactively)
+            .overlay(alignment: .bottomLeading) { KeyboardDismissButton() }   // 안전 영역이 키보드만큼 줄어 overlay 바닥이 곧 키보드 위. 오른쪽은 StudyDot이 있어 왼쪽에
+    }
     /// 탭 바를 스크롤 방향과 상관없이 늘 그대로 (iOS 26 Liquid Glass 탭 바의 최소화 동작을 끈다. 그 아래 버전은 원래 고정)
     @ViewBuilder func tabBarAlwaysVisible() -> some View {
         if #available(iOS 26.0, *) { self.tabBarMinimizeBehavior(.never) } else { self }
+    }
+}
+
+/// 키보드가 올라와 있을 때만 보이는 작은 "키보드 내리기 ⌄" 캡슐 (keyboardWillShow/Hide로 켜고 끈다)
+struct KeyboardDismissButton: View {
+    @State private var height: CGFloat = 0
+    var body: some View {
+        Group {
+            if height > 0 {
+                Button {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                } label: {
+                    Text("키보드 내리기 ⌄").font(Theme.hand(17)).foregroundStyle(Theme.red)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(Capsule().fill(Theme.paper))
+                        .overlay(Capsule().strokeBorder(Theme.red.opacity(0.6), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 12).padding(.bottom, 6)
+                .transition(.opacity)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { n in
+            if let f = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue { withAnimation(.easeOut(duration: 0.2)) { height = f.height } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in withAnimation(.easeOut(duration: 0.2)) { height = 0 } }
     }
 }

@@ -33,6 +33,7 @@ struct PhrasesView: View {
                     if let onClose { Tiny(title: "←\u{FE0E} 공책", size: 19, action: onClose).padding(.top, 4) }
                     TextField("검색", text: $q)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .submitLabel(.search).onSubmit { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }   // 검색 키로도 키보드를 내린다 (goni 2026-11-24)
                         .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                         .background(Theme.paper, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0xD6CFC0)))

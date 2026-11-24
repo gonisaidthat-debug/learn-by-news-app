@@ -746,9 +746,14 @@ struct NotebookView: View {
             #endif
         }
         .onChange(of: m.allDone) { _, _ in checkFinish() }
-        .onChange(of: phase) { _, p in if p == .active { m.recoverInflight() } }   // 백그라운드에서 돌아왔을 때 안전망
+        .onChange(of: phase) { _, p in
+            if p == .active { m.recoverInflight() }   // 백그라운드에서 돌아왔을 때 안전망
+            // 백그라운드로 갈 때 입력란 포커스를 내린다: 돌아올 때 키보드가 다시 뜨면서 입력란(지금 문장)으로 스크롤돼 읽던 자리가 사라졌다
+            // (goni 2026-11-24 "중간에 있는 다른 부분들을 보다가 백그라운드 전환하고 다시 보면 그 위치가 기억되지 않는"). 쓰려면 입력란을 다시 누른다
+            if p == .background { focused = false }
+        }
         .sheet(item: Binding(get: { phrasesSheet.map { PhraseRef(id: $0) } }, set: { phrasesSheet = $0?.id })) { r in
-            PhrasesView(focusPhraseId: r.id, onClose: { phrasesSheet = nil }).environmentObject(router)
+            PhrasesView(focusPhraseId: r.id, onClose: { phrasesSheet = nil }).environmentObject(router).keyboardDismissBar()
         }
         .onChange(of: m.inflight.isEmpty) { _, _ in checkFinish() }
         .onChange(of: m.finishingPass) { _, _ in checkFinish() }
