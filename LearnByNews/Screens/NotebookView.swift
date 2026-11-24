@@ -772,6 +772,10 @@ struct NotebookView: View {
         .toolbarBackground(Theme.desk, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) { Text(m.data?.title ?? Cache.shared.articleTitle(articleId) ?? "").font(Theme.hand(22)).lineLimit(1) }
+            // "찾기"는 늘 보이는 상단 바 오른쪽에 (goni 2026-11-24 "찾기 버튼이 어딨지?" — 머리줄에 두니 스크롤에 밀려 안 보였다)
+            ToolbarItem(placement: .topBarTrailing) {
+                if m.data != nil, !findOpen { Tiny(title: "찾기", color: Theme.red, size: 19) { findOpen = true; findFocused = true } }
+            }
         }
         // 하드웨어 키보드 Esc는 작은 상자(써 보기·메모·엮기 검색)만 닫는다 — "Esc = 참고 번역 토글"·"Esc = 다시 쓰기 취소"는 뺐다 (goni 2026-11-24 "esc는 작은 상자 닫기만", 웹 9452d90)
         .task {
@@ -891,7 +895,7 @@ struct NotebookView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    NotebookHead(tab: m.browse ? (m.roundShown.map { "\($0)회차 열람" } ?? "열람") : (m.passLabel ?? "\(doneCount) / \(total)"), onFind: findOpen ? nil : { findOpen = true; findFocused = true }) {
+                    NotebookHead(tab: m.browse ? (m.roundShown.map { "\($0)회차 열람" } ?? "열람") : (m.passLabel ?? "\(doneCount) / \(total)")) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(d.title).lineLimit(2)
                             SourceLink(source: d.source ?? "") { await m.setSource($0) }
