@@ -558,6 +558,16 @@ final class SyncManager: ObservableObject {
         Cache.shared.enqueue("qa_marks", QAMarksOp(sentenceId: sentenceId, qid: qid, marks: m)); refreshCounts()
         return m
     }
+    /// 구조 분석 내 메모: 온라인에서만(큐 없음), 기기 저장본에도 반영
+    func setStructureMemo(sentenceId: String, memo: String) async throws -> String? {
+        guard Connectivity.shared.isOnline else { throw APIError.network("연결되면 메모를 남길 수 있다") }
+        let r = try await API.shared.setStructureMemo(sentenceId, memo: memo); StructureStore.shared.setMemo(sentenceId, r); return r
+    }
+    /// 공부 기록 내 메모: 온라인에서만
+    func setSessionMemo(id: String, memo: String) async throws -> String? {
+        guard Connectivity.shared.isOnline, !id.hasPrefix("local-") else { throw APIError.network("연결되면 메모를 남길 수 있다") }
+        return try await API.shared.setSessionMemo(id, memo: memo)
+    }
     func deleteSentenceQA(sentenceId: String, qid: String) async throws {
         guard Connectivity.shared.isOnline else { throw APIError.network("연결되면 지울 수 있다") }
         try await API.shared.deleteSentenceQA(sentenceId, qid: qid)

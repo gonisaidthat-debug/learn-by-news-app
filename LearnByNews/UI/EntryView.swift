@@ -211,7 +211,7 @@ struct EntryView: View {
                                       AppLog.shared.warn("structure", "qa marks rejected; reverted", ["sentence": s.id, "qid": qid, "error": error.localizedDescription])
                                       throw error
                                   }
-                              })
+                              }, onMemo: { t in let r = try await SyncManager.shared.setStructureMemo(sentenceId: s.id, memo: t); structure?.memo = r })
                     .padding(.vertical, 4)
             }
             if fb.grade == .skip {
@@ -425,6 +425,9 @@ struct StructureView: View {
     var onAsk: ((String) async throws -> Void)? = nil      // 상자 맨 아래 입력란 → 서버 → 문답이 목록에 붙는다
     var onDeleteQA: ((String) async throws -> Void)? = nil
     var onMarks: ((String, [String]) async throws -> Void)? = nil   // 답에 밑줄 (qid, 목록 통째)
+    var showMemo = true                                              // 구조 목록은 목록 줄에 메모가 있어 상자 안엔 안 그린다
+    var onMemo: ((String) async throws -> Void)? = nil              // 내 메모 한 줄 저장 (빈 문자열이면 지움)
+    @State private var memoEditing = false
     @ObservedObject private var net = Connectivity.shared
     @State private var question = ""
     @State private var asking = false
@@ -447,6 +450,8 @@ struct StructureView: View {
             labeled("읽기", st.reading, color: Theme.pencil)
             if !st.pitfalls.isEmpty { labeled("함정", st.pitfalls.joined(separator: " · "), color: Theme.pencil) }
             if !st.mine.isEmpty { labeled("내 번역은", st.mine, color: Theme.red, size: 20) }
+            // 내 메모 한 줄은 "내 번역은" 아래 (goni 2026-11-24)
+            if showMemo, let onMemo { MemoLine(memo: st.memo, editing: memoEditing, size: 19, onEdit: { memoEditing = true }, onDone: { memoEditing = false }, onSave: onMemo) }
             // 문답 (goni 2026-11-20 "그 컨텍스트에 대해 추가로 질문하고 답변도"): 점선 위에 "Q. 질문"(남색) + 답(연필색, 줄바꿈 유지), 옆 × 지우기
             let qa = st.qa ?? []
             if !qa.isEmpty {
@@ -482,6 +487,7 @@ struct StructureView: View {
             if let onAgain {
                 HStack(spacing: 10) {
                     Tiny(title: busy ? "분석 중… ✎\u{FE0E}" : "다시 분석 ↻\u{FE0E}", color: busy ? Theme.placeholder : Theme.pencil, size: 18, action: onAgain).disabled(busy)
+                    if showMemo, onMemo != nil { MemoButton(memo: st.memo, editing: memoEditing, size: 18) { memoEditing = true } }
                     if let at = st.createdAt { Text(Date(timeIntervalSince1970: Double(at) / 1000).formatted(.dateTime.month(.defaultDigits).day().hour().minute())).font(Theme.hand(15)).foregroundStyle(Theme.placeholder) }
                 }
             }

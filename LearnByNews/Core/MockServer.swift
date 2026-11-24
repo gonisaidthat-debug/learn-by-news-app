@@ -340,7 +340,8 @@ struct MockState {
                 let a = articles.first { $0["id"] as? String == s["article_id"] as? String }
                 let grade: Any = (s["attempt"] as? [String: Any])?["grade"] ?? NSNull()
                 return ["sentence_id": sid, "text": s["text"] ?? "", "idx": s["idx"] ?? 0, "article_id": s["article_id"] ?? "", "title": a?["title"] ?? "", "created_at": st["created_at"] ?? 0,
-                        "qa_count": sentenceQA.filter { $0["sentence_id"] as? String == sid }.count, "grade": grade, "skeleton": st["skeleton"] ?? ""]
+                        "qa_count": sentenceQA.filter { $0["sentence_id"] as? String == sid }.count, "grade": grade, "skeleton": st["skeleton"] ?? "",
+                        "marks": sentenceQA.filter { $0["sentence_id"] as? String == sid }.flatMap { ($0["marks"] as? [String]) ?? [] }, "memo": st["memo"] ?? NSNull()]
             }.sorted { ($0["created_at"] as! Int64) > ($1["created_at"] as! Int64) }
             return (200, rows)
         case "GET /api/phrases/test":
@@ -372,7 +373,7 @@ struct MockState {
             return (200, ["ok": true])
         case "POST /api/sentences/:id/structure":
             let qaOf: ([String: Any]) -> [String: Any] = { [sentenceQA] o in var o = o; o["qa"] = sentenceQA.filter { $0["sentence_id"] as? String == id }; return o }
-            if let saved = structures[id], (body["force"] as? Bool) != true { var o = saved; o["cached"] = true; return (200, qaOf(o)) }
+            if let saved = structures[id], (body["force"] as? Bool) != true { var o = saved; o["cached"] = true; o["memo"] = saved["memo"] ?? NSNull(); return (200, qaOf(o)) }
             guard let s = sentences.first(where: { $0["id"] as? String == id }), let text = s["text"] as? String else { return (404, ["error": "문장을 찾을 수 없습니다"]) }
             // 단어를 넷으로 끊어 역할을 붙인 모의 분석 (화면 확인용)
             let words = text.split(separator: " ").map(String.init)
@@ -389,6 +390,7 @@ struct MockState {
                                               ["from": 3, "to": 0, "label": "부연", "from_group": 1, "to_group": 0]] : [],   // 묶음(술어부) → 묶음(주어부)
                 // 묶음 괄호 확인용: 안쪽 둘(0층) + 전체를 품는 하나(1층)
                 "groups": chunks.count >= 4 ? [["from": 0, "to": 1, "label": "주어부"], ["from": 2, "to": 3, "label": "술어부"], ["from": 0, "to": 3, "label": "문장 전체"]] : [],
+                "memo": structures[id]?["memo"] ?? NSNull(),   // 다시 분석해도 메모는 남는다
                 "reading": "주어와 동사를 먼저 잡고, 뒤의 전치사구는 때를 나타내므로 한국어에서는 맨 앞으로 옮겨 읽는다. 목적어는 동사 바로 뒤에 붙여 읽으면 된다.",
                 "pitfalls": ["전치사구를 목적어에 걸어 읽기 쉽다", "과거형 동사를 현재로 옮기기 쉽다"],
                 "mine": s["attempt"] is [String: Any] ? "주어·동사는 바로 잡았지만 마지막 전치사구를 목적어에 걸어 읽었다. 첨삭의 지적도 그 자리다." : "",
@@ -496,6 +498,17 @@ struct MockState {
             return (404, ["error": "없는 세션"])
         case "DELETE /api/sessions/:id":
             sessions.removeAll { $0["id"] as? String == id }; return (200, ["ok": true])
+        case "PUT /api/sessions/:id/memo":
+            // 내 메모 (2026-11-24): trim + 1000자, 빈 문자열이면 null로 지움
+            guard let i = sessions.firstIndex(where: { $0["id"] as? String == id }) else { return (404, ["error": "없는 기록"]) }
+            let t = String(((body["memo"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
+            sessions[i]["memo"] = t.isEmpty ? NSNull() : t
+            return (200, ["ok": true, "memo": sessions[i]["memo"]!])
+        case "PUT /api/sentences/:id/structure/memo":
+            guard structures[id] != nil else { return (404, ["error": "분석이 없다"]) }
+            let t = String(((body["memo"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
+            structures[id]!["memo"] = t.isEmpty ? NSNull() : t
+            return (200, ["ok": true, "memo": structures[id]!["memo"]!])
         case "GET /api/log":
             var attempts: [[String: Any]] = []
             for s in sentences {

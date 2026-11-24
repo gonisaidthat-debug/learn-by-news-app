@@ -166,6 +166,12 @@ final class API {
     struct QuestionBody: Encodable { var question: String }
     /// 구조 상자 안 질문(2026-11-20): 서버가 문장·분석·최신 번역·첨삭·이전 문답을 맥락으로 Claude 5~10초(하루 상한에 셈). 400 빈 질문, 404, 429
     func askSentence(_ sentenceId: String, question: String) async throws -> SentenceQA { try await send("POST", "/api/sentences/\(sentenceId)/qa", body: QuestionBody(question: question)) }
+    struct OneLineMemoBody: Encodable { var memo: String }
+    struct MemoResult: Decodable { var ok: Bool; var memo: String? }
+    /// 구조 분석 내 메모(2026-11-24): 서버가 trim + 1000자, 빈 문자열이면 null로 지움. 분석이 없으면 404
+    func setStructureMemo(_ sentenceId: String, memo: String) async throws -> String? { let r: MemoResult = try await send("PUT", "/api/sentences/\(sentenceId)/structure/memo", body: OneLineMemoBody(memo: memo)); return r.memo }
+    /// 공부 기록 내 메모(2026-11-24): 같은 규칙, 없는 기록이면 404
+    func setSessionMemo(_ id: String, memo: String) async throws -> String? { let r: MemoResult = try await send("PUT", "/api/sessions/\(id)/memo", body: OneLineMemoBody(memo: memo)); return r.memo }
     struct MarksBody: Encodable { var marks: [String] }
     struct Marked: Decodable { var ok: Bool; var marks: [String] }
     /// 답에 밑줄(2026-11-20): 고른 글자 목록을 통째로(최대 50). 404 없는 문답

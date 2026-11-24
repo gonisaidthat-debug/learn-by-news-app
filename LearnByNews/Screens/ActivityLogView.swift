@@ -103,6 +103,8 @@ struct ActivityLogView: View {
     @State private var err: String?
     @State private var days = 60
     @State private var open: Set<String> = []
+    @State private var memoEditing: String?            // 메모를 고치는 중인 공부 기록 id
+    @State private var memoSaved: [String: String?] = [:]   // 이 화면에서 저장한 메모 (다시 받기 전까지 로그 객체 대신)
     @AppStorage("lbn_log_mode") private var byArticle = false
     /// "구조" 세그먼트(2026-11-20): 구조 분석한 문장만 모아 보기. 탭 바가 5개라 기록 탭 안에 둔다
     @AppStorage("lbn_log_structures") private var showStructures = false
@@ -188,8 +190,22 @@ struct ActivityLogView: View {
             .background(Theme.desk.ignoresSafeArea())
             .scrollLogEndIfAsked()
             .toolbar(.hidden, for: .navigationBar)
-            .task(id: span) { await load() }
-            .task(id: showStructures) { if showStructures { await structs.load() } }
+            .task(id: span) {
+                await load()
+                #if DEBUG
+                // 화면 확인용: LBN_AUTOMEMO=1 이면 첫 공부 기록에 메모를 저장해 본다 (PUT /api/sessions/:id/memo)
+                if ProcessInfo.processInfo.environment["LBN_AUTOMEMO"] == "1", let f = log?.sessions.first, let r = try? await SessionModel.shared.setMemo(f.id, "(모의) 기록 메모") { memoSaved[f.id] = .some(r) }
+                #endif
+            }
+            .task(id: showStructures) {
+                if showStructures {
+                    await structs.load()
+                    #if DEBUG
+                    // 화면 확인용: LBN_AUTOMEMO=1 이면 구조 목록 첫 항목에 메모를 저장해 본다 (PUT …/structure/memo)
+                    if ProcessInfo.processInfo.environment["LBN_AUTOMEMO"] == "1", let f = structs.items.first, (f.memo ?? "").isEmpty { try? await structs.setMemo(f.sentenceId, "(모의) 내 메모") }
+                    #endif
+                }
+            }
             .refreshable { await load() }
         }
     }
@@ -230,12 +246,20 @@ struct ActivityLogView: View {
     private func block(_ b: LogBlock, showSession: Bool) -> some View {
         switch b {
         case .session(_, let s, let attempts, let drills):
+            let memo: String? = memoSaved[s.id] ?? s.memo
             Entry(stamp: AnyView(Stamp(kind: .session))) {
-                (Text("\(Date(ms: s.startedAt).hm)–\(Date(ms: s.endedAt).hm) · \(s.minutes)분 · \(s.countLabel)")
-                 + Text(s.score.map { " \($0)점" } ?? "").foregroundColor(Theme.red)
-                 + Text(" " + s.articles.joined(separator: ", ")).font(Theme.hand(17)).foregroundColor(Theme.pencil))
-                    .koLine()
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    (Text("\(Date(ms: s.startedAt).hm)–\(Date(ms: s.endedAt).hm) · \(s.minutes)분 · \(s.countLabel)")
+                     + Text(s.score.map { " \($0)점" } ?? "").foregroundColor(Theme.red)
+                     + Text(" " + s.articles.joined(separator: ", ")).font(Theme.hand(17)).foregroundColor(Theme.pencil))
+                        .koLine()
+                    // 머리줄 끝 "+ 메모" (goni 2026-11-24 "기록의 총평에도 내 메모")
+                    MemoButton(memo: memo, editing: memoEditing == s.id, size: 17) { memoEditing = s.id }
+                }
                 if s.review != nil { SessionReviewLines(session: s, size: 16).padding(.bottom, 4) }
+                // 내 메모 한 줄: 총평 아래(총평이 없어도). 저장은 PUT /api/sessions/:id/memo
+                MemoLine(memo: memo, editing: memoEditing == s.id, size: 19, onEdit: { memoEditing = s.id }, onDone: { memoEditing = nil },
+                         onSave: { t in let r = try await SessionModel.shared.setMemo(s.id, t); memoSaved[s.id] = .some(r) })
                 attemptLines(attempts, key: b.id)
                 if !drills.isEmpty { drillLines(drills, head: true) }
             }

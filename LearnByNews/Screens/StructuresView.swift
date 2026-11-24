@@ -6,6 +6,8 @@ import SwiftUI
 struct StructureItem: Codable, Identifiable {
     var sentenceId: String; var text: String; var idx: Int; var articleId: String; var title: String
     var createdAt: Int64; var qaCount: Int; var grade: Grade?; var skeleton: String
+    var marks: [String]?     // 그 문장의 문답 답에 그은 밑줄 전부 (2026-11-24, 옛 서버면 없음)
+    var memo: String?        // 내 메모 한 줄 (2026-11-24)
     var id: String { sentenceId }
 }
 
@@ -56,11 +58,24 @@ final class StructuresModel: ObservableObject {
     func setMarks(_ sid: String, _ qid: String, _ marks: [String]) async throws {
         let r = try await SyncManager.shared.setQAMarks(sentenceId: sid, qid: qid, marks: marks)
         if let i = full[sid]?.qa?.firstIndex(where: { $0.id == qid }) { full[sid]?.qa?[i].marks = r }
+        syncMarks(sid)
     }
     func deleteQA(_ sid: String, _ qid: String) async throws {
         try await SyncManager.shared.deleteSentenceQA(sentenceId: sid, qid: qid)
         full[sid]?.qa = (full[sid]?.qa ?? []).filter { $0.id != qid }
         if let i = list?.firstIndex(where: { $0.sentenceId == sid }) { list?[i].qaCount = max(0, list![i].qaCount - 1) }
+        syncMarks(sid)
+    }
+    /// 펼쳐서 긋거나 떼면 목록 줄의 밑줄도 바로 따라간다 (문답 순 → 그은 순)
+    private func syncMarks(_ sid: String) {
+        guard let qa = full[sid]?.qa, let i = list?.firstIndex(where: { $0.sentenceId == sid }) else { return }
+        list?[i].marks = qa.flatMap { $0.marks ?? [] }
+    }
+    /// 내 메모 한 줄: 목록 줄과 저장본 둘 다 맞춘다
+    func setMemo(_ sid: String, _ memo: String) async throws {
+        let r = try await SyncManager.shared.setStructureMemo(sentenceId: sid, memo: memo)
+        if let i = list?.firstIndex(where: { $0.sentenceId == sid }) { list?[i].memo = r }
+        full[sid]?.memo = r
     }
 }
 
@@ -68,6 +83,7 @@ final class StructuresModel: ObservableObject {
 struct StructuresSection: View {
     @ObservedObject var m: StructuresModel
     @EnvironmentObject var router: Router
+    @State private var memoEditing: String?   // 메모를 고치는 중인 문장 id
     var body: some View {
         let items = m.items
         Entry {
@@ -115,16 +131,29 @@ struct StructuresSection: View {
                 }
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
+            // 문답에 그은 밑줄 전부 (goni 2026-11-24 "밑줄 친 내용은 이 목록에서"): 펼치지 않아도 보이고 여기선 읽기만(떼기는 펼친 문답에서)
+            if let ms = it.marks, !ms.isEmpty {
+                FlowLayout(spacing: 10, rowSpacing: 2) {
+                    Text("밑줄").font(Theme.hand(16)).foregroundStyle(Theme.pencil)
+                    ForEach(Array(ms.enumerated()), id: \.offset) { _, t in
+                        Text(t).font(Theme.hand(18)).foregroundStyle(Theme.ink).overlay(alignment: .bottom) { Rectangle().fill(Theme.red).frame(height: 2) }
+                    }
+                }
+                .padding(.bottom, 2)
+            }
+            // 내 메모 한 줄: 목록 줄에만(펼친 상자 안에는 다시 안 나온다)
+            MemoLine(memo: it.memo, editing: memoEditing == it.sentenceId, size: 19, onEdit: { memoEditing = it.sentenceId }, onDone: { memoEditing = nil }, onSave: { t in try await m.setMemo(it.sentenceId, t) })
             FlowLayout(spacing: 12, rowSpacing: 0) {
                 if !m.byArticle { Text("\(it.title) · \(it.idx + 1)번째").font(Theme.hand(17)).foregroundStyle(Theme.pencil).lineLimit(1).frame(height: Theme.lh) }
                 Text("\(Date(ms: it.createdAt).monthDay) 분석" + (it.qaCount > 0 ? " · 문답 \(it.qaCount)" : "")).font(Theme.hand(17)).foregroundStyle(Theme.pencil).frame(height: Theme.lh)
                 Tiny(title: "공책에서 보기 →\u{FE0E}", size: 18) { router.open(.notebook(id: it.articleId, focus: it.sentenceId, browse: true)) }.frame(height: Theme.lh)
                 Tiny(title: m.busy == it.sentenceId ? "여는 중…" : isOpen ? "접기" : "펼치기", size: 18) { Task { await m.toggle(it) } }.frame(height: Theme.lh)
+                MemoButton(memo: it.memo, editing: memoEditing == it.sentenceId, size: 18) { memoEditing = it.sentenceId }
             }
             if isOpen, let st = m.full[it.sentenceId] {
                 StructureView(st: st, busy: m.busy == it.sentenceId, onAgain: { Task { await m.toggle(it, force: true) } }, onClose: { m.open = nil },
                               onAsk: { q in try await m.ask(it.sentenceId, q) }, onDeleteQA: { qid in try await m.deleteQA(it.sentenceId, qid) },
-                              onMarks: { qid, ms in try await m.setMarks(it.sentenceId, qid, ms) })
+                              onMarks: { qid, ms in try await m.setMarks(it.sentenceId, qid, ms) }, showMemo: false)
                     .padding(.vertical, 4)
             }
         }

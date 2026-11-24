@@ -120,6 +120,13 @@ final class SessionModel: ObservableObject {
         AppLog.shared.info("session", "closed", ["id": s.id, "attempts": "\(s.attempts)", "drills": "\(s.drills ?? 0)"])
         busy = false
     }
+    /// 내 메모 한 줄 (2026-11-24). 목록의 세션도 맞춘다. 총평 다시 받기는 메모를 건드리지 않는다
+    func setMemo(_ id: String, _ memo: String) async throws -> String? {
+        let r = try await SyncManager.shared.setSessionMemo(id: id, memo: memo)
+        if let i = sessions.firstIndex(where: { $0.id == id }) { sessions[i].memo = r }
+        if closed?.id == id { closed?.memo = r }
+        return r
+    }
     func remove(_ s: StudySession) async {
         do { try await API.shared.deleteSession(s.id); sessions.removeAll { $0.id == s.id } }
         catch { msg = error.localizedDescription }

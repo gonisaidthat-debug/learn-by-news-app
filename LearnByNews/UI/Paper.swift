@@ -209,6 +209,40 @@ struct NoteEditor: View {
     }
 }
 
+/// 내 메모 한 줄 (구조 분석·공부 기록, goni 2026-11-24 "메모도 할 수 있게"): 있으면 "메모" 라벨 + 남색 글씨 한 줄(누르면 고친다), 고치는 중엔 NoteEditor(Enter 저장·Esc 취소·비우면 지움).
+/// 없고 고치는 중도 아니면 아무것도 안 그린다 — "+ 메모" 버튼은 부모가 자기 자리에 둔다(`MemoButton`)
+struct MemoLine: View {
+    var memo: String?
+    var editing: Bool
+    var size: CGFloat = 19
+    var onEdit: () -> Void
+    var onDone: () -> Void
+    var onSave: (String) async throws -> Void
+    @State private var err: String?
+    var body: some View {
+        if editing {
+            NoteEditor(initial: memo ?? "", onSave: { t in Task { do { try await onSave(t); err = nil; onDone() } catch { err = error.localizedDescription } } }, onCancel: { err = nil; onDone() })
+            if let err { Text(err).font(Theme.hand(17)).foregroundStyle(Theme.red) }
+        } else if let memo, !memo.isEmpty {
+            Button(action: onEdit) {
+                (Text("메모 ").font(Theme.hand(size - 3)).foregroundColor(Theme.pencil) + Text(memo).font(Theme.hand(size)).foregroundColor(Theme.blueInk))
+                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("누르면 고친다")
+        }
+    }
+}
+/// "+ 메모" 작은 버튼: 메모가 없고 고치는 중이 아닐 때만
+struct MemoButton: View {
+    var memo: String?
+    var editing: Bool
+    var size: CGFloat = 17
+    var onEdit: () -> Void
+    var body: some View {
+        if (memo ?? "").isEmpty, !editing { Tiny(title: "+ 메모", size: size, action: onEdit).frame(height: Theme.lh) }
+    }
+}
+
 /// 중요도 별 ★★★ (goni 2026-11-19 "여러 번 틀릴 때 내가 직접 가중치"): 회색, 누르면 그 수까지 노랑, 같은 수를 다시 누르면 0
 struct StarRow: View {
     var stars: Int

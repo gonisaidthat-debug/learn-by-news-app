@@ -344,11 +344,12 @@ struct StudySession: Codable, Identifiable, Hashable {
     var drills: Int?           // 그중 응용(써 보기·응용 탭) 수
     var review: SessionReview?
     var reviewError: String?   // POST /api/sessions 응답에만: 총평 실패 이유
+    var memo: String?          // 내 메모 한 줄 (2026-11-24, PUT /api/sessions/:id/memo)
 
-    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil, review: SessionReview? = nil, reviewError: String? = nil) {
-        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills; self.review = review; self.reviewError = reviewError
+    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil, review: SessionReview? = nil, reviewError: String? = nil, memo: String? = nil) {
+        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills; self.review = review; self.reviewError = reviewError; self.memo = memo
     }
-    enum CodingKeys: String, CodingKey { case id, startedAt, endedAt, attempts, score, articles, createdAt, drills, review, reviewError }
+    enum CodingKeys: String, CodingKey { case id, startedAt, endedAt, attempts, score, articles, createdAt, drills, review, reviewError, memo }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -361,6 +362,7 @@ struct StudySession: Codable, Identifiable, Hashable {
         drills = try c.decodeIfPresent(Int.self, forKey: .drills)
         review = try? c.decodeIfPresent(SessionReview.self, forKey: .review)
         reviewError = try c.decodeIfPresent(String.self, forKey: .reviewError)
+        memo = try? c.decodeIfPresent(String.self, forKey: .memo)
     }
 
     var minutes: Int { max(1, Int((Double(endedAt - startedAt) / 60000).rounded())) }

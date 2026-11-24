@@ -87,8 +87,9 @@ import SwiftData
     var createdAt: Int64
     var drills: Int?
     var review: Data?           // SessionReview JSON
-    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil, review: SessionReview? = nil) {
-        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills
+    var memo: String? = nil     // 내 메모 (2026-11-24)
+    init(id: String, startedAt: Int64, endedAt: Int64, attempts: Int, score: Int?, articles: [String], createdAt: Int64, drills: Int? = nil, review: SessionReview? = nil, memo: String? = nil) {
+        self.id = id; self.startedAt = startedAt; self.endedAt = endedAt; self.attempts = attempts; self.score = score; self.articles = articles; self.createdAt = createdAt; self.drills = drills; self.memo = memo
         self.review = review.flatMap { try? JSONEncoder.api.encode($0) }
     }
 }
@@ -247,7 +248,7 @@ final class Cache {
                                     compare: r.review.compare.flatMap { try? JSONEncoder.api.encode($0) }, createdAt: r.createdAt))
         }
         for q in x.quizResults { ctx.insert(CachedQuizResult(id: q.id, key: q.key, sentenceId: q.sentenceId, source: q.source, correct: q.correct, createdAt: q.createdAt)) }
-        for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review)) }
+        for s in x.sessions { ctx.insert(CachedSession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review, memo: s.memo)) }
         try ctx.save()
         exportedAt = x.exportedAt
         if full { lastFullAt = Date().ms; needsFull = false }
@@ -272,7 +273,7 @@ final class Cache {
         Review(id: r.id, score: r.score, createdAt: r.createdAt, summary: r.summary, patterns: (try? JSONDecoder.api.decode([ReviewPattern].self, from: r.patterns)) ?? [], praise: r.praise, compare: r.compareValue)
     }
     private func toSession(_ s: CachedSession) -> StudySession {
-        StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review.flatMap { try? JSONDecoder.api.decode(SessionReview.self, from: $0) })
+        StudySession(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, attempts: s.attempts, score: s.score, articles: s.articles, createdAt: s.createdAt, drills: s.drills, review: s.review.flatMap { try? JSONDecoder.api.decode(SessionReview.self, from: $0) }, memo: s.memo)
     }
 
     func articles() -> [ArticleSummary]? {
