@@ -487,6 +487,8 @@ final class SyncManager: ObservableObject {
     }
     func putPass(_ articleId: String, done: [String]) async {
         await passOrdered(articleId) {
+            // 큐에 남은 그 기사의 옛 DELETE는 버린다 — 새 진행을 올린 뒤 늦게 나가 지우지 않게 (2026-11-24 점검)
+            Cache.shared.dropPending(kind: "pass_delete") { (try? JSONDecoder.api.decode(PassOp.self, from: $0.payload))?.articleId == articleId }
             if Connectivity.shared.isOnline {
                 do { let r = try await API.shared.putPass(articleId, done: done); if r.finished == true { Self.passFinished(articleId) }; return }
                 catch let e as APIError where e.isNetwork { /* 큐로 */ }

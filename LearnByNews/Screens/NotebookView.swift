@@ -189,11 +189,15 @@ final class NotebookModel: ObservableObject {
                     prog = RedoProgress.load(id)
                 }
             } else { prog = RedoProgress.load(id) }
-            if let prog {
+            if let prog, !ids.isEmpty {
                 let alive = prog.ids.filter(ids.contains)
                 let p = RedoProgress(ids: alive, done: prog.done.filter(alive.contains))
                 if p.remaining.isEmpty {
-                    RedoProgress.clear(id); await SyncManager.shared.deletePass(id)
+                    // 모든 문장을 덮는 진행은 끝난 회차: 서버 값일 때만 DELETE. 오프라인의 로컬 캐시만으로는 지우지 않는다
+                    // (2026-11-24: 웹에서 3회차 75/150 진행이 사라진 사고 뒤 점검 — 문장 0개·캐시만 있는 상태에서 "모두 덮음"으로 오판해 DELETE를 큐에 넣지 않게)
+                    AppLog.shared.warn("notebook", "pass covers all sentences", ["article": id, "done": "\(p.done.count)", "count": "\(alive.count)", "offline": "\(offline)"])
+                    RedoProgress.clear(id)
+                    if !offline { await SyncManager.shared.deletePass(id) }
                     data = d; finishingPass = true; passSubmitted = Set(p.done); onDone(true); return
                 }
                 AppLog.shared.info("notebook", "resume pass", ["article": id, "done": "\(p.done.count)", "count": "\(p.ids.count)"])
@@ -377,9 +381,12 @@ final class NotebookModel: ObservableObject {
         focusRequest += 1
     }
 
+    /// 취소(Esc·"취소" 버튼): 한 문장 다시 쓰기는 접고, 다시 쓰기(pass) 진행 중이면 쓰다 만 입력만 비운다.
+    /// 진행은 완주했을 때만 지운다 — 중간 취소로 진행을 지우는 개념은 없다 (goni 2026-11-24 "왜 지우는거야?", 웹에서 Esc 한 번에 3회차 75문장 진행이 지워진 사고 뒤).
+    /// 새로 시작하고 싶으면 마지막 장의 "처음부터 다시 쓰기"가 덮어쓴다
     func cancelRedo() {
-        if pass != nil { RedoProgress.clear(id); Task { await SyncManager.shared.deletePass(id) } }
-        redo = nil; pass = nil; passSubmitted = []; input = ""
+        input = ""
+        if pass == nil { redo = nil }
     }
     var passLabel: String? {
         guard let pass, let redo, let i = pass.firstIndex(of: redo) else { return nil }
@@ -697,7 +704,7 @@ struct NotebookView: View {
             ToolbarItem(placement: .principal) { Text(m.data?.title ?? Cache.shared.articleTitle(articleId) ?? "").font(Theme.hand(22)).lineLimit(1) }
         }
         .background {
-            // 하드웨어 키보드 Esc: 다시 쓰기 취소, 아니면 마지막 채점 문장의 참고 번역 접기/펼치기 (웹과 동일)
+            // 하드웨어 키보드 Esc: 한 문장 다시 쓰기 취소(pass 중엔 입력만 비움, 진행은 그대로), 아니면 마지막 채점 문장의 참고 번역 접기/펼치기 (웹과 동일)
             Button("") {
                 if m.redo != nil { m.cancelRedo(); focused = true }
                 else if let last = m.lastGraded { m.open = last; m.refOpen[last] = !(m.refOpen[last] ?? true) }
@@ -1021,7 +1028,7 @@ struct NotebookView: View {
                     if session.inSession { Tiny(title: "건너뛰기") { m.submit(skip: true) } }
                     Tiny(title: "제거") { toRemove = cur }
                     if m.redo != nil {
-                        Tiny(title: m.pass != nil ? "다시 쓰기 그만" : "취소") { m.cancelRedo() }
+                        if m.pass == nil { Tiny(title: "취소") { m.cancelRedo() } }   // 다시 쓰기(pass) 중엔 그만두기 버튼이 없다 — 진행은 완주할 때만 지운다 (2026-11-24)
                         if m.pass != nil { Tiny(title: "이전 회차 열람") { router.shelfPath.append(.notebook(id: articleId, browse: true)) } }
                     }
                     // 합치기: 1회차는 아직 안 쓴 다음 문장과만, 다시 쓰기 진행 중에는 같은 문단의 앞/뒤와(합친 문장은 이번 회차에 다시 쓴다, goni 2026-11-16)
