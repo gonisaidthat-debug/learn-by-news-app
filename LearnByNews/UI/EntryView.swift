@@ -813,11 +813,15 @@ struct TryBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let p = prompt, result == nil {
+            // 머리줄은 결과가 나온 뒤에도 그대로. "한 번 더"는 그 바로 아래, 내 문장 위 (goni 2026-11-24 "한번더 버튼 위치를 이거 바로 아래로"; 전엔 첨삭 맨 아래 "닫기" 옆)
+            if let p = prompt {
                 (Text(expr.phrase).fontWeight(.bold) + Text(" — 이 문장을 영어로")).handLine(size: 20, color: Theme.pencil)
                 Text(p.korean).handLine(size: 23, color: Theme.ink)
-            } else if result == nil {
+            } else {
                 (Text(expr.phrase).fontWeight(.bold) + Text(" — 이 표현으로 네 문장 하나")).handLine(size: 20, color: Theme.pencil)
+            }
+            if result != nil {
+                Tiny(title: "한 번 더", color: Theme.red, size: 19) { result = nil; queued = false; answer = ""; prompt = nil; focused = true }.frame(height: Theme.lh)
             }
             if let r = result, let fb = r.feedback {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -880,9 +884,10 @@ struct TryBox: View {
                 }
             }
             HStack(spacing: 16) {
-                if result != nil || queued {
+                if queued, result == nil {
+                    // 채점 대기(오프라인)엔 결과가 없어 "한 번 더"가 아래에 남는다. 결과가 나오면 머리줄 아래로
                     Tiny(title: "한 번 더", color: Theme.red, size: 19) { result = nil; queued = false; answer = ""; prompt = nil; focused = true }
-                } else {
+                } else if result == nil {
                     if onDrillFor != nil, prompt == nil { Tiny(title: "문제 내줘", size: 19) { Task { await askPrompt() } }.disabled(busy).opacity(busy ? 0.4 : 1) }
                 }
                 Tiny(title: "닫기", size: 19) { onClose() }.disabled(busy).opacity(busy ? 0.4 : 1)
