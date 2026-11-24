@@ -265,7 +265,7 @@ struct DrillsView: View {
                         HStack(spacing: 14) { Text("선생님이 보는 중… ✎\u{FE0E}").pencil(); Tiny(title: "멈추기 ↩\u{FE0E}") { m.stop(); focused = true } }
                     }
                 } else if let fb {
-                    Text(d.answer ?? "").koLine()
+                    MySentenceLine(text: d.answer ?? "")
                     if fb.usedExpression {
                         Text("✓\u{FE0E} \"\(d.phrase)\" 사용").handLine(size: 22, color: Theme.grade(.A))
                     } else {
@@ -274,7 +274,7 @@ struct DrillsView: View {
                     ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
                         (Text(i.mine).strikethrough(true, color: Theme.red) + Text(" →\u{FE0E} \(i.better)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(19)).foregroundColor(Color(hex: 0xC0565A))).redpen()
                     }
-                    if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(17)) + Text(fb.referenceLine)).pencil() }
+                    if !fb.reference.isEmpty { DrillRefLine(fb: fb) }
                     if !fb.note.isEmpty { Text(fb.note).pencil() }
                 }
             }

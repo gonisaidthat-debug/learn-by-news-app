@@ -763,6 +763,44 @@ struct SpeakButton: View {
 }
 
 /// 작은 🔊 아이콘 토글 (포스트잇·형광펜 메모·빨간 펜 지적·표현장): 읽는 중이면 빨간 ■
+/// 영어 문장 끝에 작은 🔊를 글자처럼 이어 붙인 줄(줄이 바뀌어도 마지막 글자 뒤에; 버튼을 따로 두면 줄바꿈 때 아래로 떨어진다).
+/// 줄을 누르면 기기 음성으로 읽고(원문·포스트잇과 같은 TapePlayer.toggleOnce), 읽는 중엔 빨간 ■. lead("참고 ")·tail(" — 뜻")은 읽지 않는다
+struct SpokenLine: View {
+    var text: String
+    var lead: Text = Text("")
+    var tail: Text = Text("")
+    var size: CGFloat = 22
+    var color: Color = Theme.blueInk
+    @ObservedObject private var tape = TapePlayer.shared
+    var body: some View {
+        let on = tape.speakingOnce == text
+        (lead + Text(text) + Text(on ? " ■\u{FE0E}" : " 🔊").font(.system(size: size * 0.62)).foregroundColor(on ? Theme.red : Theme.ink) + tail)
+            .handLine(size: size, color: color)
+            .contentShape(Rectangle())
+            .onTapGesture { tape.toggleOnce(text) }
+            .accessibilityAddTraits(.isButton).accessibilityHint(on ? "멈춤" : "읽어 주기")
+    }
+}
+
+/// 응용 "참고" 줄: 참고 영어 문장 + 🔊 + (— 한국어 뜻). 듣기는 영어 뒤·뜻 앞 (goni 2026-11-24 "이것도 문장 읽어주는 버튼")
+struct DrillRefLine: View {
+    var fb: DrillFeedback
+    var size: CGFloat = 22
+    var body: some View {
+        let ko = fb.referenceKo ?? ""
+        SpokenLine(text: fb.reference, lead: Text("참고 ").font(Theme.hand(size - 5)), tail: Text(ko.isEmpty ? "" : " — \(ko)"), size: size, color: Theme.pencil)
+    }
+}
+
+/// 내 영어 문장 줄 + 끝에 🔊 (써 보기 결과·응용 탭)
+struct MySentenceLine: View {
+    var text: String
+    var size: CGFloat = 22
+    var body: some View {
+        if text.isEmpty { Text("").koLine() } else { SpokenLine(text: text, size: size, color: Theme.blueInk) }
+    }
+}
+
 struct SpeakIcon: View {
     var text: String
     var size: CGFloat = 13
@@ -865,14 +903,14 @@ struct TryBox: View {
             if let r = result, let fb = r.feedback {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Stamp(kind: .grade(fb.grade), small: true)
-                    Text(r.answer ?? answer).koLine()
+                    MySentenceLine(text: r.answer ?? answer)
                 }
                 if fb.usedExpression { Text("✓\u{FE0E} \"\(expr.phrase)\" 사용").handLine(size: 21, color: Theme.grade(.A)) }
                 else { Text("✗\u{FE0E} \"\(expr.phrase)\"를 쓰지 않았다").redpen(size: 21) }
                 ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
                     (Text(i.mine).strikethrough(true, color: Theme.red) + Text(" →\u{FE0E} \(i.better)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(18)).foregroundColor(Color(hex: 0xC0565A))).redpen(size: 21)
                 }
-                if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(17)) + Text(fb.referenceLine)).pencil(size: 21) }
+                if !fb.reference.isEmpty { DrillRefLine(fb: fb, size: 21) }
                 if !fb.note.isEmpty { Text(fb.note).pencil(size: 21) }
             } else if queued {
                 HStack(spacing: 10) { Stamp(kind: .waiting, small: true); Text(answer).koLine() }
@@ -912,7 +950,7 @@ struct TryBox: View {
                                 ForEach(Array(fb.issues.enumerated()), id: \.offset) { _, i in
                                     (Text(i.mine).strikethrough(true, color: Theme.red) + Text(" →\u{FE0E} \(i.better)") + Text(i.why.isEmpty ? "" : " (\(i.why))").font(Theme.hand(17)).foregroundColor(Color(hex: 0xC0565A))).redpen(size: 20)
                                 }
-                                if !fb.reference.isEmpty { (Text("참고 ").font(Theme.hand(16)) + Text(fb.referenceLine)).pencil(size: 20) }
+                                if !fb.reference.isEmpty { DrillRefLine(fb: fb, size: 20) }
                                 if !fb.note.isEmpty { Text(fb.note).pencil(size: 20) }
                             }
                             .padding(.leading, 32).padding(.bottom, 4)
