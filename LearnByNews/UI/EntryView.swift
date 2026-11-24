@@ -1,6 +1,37 @@
 import SwiftUI
 
 /// 내 번역에서 틀린 구간(issue.mine)을 찾아 빨간 밑줄로 표시 (웹 markWrong)
+/// 공책 안에서 찾기(goni 2026-11-24): 찾는 말. 글자 그대로(대소문자·굽은 따옴표만 무시). EntryView가 원문·내 번역·참고에 노란 칠을 한다
+struct SearchTermKey: EnvironmentKey { static let defaultValue: String? = nil }
+extension EnvironmentValues { var searchTerm: String? { get { self[SearchTermKey.self] } set { self[SearchTermKey.self] = newValue } } }
+/// 찾기 비교용: 소문자 + 굽은 따옴표 → 곧은 따옴표 (글자 수는 그대로)
+func normalizeForFind(_ s: String) -> String {
+    s.lowercased().replacingOccurrences(of: "’", with: "'").replacingOccurrences(of: "‘", with: "'").replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
+}
+/// 찾는 말이 있는 자리에 노란 칠 (형광펜과 구분되게 탭 색). 소문자화로 글자 수가 달라지는 글은 칠하지 않는다
+func markSearch(_ a: AttributedString, _ term: String?) -> AttributedString {
+    guard let term, !term.isEmpty else { return a }
+    let text = String(a.characters)
+    let n = normalizeForFind(text), t = normalizeForFind(term)
+    guard n.count == text.count, !t.isEmpty else { return a }
+    var out = a
+    var from = n.startIndex
+    while let r = n.range(of: t, range: from..<n.endIndex) {
+        let lo = n.distance(from: n.startIndex, to: r.lowerBound), hi = n.distance(from: n.startIndex, to: r.upperBound)
+        let x = out.index(out.startIndex, offsetByCharacters: lo), y = out.index(out.startIndex, offsetByCharacters: hi)
+        out[x..<y].backgroundColor = Theme.tab
+        from = r.upperBound
+    }
+    return out
+}
+/// 단어 하나가 찾는 말에 걸리는지 (원문의 단어 조각용): 단어에 찾는 말이 들어 있거나, 여러 단어짜리 찾는 말에 그 단어가 들어 있으면
+func wordHitsFind(_ word: String, _ term: String?) -> Bool {
+    guard let term else { return false }
+    let w = normalizeForFind(word).trimmingCharacters(in: .punctuationCharacters), t = normalizeForFind(term)
+    guard !w.isEmpty, !t.isEmpty else { return false }
+    return w.contains(t) || (t.contains(" ") && t.split(separator: " ").contains { String($0) == w })
+}
+
 func markWrong(_ text: String, _ issues: [Issue]) -> AttributedString {
     var out = AttributedString(text)
     var marks: [(Int, Int)] = []
@@ -89,6 +120,7 @@ struct HistoryLine: View {
 
 /// 채점된 문장 한 항목 (웹 Entry.tsx)
 struct EntryView: View {
+    @Environment(\.searchTerm) private var searchTerm   // 공책 안에서 찾기: 원문·내 번역·참고에 노란 칠
     var s: Sentence
     var expanded: Bool
     var onToggle: (() -> Void)?
@@ -159,9 +191,9 @@ struct EntryView: View {
             // 원문의 것은 원문 줄 끝에 (goni 2026-11-20 A안): 복사 ⎘ · 듣기 🔊 · "구조 분석". 건너뛴 문장도 ⎘ 🔊는 원문 끝
             let tools = SrcTools(text: s.text, structOpen: structOpen && structure != nil, structBusy: structBusy,
                                  onStructure: (onStructure == nil || fb.grade == .skip) ? nil : { loadStructure() })
-            if expanded || fb.grade == .skip, let onAsk { MarkerWords(text: s.text, sentenceId: s.id, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight, onRelated: onRelated, tools: tools) }
-            else if expanded || fb.grade == .skip { HStack(alignment: .bottom, spacing: 0) { Text(markHighlights(s.text, highlights)).enLine(); tools } }
-            else { Text(markHighlights(s.text, highlights)).enLine() }
+            if expanded || fb.grade == .skip, let onAsk { MarkerWords(text: s.text, sentenceId: s.id, highlights: highlights, onAsk: onAsk, onMemo: onMemo, onNote: onNote, onDelete: onDeleteHighlight, onRelated: onRelated, tools: tools, searchTerm: searchTerm) }
+            else if expanded || fb.grade == .skip { HStack(alignment: .bottom, spacing: 0) { Text(markSearch(markHighlights(s.text, highlights), searchTerm)).enLine(); tools } }
+            else { Text(markSearch(markHighlights(s.text, highlights), searchTerm)).enLine() }
             if expanded {
                 ForEach(highlights) { h in
                     let he = Expression(phrase: h.span, meaning: h.hasAnswer ? h.answer.meaning : (h.note ?? ""))
@@ -178,7 +210,7 @@ struct EntryView: View {
             if expanded, fb.grade != .skip {
                 if showRef {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        (Text("참고 ").font(Theme.hand(17)) + Text(fb.reference)).pencil()
+                        (Text("참고 ").font(Theme.hand(17)) + Text(markSearch(AttributedString(fb.reference), searchTerm))).pencil()
                         Tiny(title: "접기", action: onToggleRef)
                     }
                 } else {
@@ -223,7 +255,7 @@ struct EntryView: View {
                 historyBlock
             } else {
                 if a.translation.isEmpty { Text("건너뜀").handLine(size: 21, color: Theme.pencil) }
-                else { Text(markWrong(a.translation, fb.issues)).koLine() }
+                else { Text(markSearch(markWrong(a.translation, fb.issues), searchTerm)).koLine() }
                 if expanded { marks(fb) }
             }
         }
@@ -1098,6 +1130,7 @@ struct MarkerWords: View {
     var onDelete: ((Highlight) async -> Void)? = nil
     var onRelated: ((String?, String?, String?, String?) async -> [Related])? = nil
     var tools: SrcTools? = nil                    // 원문 줄 끝 ⎘ 🔊 구조 분석 (A안)
+    var searchTerm: String? = nil                 // 공책 안에서 찾기: 걸리는 단어에 노란 칠
     @State private var chosen: [Related] = []     // 메모와 함께 엮을 것
     @State private var anchor: Int?
     @State private var range: ClosedRange<Int>?
@@ -1118,7 +1151,7 @@ struct MarkerWords: View {
                     // 같은 형광펜(또는 같은 선택)에 속한 이웃 단어와는 사이 공백까지 한 덩어리로, 모서리는 양끝만 둥글게
                     let savedRun = highlights.first { i >= $0.startWord && i <= $0.endWord }
                     let picking = (range.map { $0.contains(i) } ?? false) || (picked != nil && savedRun?.id == picked?.id)
-                    let color: Color? = picking ? Theme.markerSelecting : (savedRun != nil ? Theme.marker : nil)
+                    let color: Color? = picking ? Theme.markerSelecting : (savedRun != nil ? Theme.marker : (wordHitsFind(p.word, searchTerm) ? Theme.tab : nil))
                     let joinNext: Bool = picking ? (range?.contains(i + 1) ?? false) : (savedRun.map { i + 1 <= $0.endWord } ?? false)
                     let joinPrev: Bool = picking ? (range?.contains(i - 1) ?? false) : (savedRun.map { i - 1 >= $0.startWord } ?? false)
                     HStack(spacing: 0) {

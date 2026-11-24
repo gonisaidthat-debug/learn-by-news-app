@@ -43,6 +43,8 @@ final class NotebookModel: ObservableObject {
     private func openFromLink(_ sid: String?) {
         openingFromLink = true; open = sid; openingFromLink = false
     }
+    /// 찾기로 펼치기: 책갈피를 옮기지 않는다 (goni 2026-11-24 공책 안에서 찾기)
+    func openForFind(_ sid: String) { openingFromLink = true; open = sid; openingFromLink = false }
 
     /// 펼쳐 본 문장이 책갈피가 된다 ("마지막까지 본 곳"). 직접 탭해 펼쳤거나 방금 채점돼 펼쳐진 문장에만. 0.5초 디바운스
     private func scheduleAutoBookmark() {
@@ -679,6 +681,74 @@ struct NotebookView: View {
     @State private var readingIndex = 0          // 화면 40% 지점의 문장 idx
     @State private var rowFrames: [String: CGRect] = [:]
     @State private var lastProgressTick = Date.distantPast
+    // 공책 안에서 찾기 (goni 2026-11-24 "특정 표현들 썼던 거 검색이 되면", 웹 find.ts와 같은 규칙). 서버 호출 없이 받은 공책 데이터에서
+    @State private var findOpen = false
+    @State private var findText = ""
+    @State private var findCursor: Int?          // 지금 보는 히트 번호 (nil이면 아직 이동 전: "n문장"만)
+    @State private var findHit: String?          // 찾기로 펼친 문장 (노란 띠)
+    @FocusState private var findFocused: Bool
+    /// 두 글자부터. 비교는 normalizeForFind
+    private var findTerm: String? {
+        guard findOpen else { return nil }
+        let t = findText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizeForFind(t).count >= 2 ? t : nil
+    }
+    private struct FindHit { var id: String; var pos: Int; var places: [String] }
+    /// 지금 화면에 있는 문장(upto까지)에서: 원문 / 내 번역 / 참고 / 첨삭 / 표현 / 형광펜. 지금 쓰는 문장·채점 중 문장은 원문만, 다시 쓰기에서 가려 둔 지난 회차 번역은 안 본다
+    private func findHits(_ d: ArticleDetail, upto: Int) -> [FindHit] {
+        guard let term = findTerm else { return [] }
+        let t = normalizeForFind(term)
+        func has(_ s: String?) -> Bool { guard let s, !s.isEmpty else { return false }; return normalizeForFind(s).contains(t) }
+        var out: [FindHit] = []
+        for (pos, x) in d.sentences.prefix(upto).enumerated() {
+            var places: [String] = []
+            if has(x.text) { places.append("원문") }
+            let writing = m.redo == x.id || (!m.browse && x.id == m.current?.id) || m.inflight[x.id] != nil
+            if !writing, let a = m.visibleAttempt(x) {
+                let fb = a.feedback
+                if has(a.translation) { places.append("내 번역") }
+                if has(fb.reference) { places.append("참고") }
+                if fb.issues.contains(where: { has($0.source) || has($0.mine) || has($0.meaning) || has($0.why) }) { places.append("첨삭") }
+                let saved = d.phrases.filter { $0.sentenceId == x.id }
+                if fb.expressions.contains(where: { has($0.phrase) || has($0.meaning) }) || saved.contains(where: { has($0.phrase) || has($0.meaning) || has($0.note) }) { places.append("표현") }
+                if d.highlights.filter({ $0.sentenceId == x.id }).contains(where: { has($0.note) || has($0.answer.meaning) || has($0.answer.why) || has($0.answer.similar) }) { places.append("형광펜") }
+            }
+            if !places.isEmpty { out.append(FindHit(id: x.id, pos: pos, places: places)) }
+        }
+        return out
+    }
+    /// 다음(+1)/이전(-1): 처음엔 지금 보는 자리(readingIndex)에서 가까운 쪽, 끝에서 처음으로 돈다. 그 문장을 펼치고(책갈피는 안 옮김) 가운데로
+    private func findStep(_ hits: [FindHit], _ dir: Int) {
+        guard !hits.isEmpty else { return }
+        let n = hits.count
+        let i: Int
+        if let c = findCursor, c < n { i = (c + dir + n) % n }
+        else if dir > 0 { i = hits.firstIndex { $0.pos >= readingIndex } ?? 0 }
+        else { i = hits.lastIndex { $0.pos <= readingIndex } ?? (n - 1) }
+        findCursor = i; findHit = hits[i].id
+        m.openForFind(hits[i].id); m.requestScroll(hits[i].id)
+    }
+    private func findStatus(_ hits: [FindHit]) -> String {
+        if let c = findCursor, c < hits.count { return "\(c + 1) / \(hits.count) · " + hits[c].places.joined(separator: " · ") }
+        return findTerm == nil ? "" : "\(hits.count)문장"
+    }
+    private func closeFind() { findOpen = false; findText = ""; findCursor = nil; findHit = nil; findFocused = false }
+    @ViewBuilder private func findBar(_ d: ArticleDetail, upto: Int) -> some View {
+        let hits = findHits(d, upto: upto)
+        HStack(spacing: 10) {
+            TextField("공책 안에서 찾기", text: $findText).font(Theme.hand(20)).foregroundStyle(Theme.blueInk).tint(Theme.blueInk)
+                .focused($findFocused).submitLabel(.search).autocorrectionDisabled().textInputAutocapitalization(.never)
+                .onSubmit { findStep(hits, +1) }
+            Text(findStatus(hits)).font(Theme.hand(16)).foregroundStyle(Theme.pencil).lineLimit(1).fixedSize()
+            Tiny(title: "↑\u{FE0E}", size: 18) { findStep(hits, -1) }
+            Tiny(title: "↓\u{FE0E}", size: 18) { findStep(hits, +1) }
+            Tiny(title: "×", size: 20) { closeFind() }.keyboardShortcut(.escape, modifiers: []).accessibilityLabel("찾기 닫기")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Theme.paper, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .onChange(of: findText) { _, _ in findCursor = nil; findHit = nil }
+    }
 
     init(articleId: String, focusId: String? = nil, restartAfter: Int? = nil, browseAll: Bool = false, round: Int? = nil) {
         self.articleId = articleId; self.focusId = focusId; self.restartAfter = restartAfter; self.browseAll = browseAll; self.round = round
@@ -714,6 +784,8 @@ struct NotebookView: View {
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOREMOVE"], m.data?.sentences.contains(where: { $0.id == sid }) == true { _ = await m.remove(sid) }
             // 화면 확인용: LBN_AUTOOPEN=<문장 id> 이면 그 항목을 펼친다. LBN_AUTOVOID=<문장 id> 이면 그 문장의 지금 번역을 "잘못 눌렀다"로 표시한 뒤 입력을 접고 항목을 펼친다
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOOPEN"] { m.open = sid; m.requestScroll(sid) }
+            // 화면 확인용: LBN_FIND=<말> 이면 찾기 칸을 열고 그 말로 한 번 이동한다
+            if let q = ProcessInfo.processInfo.environment["LBN_FIND"], let d = m.data { findOpen = true; findText = q; try? await Task.sleep(for: .seconds(3)); let total = d.sentences.count; findStep(findHits(d, upto: m.browse ? total : (m.frontIdx ?? total)), +1) }
             // 화면 확인용: LBN_AUTOPIN=<문장 id> 이면 그 문장의 첫 지적 표현을 표현장에 붙인다("붙여 둠 ✓"·"써 보기" 확인용)
             if let sid = ProcessInfo.processInfo.environment["LBN_AUTOPIN"], let i = m.data?.sentences.first(where: { $0.id == sid })?.attempt?.feedback.issues.first {
                 await m.togglePhrase(sid, Expression(phrase: i.source.trimmingCharacters(in: .whitespacesAndNewlines), meaning: i.meaning))
@@ -819,7 +891,7 @@ struct NotebookView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    NotebookHead(tab: m.browse ? (m.roundShown.map { "\($0)회차 열람" } ?? "열람") : (m.passLabel ?? "\(doneCount) / \(total)")) {
+                    NotebookHead(tab: m.browse ? (m.roundShown.map { "\($0)회차 열람" } ?? "열람") : (m.passLabel ?? "\(doneCount) / \(total)"), onFind: findOpen ? nil : { findOpen = true; findFocused = true }) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(d.title).lineLimit(2)
                             SourceLink(source: d.source ?? "") { await m.setSource($0) }
@@ -877,6 +949,9 @@ struct NotebookView: View {
                 withAnimation { proxy.scrollTo(t, anchor: t == "bottom" ? .bottom : .center) }
                 m.scrollTo = nil
             }
+            .environment(\.searchTerm, findTerm)
+            // 찾기 칸은 스크롤과 상관없이 위에 고정 (이동해도 칸이 보이게)
+            .safeAreaInset(edge: .top, spacing: 0) { if findOpen { findBar(d, upto: upto).background(Theme.desk) } }
         }
         .confirmationDialog("이 문장을 공책에서 뺄까요?", isPresented: Binding(get: { toRemove != nil }, set: { if !$0 { toRemove = nil } }), titleVisibility: .visible) {
             Button("빼기", role: .destructive) {
@@ -942,7 +1017,7 @@ struct NotebookView: View {
                 onRestore: m.browse ? nil : { a in Task { await m.restoreAttempt(a) } },
                 onMergePrev: mergeTarget(x, d: d, dir: "prev"),
                 onMergeNext: mergeTarget(x, d: d, dir: "next"),
-                highlight: focusId == x.id,
+                highlight: focusId == x.id || findHit == x.id,
                 bookmarked: m.bookmark?.sentenceId == x.id,
                 onBookmark: { Task { await m.toggleBookmark(x.id) } },
                 highlights: d.highlights.filter { $0.sentenceId == x.id },

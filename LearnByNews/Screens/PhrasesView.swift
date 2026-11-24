@@ -5,6 +5,7 @@ struct PhrasesView: View {
     /// 공책에서 "표현장 ↗"로 열 때: 이 표현으로 스크롤하고 2.4초 빨간 테두리로 비춘다(습득 완료로 숨겨져 있으면 보기 켬)
     var focusPhraseId: String? = nil
     var onClose: (() -> Void)? = nil        // 시트로 열렸을 때 "← 공책"
+    @EnvironmentObject private var router: Router
     @State private var highlightId: String?
     @State private var q = ""
     @State private var list: [Phrase] = []
@@ -118,6 +119,8 @@ struct PhrasesView: View {
                     }
                     Spacer(minLength: 4)
                     Text(p.articleTitle ?? "").font(Theme.hand(15)).foregroundStyle(Theme.pencil)
+                    // 그 문장으로 (goni 2026-11-24 "그 위치로 이동하는 버튼도 있음 좋겠어"): 공책을 열람으로 열고 그 문장을 펼친다
+                    Tiny(title: "공책에서 보기 →\u{FE0E}", size: 15) { onClose?(); router.open(.notebook(id: p.articleId, focus: p.sentenceId, browse: true)) }
                 } else {
                     Text(p.phrase).font(Theme.hand(24)).fontWeight(.bold).foregroundStyle(Color(hex: 0x2A2412))
                     Text(p.meaning).font(Theme.hand(18)).foregroundStyle(Color(hex: 0x5B5440))

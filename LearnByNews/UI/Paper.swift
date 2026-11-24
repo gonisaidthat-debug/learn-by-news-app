@@ -309,11 +309,13 @@ struct GradeBar: View {
 /// 노트 머리: 제목(손글씨) + 오른쪽 노란 탭
 struct NotebookHead<Label: View>: View {
     var tab: String
+    var onFind: (() -> Void)? = nil       // 회차 탭 왼쪽 "찾기" (공책 안에서 찾기, goni 2026-11-24)
     @ViewBuilder var label: () -> Label
     var body: some View {
         HStack(alignment: .bottom) {
             label().font(Theme.hand(26)).foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
+            if let onFind { Tiny(title: "찾기", size: 18, action: onFind).padding(.trailing, 6).padding(.bottom, 2) }
             Text(tab)
                 .font(Theme.hand(20)).foregroundStyle(Theme.tabInk)
                 .padding(.horizontal, 12).padding(.vertical, 2)
