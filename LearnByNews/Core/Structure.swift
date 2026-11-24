@@ -7,12 +7,15 @@ struct Structure: Codable, Equatable {
     struct Chunk: Codable, Equatable { var text: String; var role: String; var note: String }
     /// 꾸밈 관계(2026-11-23): from(꾸미는 쪽) → to(받는 쪽), chunks 번호(0부터), label은 관계 이름 한 단어. 옛 분석엔 없다(→ 화살표 없음)
     struct Link: Codable, Equatable { var from: Int; var to: Int; var label: String }
+    /// 묶음 괄호(2026-11-24): chunks from…to(연속 범위, 겹침 가능, 최대 6)를 밑줄 아래 ⌊__⌋로. 분사구문 전체·관계절 전체·병렬 묶음 등
+    struct Group: Codable, Equatable { var from: Int; var to: Int; var label: String }
     var skeleton: String
     var chunks: [Chunk]
     var reading: String
     var pitfalls: [String]
     var mine: String
     var links: [Link]?
+    var groups: [Group]?
     var createdAt: Int64?
     var cached: Bool?
     /// 구조 상자 안 문답(2026-11-20, 오래된 순). 서버 sentence_qa

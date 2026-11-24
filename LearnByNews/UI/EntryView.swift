@@ -420,46 +420,156 @@ struct ChunkFrames: PreferenceKey {
     static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
 }
 
-/// 구조 분석 덩어리 아래 꾸밈 관계 화살표 (웹 Entry.tsx의 chunk-arrows와 같은 기하, goni 2026-11-24 "단어 밑으로만").
-/// 모든 화살표는 보내는 상자의 아래 가운데에서 나와 아래로만 돌아 받는 상자의 아래 가운데에 닿는다(화살촉은 아래에서 위로).
-/// cubic: (x1,y) → 제어점 (x1,y+h),(x2,y+h) → (x2,y). h = 18 + 11×|to−from| (최대 72)라 멀리 걸릴수록 깊어 겹치지 않는다. 라벨은 호 바닥(0.75h) 바로 위 가운데.
-/// 갈색 1.6pt, 라벨 손글씨 13pt에 종이색 바탕
-struct ChunkArrows: View {
-    var links: [Structure.Link]
-    var frames: [Int: CGRect]
-    private let brown = Color(hex: 0x8A6A2A)
-    static func depth(_ l: Structure.Link) -> CGFloat { min(72, 18 + 11 * CGFloat(abs(l.to - l.from))) }
-    /// 아래 여백: 가장 깊은 호(0.75h) + 14
-    static func bottomPad(_ links: [Structure.Link]) -> CGFloat { (links.map(depth).max() ?? 0) * 0.75 + 14 }
+/// 구조 분석 덩어리 밑의 묶음 괄호와 꾸밈 관계 화살표 기하 (웹 Entry.tsx compute()와 같은 규칙, goni 2026-11-24).
+/// 덩어리는 줄바꿈 그대로. 괄호: 안쪽 묶음이 0층(상자에 가까움), 품은 묶음은 품은 것의 최대 층+1(한 층 15pt), 줄을 넘으면 줄마다 토막("…이름").
+/// 화살표는 괄호 층 아래에서만: 같은 줄은 밑줄 아래 U자, 다른 줄은 상자 옆 세로 틈(column-gap 20의 가운데)과 윗줄 아래 띠로만(상자·괄호를 가로지르지 않음).
+/// 띠 깊이 = 괄호 층 + 10 + 10×lane(띠별 0~3, 짧은 것부터), 세로 틈·끝점은 lane×4pt씩 비낌, 8색 순환. 줄 사이·아래 여백은 괄호 층 + 화살표 깊이에 맞춘다
+struct ChunkGeometry {
+    struct Bracket { var path: Path; var label: String; var at: CGPoint }
+    struct Arrow { var path: Path; var head: Path; var label: String; var at: CGPoint; var color: Color }
+    var brackets: [Bracket] = []
+    var arrows: [Arrow] = []
+    var rowGap: CGFloat = 24
+    var bottomPad: CGFloat = 22
+    static let colors: [Color] = [0x8A6A2A, 0x2F6FD6, 0xC0392B, 0x2F9E44, 0x7A3FB8, 0xD9730D, 0x0B7285, 0xA61E4D].map { Color(hex: $0) }
+    static let bracketColor = Color(hex: 0x8A8378), bracketLabel = Color(hex: 0x6F6960)
+
+    private struct R { var l, r, t, b, cx: CGFloat }
+    /// 꺾이는 곳을 둥글린 꺾은선
+    private static func rounded(_ pts: [CGPoint], _ r: CGFloat) -> Path {
+        var p = Path(); guard let f = pts.first else { return p }
+        p.move(to: f)
+        if pts.count > 2 {
+            for i in 1..<(pts.count - 1) {
+                let (pv, c, nx) = (pts[i - 1], pts[i], pts[i + 1])
+                let d1 = hypot(c.x - pv.x, c.y - pv.y), d2 = hypot(nx.x - c.x, nx.y - c.y)
+                guard d1 > 0, d2 > 0 else { continue }
+                let rr = min(r, d1 / 2, d2 / 2)
+                p.addLine(to: CGPoint(x: c.x - (c.x - pv.x) / d1 * rr, y: c.y - (c.y - pv.y) / d1 * rr))
+                p.addQuadCurve(to: CGPoint(x: c.x + (nx.x - c.x) / d2 * rr, y: c.y + (nx.y - c.y) / d2 * rr), control: c)
+            }
+        }
+        p.addLine(to: pts[pts.count - 1])
+        return p
+    }
+    static func compute(count: Int, links: [Structure.Link], groups: [Structure.Group], frames: [Int: CGRect]) -> ChunkGeometry {
+        var g = ChunkGeometry()
+        guard count > 0, (0..<count).allSatisfy({ frames[$0] != nil }) else { return g }
+        let rects: [R] = (0..<count).map { let f = frames[$0]!; return R(l: f.minX, r: f.maxX, t: f.minY, b: f.maxY + 2, cx: f.midX) }
+        var tops: [CGFloat] = []
+        for r in rects where !tops.contains(where: { abs($0 - r.t) < 8 }) { tops.append(r.t) }
+        tops.sort()
+        func rowOf(_ r: R) -> Int { tops.firstIndex { abs($0 - r.t) < 8 } ?? 0 }
+        func rowBottom(_ row: Int) -> CGFloat { rects.filter { rowOf($0) == row }.map(\.b).max() ?? 0 }
+        let GAP: CGFloat = 10, BR: CGFloat = 15
+        // 묶음 괄호
+        func inside(_ o: Structure.Group, _ gg: Structure.Group) -> Bool { o != gg && o.from >= gg.from && o.to <= gg.to && (o.to - o.from) < (gg.to - gg.from) }
+        func level(_ gg: Structure.Group) -> Int { let inner = groups.filter { inside($0, gg) }; return inner.isEmpty ? 0 : 1 + (inner.map(level).max() ?? 0) }
+        var bracketRows: [Int: Int] = [:]
+        for gg in groups {
+            let lv = level(gg)
+            let members = Array(rects[gg.from...gg.to])
+            let byRow = Dictionary(grouping: members, by: rowOf)
+            let firstRow = byRow.keys.min() ?? 0
+            for (row, ms) in byRow.sorted(by: { $0.key < $1.key }) {
+                bracketRows[row] = max(bracketRows[row] ?? 0, lv + 1)
+                let x1 = (ms.map(\.l).min() ?? 0) + 2, x2 = (ms.map(\.r).max() ?? 0) - 2
+                let y = rowBottom(row) + 4 + BR * CGFloat(lv)
+                var p = Path(); p.move(to: CGPoint(x: x1, y: y - 4)); p.addLine(to: CGPoint(x: x1, y: y)); p.addLine(to: CGPoint(x: x2, y: y)); p.addLine(to: CGPoint(x: x2, y: y - 4))
+                g.brackets.append(Bracket(path: p, label: row == firstRow ? gg.label : "…\(gg.label)", at: CGPoint(x: (x1 + x2) / 2, y: y + 7)))
+            }
+        }
+        func bracketDepth(_ row: Int) -> CGFloat { CGFloat(bracketRows[row] ?? 0) * BR + 2 }
+        // 화살표: 짧은 것부터, 띠(band = 두 줄 중 위)마다 lane 0~3
+        var lanes: [Int: Int] = [:]
+        func laneOf(_ band: Int) -> Int { let n = lanes[band] ?? 0; lanes[band] = n + 1; return n % 4 }
+        func onLine(_ r: R, _ x: CGFloat) -> CGFloat { max(r.l + 10, min(r.r - 10, x)) }
+        let valid = links.map { l -> (Structure.Link, CGFloat, Int) in
+            let a = rects[l.from], b = rects[l.to]
+            return (l, abs(b.cx - a.cx), min(rowOf(a), rowOf(b)))
+        }.sorted { $0.1 < $1.1 }
+        var lastBandDepth: CGFloat = 0
+        for (k, (l, _, band)) in valid.enumerated() {
+            let a = rects[l.from], b = rects[l.to]
+            let ra = rowOf(a), rb = rowOf(b)
+            let lane = laneOf(band)
+            let depth = bracketDepth(band) + 10 + 10 * CGFloat(lane)
+            let off = CGFloat(lane) * 4
+            let color = colors[k % colors.count]
+            if band == tops.count - 1 { lastBandDepth = max(lastBandDepth, depth) }
+            var pts: [CGPoint], label: CGPoint, radius: CGFloat = 6
+            if ra == rb {
+                // 같은 줄: 밑줄 아래로 U자. 끝점은 서로 가까운 쪽 모서리
+                let x1 = onLine(a, b.cx > a.cx ? a.r - 10 - off : a.l + 10 + off), x2 = onLine(b, a.cx > b.cx ? b.r - 10 - off : b.l + 10 + off)
+                let yy = max(a.b, b.b) + depth
+                pts = [CGPoint(x: x1, y: a.b), CGPoint(x: x1, y: yy), CGPoint(x: x2, y: yy), CGPoint(x: x2, y: b.b)]
+                label = CGPoint(x: (x1 + x2) / 2, y: yy - 8); radius = 8
+            } else if ra > rb {
+                // 아랫줄 → 윗줄: 모서리에서 살짝 내려가 옆 세로 틈으로 올라가, 윗줄 아래 띠를 지나 받는 밑줄에
+                let side: CGFloat = b.cx >= a.cx ? 1 : -1
+                let gx = side > 0 ? a.r + GAP - 6 + off : a.l - GAP + 6 - off
+                let sx = onLine(a, side > 0 ? a.r - 10 - off : a.l + 10 + off)
+                let bandY = rowBottom(rb) + depth
+                let tx = onLine(b, gx + side * off)
+                let ya = a.b + bracketDepth(ra) + 5 + off
+                pts = [CGPoint(x: sx, y: a.b), CGPoint(x: sx, y: ya), CGPoint(x: gx, y: ya), CGPoint(x: gx, y: bandY), CGPoint(x: tx, y: bandY), CGPoint(x: tx, y: b.b)]
+                label = CGPoint(x: (gx + tx) / 2, y: bandY - 8)
+            } else {
+                // 윗줄 → 아랫줄: 밑줄에서 띠로 내려가 받는 상자 옆 세로 틈으로 내려간 뒤 아래에서 밑줄에
+                let side: CGFloat = a.cx >= b.cx ? 1 : -1
+                let gx = side > 0 ? b.r + GAP - 6 + off : b.l - GAP + 6 - off
+                let tx = onLine(b, side > 0 ? b.r - 10 - off : b.l + 10 + off)
+                let sx = onLine(a, gx - side * off)
+                let bandY = rowBottom(ra) + depth
+                let yb = b.b + bracketDepth(rb) + 5 + off
+                pts = [CGPoint(x: sx, y: a.b), CGPoint(x: sx, y: bandY), CGPoint(x: gx, y: bandY), CGPoint(x: gx, y: yb), CGPoint(x: tx, y: yb), CGPoint(x: tx, y: b.b)]
+                label = CGPoint(x: (sx + gx) / 2, y: bandY - 8)
+            }
+            let end = pts[pts.count - 1]
+            var head = Path()   // 마지막 토막은 늘 위로 올라가 밑줄에 닿는다 → 위를 향한 화살촉
+            head.move(to: end); head.addLine(to: CGPoint(x: end.x - 3.5, y: end.y + 8)); head.addLine(to: CGPoint(x: end.x + 3.5, y: end.y + 8)); head.closeSubpath()
+            g.arrows.append(Arrow(path: rounded(pts, radius), head: head, label: l.label, at: label, color: color))
+        }
+        // 줄 사이와 아래 여백은 괄호 층 + 화살표 깊이에 맞춘다
+        let lastRow = tops.count - 1
+        g.bottomPad = max(lastBandDepth, bracketDepth(lastRow) + 5 + 12) + 22
+        var needGap: CGFloat = 0
+        for i in 0..<tops.count {
+            let bd = bracketDepth(i)
+            var d = bd
+            if let n = lanes[i] {
+                let topLane = CGFloat(min(3, n - 1))
+                d = max(d, bd + 10 + 10 * topLane)
+            }
+            needGap = max(needGap, d)
+        }
+        g.rowGap = max(24, needGap + 26)
+        return g
+    }
+}
+
+/// ChunkGeometry를 Canvas로: 괄호(연필색 1.4pt, 라벨 13pt) → 화살표(1.6pt, 색별, 위로 향한 화살촉, 라벨 같은 색). 라벨은 종이색 바탕
+struct ChunkOverlay: View {
+    var geo: ChunkGeometry
     var body: some View {
         Canvas { ctx, _ in
-            for l in links {
-                guard let ra = frames[l.from], let rb = frames[l.to] else { continue }
-                let x1 = ra.midX, x2 = rb.midX
-                let y = max(ra.maxY, rb.maxY) + 2
-                let h = Self.depth(l)
-                var p = Path()
-                p.move(to: CGPoint(x: x1, y: y))
-                p.addCurve(to: CGPoint(x: x2, y: y), control1: CGPoint(x: x1, y: y + h), control2: CGPoint(x: x2, y: y + h))
-                ctx.stroke(p, with: .color(brown), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                // 화살촉: 받는 상자 아래에서 위로
-                var head = Path()
-                head.move(to: CGPoint(x: x2, y: y))
-                head.addLine(to: CGPoint(x: x2 - 3.5, y: y + 8))
-                head.addLine(to: CGPoint(x: x2 + 3.5, y: y + 8))
-                head.closeSubpath()
-                ctx.fill(head, with: .color(brown))
-                // 라벨: 호 바닥(y + 0.75h) 바로 위
-                let t = l.label.trimmingCharacters(in: .whitespaces)
-                if !t.isEmpty {
-                    let r = ctx.resolve(Text(t).font(Theme.hand(13)).foregroundColor(brown))
-                    let sz = r.measure(in: CGSize(width: 200, height: 40))
-                    let at = CGPoint(x: (x1 + x2) / 2, y: y + 0.75 * h - sz.height / 2 - 1)
-                    let bg = CGRect(x: at.x - sz.width / 2 - 3, y: at.y - sz.height / 2 - 1, width: sz.width + 6, height: sz.height + 2)
-                    ctx.fill(Path(roundedRect: bg, cornerRadius: 3), with: .color(Color(red: 1, green: 0.992, blue: 0.965).opacity(0.95)))
-                    ctx.draw(r, at: at, anchor: .center)
-                }
+            func label(_ t: String, _ at: CGPoint, _ color: Color) {
+                let s = t.trimmingCharacters(in: .whitespaces); guard !s.isEmpty else { return }
+                let r = ctx.resolve(Text(s).font(Theme.hand(13)).foregroundColor(color))
+                let sz = r.measure(in: CGSize(width: 240, height: 40))
+                let bg = CGRect(x: at.x - sz.width / 2 - 3, y: at.y - sz.height / 2 - 1, width: sz.width + 6, height: sz.height + 2)
+                ctx.fill(Path(roundedRect: bg, cornerRadius: 3), with: .color(Color(red: 1, green: 0.992, blue: 0.965).opacity(0.95)))
+                ctx.draw(r, at: at, anchor: .center)
             }
+            for b in geo.brackets {
+                ctx.stroke(b.path, with: .color(ChunkGeometry.bracketColor), style: StrokeStyle(lineWidth: 1.4, lineJoin: .round))
+                label(b.label, b.at, ChunkGeometry.bracketLabel)
+            }
+            for a in geo.arrows {
+                ctx.stroke(a.path, with: .color(a.color), style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                ctx.fill(a.head, with: .color(a.color))
+            }
+            for a in geo.arrows { label(a.label, a.at, a.color) }
         }
     }
 }
@@ -491,26 +601,25 @@ struct StructureView: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.025)))
             .overlay(alignment: .bottom) { Rectangle().fill(Structure.color(ch.role)).frame(height: 3).clipShape(RoundedRectangle(cornerRadius: 1.5)) }
             .help(ch.note)
-            .fixedSize()
             .background(GeometryReader { g in Color.clear.preference(key: ChunkFrames.self, value: [i: g.frame(in: .named("chunks"))]) })
         }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             labeled("뼈대", st.skeleton, color: Theme.pencil).padding(.trailing, onClose == nil ? 0 : 22)
-            // 덩어리 띠. 꾸밈 관계(links)가 있으면 한 줄로 늘어놓고(가로 스크롤) 상자 아래로만 도는 화살표를 덧그린다
-            // (goni 2026-11-23 "꾸밈 관계를 화살표로도" → 2026-11-24 "화살표는 단어 밑으로만, 위아래로 끝점이 찍히니 어지럽다"). 없으면 전처럼 줄바꿈
+            // 덩어리 띠. 꾸밈 관계(links)·묶음(groups)이 있으면 줄바꿈은 그대로 두고 상자 자리를 재서 밑줄 아래에 괄호와 화살표를 덧그린다
+            // (goni 2026-11-23 "꾸밈 관계를 화살표로도" → 2026-11-24 "단어 밑으로만", "overflow는 싫다", "겹쳐서 안 보인다", "밑줄 네모 같은 것도 겹겹이")
             let links = (st.links ?? []).filter { $0.from != $0.to && st.chunks.indices.contains($0.from) && st.chunks.indices.contains($0.to) }
-            if links.isEmpty {
+            let groups = (st.groups ?? []).filter { $0.to > $0.from && st.chunks.indices.contains($0.from) && st.chunks.indices.contains($0.to) }
+            if links.isEmpty && groups.isEmpty {
                 FlowLayout(spacing: 8) { chunkBoxes }
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 8) { chunkBoxes }
-                        .padding(.bottom, ChunkArrows.bottomPad(links))
-                        .coordinateSpace(name: "chunks")
-                        .onPreferenceChange(ChunkFrames.self) { chunkFrames = $0 }
-                        .overlay { ChunkArrows(links: links, frames: chunkFrames).allowsHitTesting(false) }
-                }
+                let geo = ChunkGeometry.compute(count: st.chunks.count, links: links, groups: groups, frames: chunkFrames)
+                FlowLayout(spacing: 20, rowSpacing: geo.rowGap) { chunkBoxes }
+                    .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, geo.bottomPad)
+                    .coordinateSpace(name: "chunks")
+                    .onPreferenceChange(ChunkFrames.self) { chunkFrames = $0 }
+                    .overlay { ChunkOverlay(geo: geo).allowsHitTesting(false) }
             }
             let noted = st.chunks.filter { !$0.note.isEmpty }
             if !noted.isEmpty {
