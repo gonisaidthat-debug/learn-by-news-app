@@ -381,7 +381,7 @@ final class NotebookModel: ObservableObject {
         focusRequest += 1
     }
 
-    /// 취소(Esc·"취소" 버튼): 한 문장 다시 쓰기는 접고, 다시 쓰기(pass) 진행 중이면 쓰다 만 입력만 비운다.
+    /// "취소" 버튼(한 문장 다시 쓰기에만): 다시 쓰기를 접는다. pass 진행 중엔 버튼이 없고 Esc도 없다.
     /// 진행은 완주했을 때만 지운다 — 중간 취소로 진행을 지우는 개념은 없다 (goni 2026-11-24 "왜 지우는거야?", 웹에서 Esc 한 번에 3회차 75문장 진행이 지워진 사고 뒤).
     /// 새로 시작하고 싶으면 마지막 장의 "처음부터 다시 쓰기"가 덮어쓴다
     func cancelRedo() {
@@ -703,15 +703,7 @@ struct NotebookView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { Text(m.data?.title ?? Cache.shared.articleTitle(articleId) ?? "").font(Theme.hand(22)).lineLimit(1) }
         }
-        .background {
-            // 하드웨어 키보드 Esc: 한 문장 다시 쓰기 취소(pass 중엔 입력만 비움, 진행은 그대로), 아니면 마지막 채점 문장의 참고 번역 접기/펼치기 (웹과 동일)
-            Button("") {
-                if m.redo != nil { m.cancelRedo(); focused = true }
-                else if let last = m.lastGraded { m.open = last; m.refOpen[last] = !(m.refOpen[last] ?? true) }
-            }
-            .keyboardShortcut(.escape, modifiers: [])
-            .opacity(0).frame(width: 0, height: 0)
-        }
+        // 하드웨어 키보드 Esc는 작은 상자(써 보기·메모·엮기 검색)만 닫는다 — "Esc = 참고 번역 토글"·"Esc = 다시 쓰기 취소"는 뺐다 (goni 2026-11-24 "esc는 작은 상자 닫기만", 웹 9452d90)
         .task {
             await m.load { newReview in router.shelfPath = [.done(id: articleId, newReview: newReview)] }
             await m.loadBookmark()

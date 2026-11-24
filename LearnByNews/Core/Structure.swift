@@ -6,7 +6,8 @@ import SwiftUI
 struct Structure: Codable, Equatable {
     struct Chunk: Codable, Equatable { var text: String; var role: String; var note: String }
     /// 꾸밈 관계(2026-11-23): from(꾸미는 쪽) → to(받는 쪽), chunks 번호(0부터), label은 관계 이름 한 단어. 옛 분석엔 없다(→ 화살표 없음)
-    struct Link: Codable, Equatable { var from: Int; var to: Int; var label: String }
+    /// from_group/to_group(2026-11-24, 옵셔널): groups 배열 번호(0부터, 서버 순서), 묶음이 아니면 -1, 옛 분석엔 없음. from/to는 그때도 덩어리 번호(묶음의 핵심 덩어리)
+    struct Link: Codable, Equatable { var from: Int; var to: Int; var label: String; var fromGroup: Int? = nil; var toGroup: Int? = nil }
     /// 묶음 괄호(2026-11-24): chunks from…to(연속 범위, 겹침 가능, 최대 6)를 밑줄 아래 ⌊__⌋로. 분사구문 전체·관계절 전체·병렬 묶음 등
     struct Group: Codable, Equatable { var from: Int; var to: Int; var label: String }
     var skeleton: String
