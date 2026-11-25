@@ -268,6 +268,7 @@ final class NotebookModel: ObservableObject {
         if !r.revoked.isEmpty { revokedNotes[sid] = r.revoked; AppLog.shared.info("notebook", "mastered revoked", ["sentence": sid, "phrases": r.revoked.map(\.phrase).joined(separator: ", ")]) }
         data = d
         inflight[sid] = nil
+        if pass != nil, passSubmitted.contains(sid) { savePassProgress() }   // 채점이 도착한 문장만 done에 (2026-11-25)
         if r.grade != .skip { open = sid; lastGraded = sid; requestScroll("bottom") }
     }
 
@@ -332,12 +333,27 @@ final class NotebookModel: ObservableObject {
     }
 
     /// 멈추기: 요청 취소 → 서버에 DELETE → 그 문장을 다시 입력란으로, 쓰던 번역은 그대로
+    /// 다시 쓰기 진행(done)에는 **채점이 도착한 문장만** (goni 2026-11-25 "3회차 때 내가 쓴 문장이 아닌 거 같은데" — 제출 즉시 done에 넣어 PUT 하니
+    /// 채점이 안 도착한(멈춤·실패·닫음) 문장이 '쓴 것'으로 남아 지난 회차 번역이 이번 회차 것처럼 보였다, 웹 0ef4de1과 같은 규칙).
+    /// 화면(passSubmitted)은 전처럼 제출 즉시 넘어가고, 서버·로컬 저장은 채점 대기·실패 중(inflight)인 문장을 뺀다. 제출할 때와 채점이 도착할 때 PUT
+    private func passDoneForServer(excluding: String? = nil) -> [String] {
+        guard let pass else { return [] }
+        return pass.filter { passSubmitted.contains($0) && inflight[$0] == nil && $0 != excluding }
+    }
+    private func savePassProgress(excluding: String? = nil) {
+        guard let pass else { return }
+        let done = passDoneForServer(excluding: excluding)
+        RedoProgress(ids: pass, done: done).save(id)
+        AppLog.shared.info("notebook", "pass progress", ["article": id, "done": "\(done.count)", "submitted": "\(passSubmitted.count)", "count": "\(pass.count)"])
+        Task { await SyncManager.shared.putPass(id, done: done) }
+    }
     func stop(_ sid: String) {
         guard let f = inflight[sid] else { return }
         stopped.insert(f.attemptId)
         tasks[sid]?.cancel(); tasks[sid] = nil
         inflight[sid] = nil
         AppLog.shared.info("notebook", "stop", ["sentence": sid, "attempt": f.attemptId])
+        if pass != nil, passSubmitted.contains(sid) { passSubmitted.remove(sid); savePassProgress() }   // 멈춘 문장은 화면·저장 모두 done에서 뺀다
         if f.wasRedo { redo = sid } else { redo = nil }
         input = f.translation
         focusRequest += 1
@@ -357,11 +373,9 @@ final class NotebookModel: ObservableObject {
             // 처음부터 다시: 다음 문장으로 이어서, 끝나면 새 총평을 받으러 마지막 장으로
             passSubmitted.insert(cur.id)
             let i = pass.firstIndex(of: cur.id) ?? -1
-            let done = pass.filter(passSubmitted.contains)
             // 그 뒤에서 아직 안 쓴 첫 문장으로(합치기로 되돌아가 썼으면 이미 쓴 문장은 건너뛴다, 2026-11-16)
             if i >= 0, let next = pass[(i + 1)...].first(where: { !passSubmitted.contains($0) }) {
-                RedoProgress(ids: pass, done: done).save(id)
-                Task { await SyncManager.shared.putPass(id, done: done) }
+                savePassProgress(excluding: cur.id)   // 지금 문장은 채점이 도착하면(applyResult) 그때 done에 든다
                 redo = next; requestScroll(next); focusRequest += 1
             } else {
                 // 마지막 문장: PUT 없이 DELETE만 (2026-11-23 규칙). 앞 문장의 PUT이 아직 가는 중이면 SyncManager가 순서를 지킨다
@@ -412,11 +426,9 @@ final class NotebookModel: ObservableObject {
         do { try await SyncManager.shared.voidAttempt(aid, void: true) } catch { err = error.localizedDescription; return }
         AppLog.shared.info("notebook", "void attempt", ["sentence": s.id, "attempt": aid])
         await reload()
-        if let pass {
+        if pass != nil {
             passSubmitted.remove(s.id)
-            let done = pass.filter(passSubmitted.contains)
-            RedoProgress(ids: pass, done: done).save(id)
-            Task { await SyncManager.shared.putPass(id, done: done) }
+            savePassProgress()
             redo = s.id
         } else {
             redo = data?.sentences.first { $0.id == s.id }?.attempt != nil ? s.id : nil
@@ -436,11 +448,10 @@ final class NotebookModel: ObservableObject {
     private func passAfterMerge(kept: String) {
         guard pass != nil, let d = data else { return }
         let ids = d.sentences.map(\.id)
-        let done = ids.filter { passSubmitted.contains($0) && $0 != kept }
-        pass = ids; passSubmitted = Set(done)
-        RedoProgress(ids: ids, done: done).save(id)
-        Task { await SyncManager.shared.putPass(id, done: done) }
-        AppLog.shared.info("notebook", "pass after merge", ["article": id, "kept": kept, "done": "\(done.count)", "count": "\(ids.count)"])
+        let submitted = ids.filter { passSubmitted.contains($0) && $0 != kept }
+        pass = ids; passSubmitted = Set(submitted)
+        savePassProgress()   // 채점 도착한 것만 PUT
+        AppLog.shared.info("notebook", "pass after merge", ["article": id, "kept": kept, "submitted": "\(submitted.count)", "count": "\(ids.count)"])
         redo = kept; open = nil; input = ""; requestScroll(kept); focusRequest += 1
     }
 
