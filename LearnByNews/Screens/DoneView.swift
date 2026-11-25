@@ -391,6 +391,7 @@ struct DoneView: View {
                                 savedPhrases: d.phrases.filter { $0.sentenceId == s.id },
                                 onTogglePhrase: { e in Task { await m.togglePhrase(s.id, e) } },
                                 bookmarked: m.bookmark?.sentenceId == s.id,
+                                reviewTimes: d.reviews.map(\.createdAt),
                                 onBookmark: { Task { await m.toggleBookmark(s.id) } },
                                 highlights: d.highlights.filter { $0.sentenceId == s.id },
                                 onAsk: { st, en, sp in try await m.ask(s.id, start: st, end: en, span: sp) },

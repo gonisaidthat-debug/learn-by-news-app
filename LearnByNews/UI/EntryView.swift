@@ -63,7 +63,7 @@ func markSource(_ text: String, _ source: String) -> AttributedString {
 /// 이전 시도 한 줄: 작은 도장 + 연필로 줄 그은 글씨 + 시각. 누르면 그때의 첨삭이 펼쳐진다
 struct HistoryLine: View {
     var attempt: Attempt
-    var index: Int? = nil                // "1번째" 번호 (오래된 것부터, goni 2026-11-23 "역순인지 순서대로인지 잘 모르겠는데")
+    var roundLabel: String? = nil        // "3회차" / "3회차 (2번째)" — 그 시도가 속한 회차 (goni 2026-11-25 "다시 쓴다고 4회차가 되는 건 아니잖아"; 전엔 쓴 순서 "1번째")
     var onRestore: (() -> Void)? = nil   // void("잘못 누름")인 시도의 되살리기
     #if DEBUG
     @State private var open = ProcessInfo.processInfo.environment["LBN_AUTOHISTORY"] == "1"   // 화면 확인용: 펼친 채로 시작
@@ -80,7 +80,7 @@ struct HistoryLine: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if let index { Text("\(index)번째").font(Theme.hand(14)).foregroundStyle(Theme.pencil).fixedSize() }
+                    if let roundLabel { Text(roundLabel).font(Theme.hand(14)).foregroundStyle(Theme.pencil).fixedSize() }
                     Stamp(kind: .grade(attempt.grade), small: true).opacity(0.6)
                     Text(attempt.translation.isEmpty ? "건너뜀" : attempt.translation)
                         .strikethrough(true, color: Theme.pencil)
@@ -139,6 +139,8 @@ struct EntryView: View {
     var onMergeNext: (() -> Void)?
     var highlight = false
     var bookmarked = false
+    /// 이 공책의 총평 시각들(오래된 순이든 아니든): 이전 시도의 회차 = 그 시도보다 앞선 총평 수 + 1 (회차 열람이면 그 회차까지로 잘린 것이 온다)
+    var reviewTimes: [Int64] = []
     var onBookmark: (() -> Void)?
     /// 형광펜: 이 문장의 메모들, 묻기(start, end, span), 삭제
     var highlights: [Highlight] = []
@@ -333,12 +335,25 @@ struct EntryView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // 머리줄: 순서가 헷갈리지 않게 (goni 2026-11-23). 오래된 것부터 아래로
                 Text("이전 시도 \(s.history.count) · 오래된 것부터 ↓\u{FE0E}").font(Theme.hand(14)).foregroundStyle(Theme.pencil).frame(height: 20)
-                ForEach(Array(s.history.enumerated()), id: \.offset) { i, h in HistoryLine(attempt: h, index: i + 1, onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
+                let labels = Self.historyRoundLabels(s.history, reviewTimes: reviewTimes)
+                ForEach(Array(s.history.enumerated()), id: \.offset) { i, h in HistoryLine(attempt: h, roundLabel: labels[i], onRestore: h.isVoid ? onRestore.map { f in { f(h) } } : nil) }
             }
             .padding(.leading, 14)
             .overlay(alignment: .leading) { Rectangle().fill(Theme.pencil).frame(width: 2).padding(.vertical, 4) }
             .padding(.leading, 26)
             .opacity(0.85)
+        }
+    }
+
+    /// 이전 시도 줄 앞 번호 = 회차(그 시도보다 앞선 총평 수 + 1). 한 회차 안에서 다시 쓴 것은 "(2번째)"를 덧붙이고, 잘못 누른(void) 시도는 회차만 적고 순서에 세지 않는다 (웹 HistoryList와 같은 규칙, 2026-11-25)
+    static func historyRoundLabels(_ history: [Attempt], reviewTimes: [Int64]) -> [String] {
+        var seen: [Int: Int] = [:]
+        return history.map { h in
+            let round = reviewTimes.filter { $0 < h.createdAt }.count + 1
+            if h.isVoid { return "\(round)회차" }
+            seen[round, default: 0] += 1
+            let n = seen[round]!
+            return n == 1 ? "\(round)회차" : "\(round)회차 (\(n)번째)"
         }
     }
 

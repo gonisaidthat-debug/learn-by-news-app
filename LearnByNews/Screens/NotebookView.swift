@@ -1034,6 +1034,7 @@ struct NotebookView: View {
                 onMergeNext: mergeTarget(x, d: d, dir: "next"),
                 highlight: focusId == x.id || findHit == x.id,
                 bookmarked: m.bookmark?.sentenceId == x.id,
+                reviewTimes: d.reviews.map(\.createdAt),   // 회차 열람이면 asOfRound가 그 회차까지로 잘라 둔 reviews
                 onBookmark: { Task { await m.toggleBookmark(x.id) } },
                 highlights: d.highlights.filter { $0.sentenceId == x.id },
                 onAsk: { st, en, sp in try await m.ask(x.id, start: st, end: en, span: sp) },
